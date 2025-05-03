@@ -1,3 +1,5 @@
+const db = require("../config/db"); // Add this line at the top
+
 const getUsers = async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM users");

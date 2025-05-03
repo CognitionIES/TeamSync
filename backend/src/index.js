@@ -34,7 +34,6 @@ app.listen(PORT, async () => {
   
   try {
     await connectDB();
-    console.log('Database connected successfully');
   } catch (error) {
     console.error('Database connection failed:', error.message);
   }

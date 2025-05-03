@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +22,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 // API URL - will be taken from environment in production
-const API_URL = "/api";
+const API_URL = "http://localhost:3000/api";
 
 const LoginForm = () => {
   const [role, setRole] = useState<UserRole | "">("");
@@ -32,7 +31,7 @@ const LoginForm = () => {
   const [nameOptions, setNameOptions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  
+
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -51,9 +50,9 @@ const LoginForm = () => {
     setIsLoadingUsers(true);
     try {
       const response = await axios.get(`${API_URL}/users/role/${selectedRole}`);
-      if (response.data) {
+      if (response.data && response.data.data) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setNameOptions(response.data.map((user: any) => user.name));
+        setNameOptions(response.data.data.map((user: any) => user.name));
       }
     } catch (error) {
       console.error("Failed to fetch users:", error);
@@ -72,11 +71,11 @@ const LoginForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!role || !name || !password) {
       return;
     }
-    
+
     setIsLoading(true);
     try {
       const success = await login(role as UserRole, name, password);
@@ -118,7 +117,7 @@ const LoginForm = () => {
               </SelectContent>
             </Select>
           </div>
-          
+
           <div className="space-y-2">
             <label htmlFor="name" className="text-sm font-medium">
               Name
@@ -129,7 +128,15 @@ const LoginForm = () => {
               disabled={!role || isLoadingUsers}
             >
               <SelectTrigger id="name" aria-label="Select name">
-                <SelectValue placeholder={isLoadingUsers ? "Loading..." : role ? "Select your name" : "Select a position first"} />
+                <SelectValue
+                  placeholder={
+                    isLoadingUsers
+                      ? "Loading..."
+                      : role
+                      ? "Select your name"
+                      : "Select a position first"
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {nameOptions.map((name) => (
@@ -140,7 +147,7 @@ const LoginForm = () => {
               </SelectContent>
             </Select>
           </div>
-          
+
           <div className="space-y-2">
             <label htmlFor="password" className="text-sm font-medium">
               Password
@@ -156,8 +163,8 @@ const LoginForm = () => {
           </div>
         </CardContent>
         <CardFooter>
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             className="w-full"
             disabled={!role || !name || !password || isLoading}
           >
