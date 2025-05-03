@@ -73,15 +73,22 @@ const LoginForm = () => {
     e.preventDefault();
 
     if (!role || !name || !password) {
+      console.log("Missing role, name, or password");
       return;
     }
 
     setIsLoading(true);
     try {
+      console.log("Attempting login with:", { role, name, password });
       const success = await login(role as UserRole, name, password);
+      console.log("Login result:", success);
       if (success) {
         navigate("/dashboard");
+      } else {
+        console.log("Login failed");
       }
+    } catch (error) {
+      console.error("Login error:", error);
     } finally {
       setIsLoading(false);
     }

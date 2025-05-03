@@ -4,7 +4,7 @@ const {
   getUserById,
   getUsersByRole
 } = require('../controllers/users.controller');
-const { protect, authorize } = require('../middleware/auth.middleware');
+const { protect, authorize } = require('../middleware/auth');
 const db = require('../config/db');
 
 const router = express.Router();

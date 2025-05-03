@@ -9,8 +9,7 @@ import axios from "axios";
 export const AuthContext = createContext<AuthContextType | null>(null);
 
 // API URL - will be taken from environment in production
-const API_URL = "/api";
-
+const API_URL = "http://localhost:3000/api";
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -41,14 +40,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         logout();
         return;
       }
-
+  
       const response = await axios.get(`${API_URL}/auth/validate`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-
-      if (!response.data.valid) {
+  
+      if (!response.data.user) { // Check for user object instead of valid
         logout();
       }
     } catch (error) {
@@ -69,12 +68,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         password,
         role,
       });
+      console.log("Login API response:", response.data); // For debugging
 
       if (response.data.token) {
         const userData = {
-          id: response.data.user.id,
-          name: response.data.user.name,
-          role: response.data.user.role,
+          id: response.data.id, // Use response.data.id instead of response.data.user.id
+          name: response.data.name, // Use response.data.name instead of response.data.user.name
+          role: response.data.role, // Use response.data.role instead of response.data.user.role
         };
 
         setUser(userData);

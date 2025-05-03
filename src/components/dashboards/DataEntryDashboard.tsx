@@ -1,4 +1,4 @@
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import {
   Card,
@@ -8,6 +8,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -19,7 +20,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -31,159 +31,417 @@ import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
+import axios from "axios";
+import { Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
-// Mock data
-const mockProjects = [
-  { id: "project-1", name: "Project Alpha" },
-  { id: "project-2", name: "Project Beta" },
-  { id: "project-3", name: "Project Gamma" },
-];
-
-const mockLineTypes = [
-  { id: "type-1", name: "Process" },
-  { id: "type-2", name: "Utility" },
-  { id: "type-3", name: "Instrument" },
-];
-
-const mockEquipmentTypes = [
-  { id: "equip-type-1", name: "Pump" },
-  { id: "equip-type-2", name: "Valve" },
-  { id: "equip-type-3", name: "Tank" },
-];
-
-const mockAreas = [
-  { id: "area-1", name: "Area 100" },
-  { id: "area-2", name: "Area 200" },
-  { id: "area-3", name: "Area 300" },
-];
+const API_URL = "http://localhost:3000/api";
 
 const DataEntryDashboard = () => {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("pids");
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [isProjectSelected, setIsProjectSelected] = useState(false);
-  
-  // Form for P&IDs
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
+  const [showNewProjectForm, setShowNewProjectForm] = useState(false);
+  const [showNewAreaForm, setShowNewAreaForm] = useState(false); // State for new area form
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+
   const pidForm = useForm({
     defaultValues: {
-      pidNumber: "",
-      description: "",
       areaId: "",
+      pidNumber: "",
+      lines: "",
     },
   });
-  
-  // Form for Lines
-  const lineForm = useForm({
-    defaultValues: {
-      lineNumber: "",
-      description: "",
-      typeId: "",
-      pidId: "",
-    },
-  });
-  
-  // Form for Equipment
+
   const equipmentForm = useForm({
     defaultValues: {
-      equipmentNumber: "",
-      description: "",
-      typeId: "",
       areaId: "",
+      equipmentList: "",
     },
   });
-  
-  // Update project selection status
+
+  const newProjectForm = useForm({
+    defaultValues: {
+      projectName: "",
+    },
+  });
+
+  const newAreaForm = useForm({
+    defaultValues: {
+      areaName: "",
+    },
+  });
+
+  // Redirect to login if not authenticated
   useEffect(() => {
-    setIsProjectSelected(!!selectedProject);
-  }, [selectedProject]);
+    if (!isAuthenticated) {
+      toast.error("Please log in to access the dashboard.");
+      navigate("/login", { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  const fetchProjects = async () => {
+    setIsLoadingProjects(true);
+    try {
+      const response = await axios.get(`${API_URL}/projects`); // Interceptor adds token
+      let projectData = [];
+      if (Array.isArray(response.data)) {
+        projectData = response.data;
+      } else if (response.data.data && Array.isArray(response.data.data)) {
+        projectData = response.data.data;
+      } else {
+        throw new Error("Unexpected response format from projects API");
+      }
+
+      setProjects(
+        projectData.map((project: any) => ({
+          id: project.id.toString(),
+          name: project.name,
+        }))
+      );
+    } catch (error: any) {
+      console.error("Error fetching projects:", error);
+      const errorMessage =
+        error.response?.data?.message ||
+        "Failed to fetch projects. Please try again.";
+      toast.error(errorMessage);
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  };
+
+  const fetchAreas = async () => {
+    try {
+      const response = await axios.get(
+        `${API_URL}/areas/project/${selectedProject}`
+      );
+      let areaData = [];
+      if (Array.isArray(response.data)) {
+        areaData = response.data;
+      } else if (response.data.data && Array.isArray(response.data.data)) {
+        areaData = response.data.data;
+      } else {
+        throw new Error("Unexpected response format from areas API");
+      }
+
+      setAreas(
+        areaData.map((area: any) => ({
+          id: area.id.toString(),
+          name: area.name,
+        }))
+      );
+      setIsProjectSelected(true);
+    } catch (error: any) {
+      console.error("Error fetching areas:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      let errorMessage = "Failed to fetch areas for the selected project.";
+      if (error.response?.status === 404) {
+        errorMessage = "No areas found for this project.";
+        setAreas([]); // Allow dashboard to continue without areas
+        setIsProjectSelected(true); // Enable forms, but area selection will be empty
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      toast.error(errorMessage);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setAreas([]);
+      setIsProjectSelected(false);
+      return;
+    }
+
+    if (isAuthenticated) {
+      fetchAreas();
+    }
+  }, [selectedProject, isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchProjects();
+    }
+  }, [isAuthenticated]);
 
   const handleRefresh = () => {
     toast.success("Data refreshed");
+    fetchProjects();
+    if (selectedProject) {
+      fetchAreas();
+    }
   };
-  
+
   const handleProjectChange = (value: string) => {
     setSelectedProject(value);
   };
-  
-  const onPIDSubmit = (values: any) => {
+
+  const onNewProjectSubmit = async (values: any) => {
+    try {
+      await axios.post(`${API_URL}/projects`, { name: values.projectName });
+      toast.success(`Project ${values.projectName} created successfully`);
+      newProjectForm.reset();
+      setShowNewProjectForm(false);
+      fetchProjects();
+    } catch (error: any) {
+      console.error("Error creating project:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to create project";
+      toast.error(errorMessage);
+    }
+  };
+
+  const onNewAreaSubmit = async (values: any) => {
+    try {
+      await axios.post(`${API_URL}/areas`, {
+        name: values.areaName,
+        projectId: selectedProject,
+      });
+      toast.success(`Area ${values.areaName} created successfully`);
+      newAreaForm.reset();
+      setShowNewAreaForm(false);
+      fetchAreas(); // Refresh areas list
+    } catch (error: any) {
+      console.error("Error creating area:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to create area";
+      toast.error(errorMessage);
+    }
+  };
+
+  const onPIDSubmit = async (values: any) => {
     if (!isProjectSelected) {
       toast.error("Please select a project first");
       return;
     }
-    
-    console.log("P&ID Submitted:", { projectId: selectedProject, ...values });
-    toast.success(`P&ID ${values.pidNumber} added successfully`);
-    pidForm.reset();
+
+    try {
+      const pidResponse = await axios.post(`${API_URL}/pids`, {
+        pidNumber: values.pidNumber,
+        description: `P&ID for ${values.pidNumber}`,
+        areaId: values.areaId || null, // Allow null if no areas available
+        projectId: selectedProject,
+      });
+
+      const pidId = pidResponse.data.data.id;
+
+      if (values.lines) {
+        const lines = values.lines
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter((line: string) => line);
+
+        for (const lineNumber of lines) {
+          await axios.post(`${API_URL}/lines`, {
+            lineNumber,
+            description: `Line ${lineNumber}`,
+            typeId: 1,
+            pidId,
+            projectId: selectedProject,
+          });
+        }
+      }
+
+      toast.success(
+        `P&ID ${values.pidNumber} and associated lines added successfully`
+      );
+      pidForm.reset();
+    } catch (error: any) {
+      console.error("Error submitting P&ID:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to add P&ID and lines";
+      toast.error(errorMessage);
+    }
   };
-  
-  const onLineSubmit = (values: any) => {
+
+  const onEquipmentSubmit = async (values: any) => {
     if (!isProjectSelected) {
       toast.error("Please select a project first");
       return;
     }
-    
-    console.log("Line Submitted:", { projectId: selectedProject, ...values });
-    toast.success(`Line ${values.lineNumber} added successfully`);
-    lineForm.reset();
-  };
-  
-  const onEquipmentSubmit = (values: any) => {
-    if (!isProjectSelected) {
-      toast.error("Please select a project first");
-      return;
+
+    try {
+      const equipmentList = values.equipmentList
+        .split("\n")
+        .map((equip: string) => equip.trim())
+        .filter((equip: string) => equip);
+
+      for (const equipmentNumber of equipmentList) {
+        await axios.post(`${API_URL}/equipment`, {
+          equipmentNumber,
+          description: `Equipment ${equipmentNumber}`,
+          typeId: 1,
+          areaId: values.areaId || null, // Allow null if no areas available
+          projectId: selectedProject,
+        });
+      }
+
+      toast.success(`Equipment added successfully`);
+      equipmentForm.reset();
+    } catch (error: any) {
+      console.error("Error submitting equipment:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to add equipment";
+      toast.error(errorMessage);
     }
-    
-    console.log("Equipment Submitted:", { projectId: selectedProject, ...values });
-    toast.success(`Equipment ${values.equipmentNumber} added successfully`);
-    equipmentForm.reset();
   };
-  
+
+  if (!isAuthenticated) {
+    return null; // Render nothing while redirecting
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar onRefresh={handleRefresh} />
-      
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold">Data Entry Dashboard</h1>
-          <p className="text-gray-500">
-            Add and manage P&IDs, lines, and equipment
-          </p>
+          <p className="text-gray-500">Add and manage P&IDs and Equipment</p>
         </header>
-        
-        {/* Project Selection - Required */}
         <Card className="mb-6 border-blue-200 shadow-sm">
           <CardHeader className="bg-blue-50 border-b border-blue-100">
-            <CardTitle className="text-lg text-blue-800">Project Selection</CardTitle>
-            <CardDescription>Select a project before proceeding with data entry</CardDescription>
+            <CardTitle className="text-lg text-blue-800">
+              Project Selection
+            </CardTitle>
+            <CardDescription>
+              Select a project or create a new one before proceeding with data
+              entry
+            </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="grid grid-cols-1 gap-4">
-              <div>
-                <FormLabel htmlFor="project-select" className="block mb-2">
-                  Select Project <span className="text-red-500">*</span>
-                </FormLabel>
-                <Select value={selectedProject} onValueChange={handleProjectChange}>
-                  <SelectTrigger className={`w-full ${!selectedProject ? 'border-red-300 ring-1 ring-red-300' : ''}`}>
-                    <SelectValue placeholder="Choose project..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockProjects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {!isProjectSelected && (
-                  <p className="text-sm text-red-500 mt-1">
-                    Project selection is required to proceed with data entry
-                  </p>
-                )}
+              <div className="flex items-end space-x-4">
+                <div className="flex-1">
+                  <FormLabel htmlFor="project-select" className="block mb-2">
+                    Select Project <span className="text-red-500">*</span>
+                  </FormLabel>
+                  <Select
+                    value={selectedProject}
+                    onValueChange={handleProjectChange}
+                    disabled={isLoadingProjects}
+                  >
+                    <SelectTrigger
+                      className={`w-full ${
+                        !selectedProject
+                          ? "border-red-300 ring-1 ring-red-300"
+                          : ""
+                      }`}
+                    >
+                      {isLoadingProjects ? (
+                        <div className="flex items-center">
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Loading projects...
+                        </div>
+                      ) : (
+                        <SelectValue placeholder="Choose project..." />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {!isProjectSelected && projects.length > 0 && (
+                    <p className="text-sm text-red-500 mt-1">
+                      Project selection is required to proceed with data entry
+                    </p>
+                  )}
+                  {projects.length === 0 && !isLoadingProjects && (
+                    <p className="text-sm text-red-500 mt-1">
+                      No projects available. Please create a new project.
+                    </p>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowNewProjectForm(!showNewProjectForm)}
+                  disabled={isLoadingProjects}
+                >
+                  {showNewProjectForm ? "Cancel" : "New Project"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowNewAreaForm(!showNewAreaForm)}
+                  disabled={isLoadingProjects || !selectedProject}
+                >
+                  {showNewAreaForm ? "Cancel" : "New Area"}
+                </Button>
               </div>
+              {showNewProjectForm && (
+                <div className="mt-4">
+                  <Form {...newProjectForm}>
+                    <form
+                      onSubmit={newProjectForm.handleSubmit(onNewProjectSubmit)}
+                      className="space-y-4"
+                    >
+                      <FormField
+                        control={newProjectForm.control}
+                        name="projectName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Project Name</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="Enter project name"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <Button type="submit" className="w-full">
+                        Create Project
+                      </Button>
+                    </form>
+                  </Form>
+                </div>
+              )}
+              {showNewAreaForm && selectedProject && (
+                <div className="mt-4">
+                  <Form {...newAreaForm}>
+                    <form
+                      onSubmit={newAreaForm.handleSubmit(onNewAreaSubmit)}
+                      className="space-y-4"
+                    >
+                      <FormField
+                        control={newAreaForm.control}
+                        name="areaName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Area Number</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="Enter area number (e.g., Area A)"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <Button type="submit" className="w-full">
+                        Create Area
+                      </Button>
+                    </form>
+                  </Form>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
-        
-        {!isProjectSelected && (
+        {!isProjectSelected && projects.length > 0 && (
           <Alert variant="destructive" className="mb-6 animate-fade-in">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Action Required</AlertTitle>
@@ -192,80 +450,64 @@ const DataEntryDashboard = () => {
             </AlertDescription>
           </Alert>
         )}
-        
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
+        {isProjectSelected && areas.length === 0 && (
+          <Alert variant="default" className="mb-6 animate-fade-in">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>No Areas Available</AlertTitle>
+            <AlertDescription>
+              No areas are defined for this project. You can add a new area
+              above or proceed without selecting an area.
+            </AlertDescription>
+          </Alert>
+        )}
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-6"
+        >
+          <TabsList className="grid grid-cols-2 w-full max-w-md mx-auto">
             <TabsTrigger value="pids">P&IDs</TabsTrigger>
-            <TabsTrigger value="lines">Lines</TabsTrigger>
             <TabsTrigger value="equipment">Equipment</TabsTrigger>
           </TabsList>
-          
-          {/* P&ID Form */}
           <TabsContent value="pids" className="space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle>Add New P&ID</CardTitle>
                 <CardDescription>
-                  Enter P&ID details for the selected project
+                  Enter P&ID details and associated lines for the selected
+                  project
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <Form {...pidForm}>
-                  <form onSubmit={pidForm.handleSubmit(onPIDSubmit)} className="space-y-4">
-                    <FormField
-                      control={pidForm.control}
-                      name="pidNumber"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>P&ID Number</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="e.g., P-101" 
-                              {...field}
-                              disabled={!isProjectSelected} 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={pidForm.control}
-                      name="description"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Description</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="Enter P&ID description" 
-                              {...field}
-                              disabled={!isProjectSelected} 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
+                  <form
+                    onSubmit={pidForm.handleSubmit(onPIDSubmit)}
+                    className="space-y-4"
+                  >
                     <FormField
                       control={pidForm.control}
                       name="areaId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Area</FormLabel>
+                          <FormLabel>Area Number (Optional)</FormLabel>
                           <Select
                             value={field.value}
                             onValueChange={field.onChange}
-                            disabled={!isProjectSelected}
+                            disabled={!isProjectSelected || areas.length === 0}
                           >
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Select area" />
+                                <SelectValue
+                                  placeholder={
+                                    areas.length === 0
+                                      ? "No areas available"
+                                      : "Select area"
+                                  }
+                                />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {mockAreas.map((area) => (
+                              {areas.map((area) => (
                                 <SelectItem key={area.id} value={area.id}>
                                   {area.name}
                                 </SelectItem>
@@ -276,138 +518,53 @@ const DataEntryDashboard = () => {
                         </FormItem>
                       )}
                     />
-                    
-                    <Button 
-                      type="submit" 
-                      className="w-full"
-                      disabled={!isProjectSelected}
-                    >
-                      Save P&ID
-                    </Button>
-                  </form>
-                </Form>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
-          {/* Lines Form */}
-          <TabsContent value="lines" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Add New Line</CardTitle>
-                <CardDescription>
-                  Enter line details for the selected project
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Form {...lineForm}>
-                  <form onSubmit={lineForm.handleSubmit(onLineSubmit)} className="space-y-4">
                     <FormField
-                      control={lineForm.control}
-                      name="lineNumber"
+                      control={pidForm.control}
+                      name="pidNumber"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Line Number</FormLabel>
+                          <FormLabel>P&ID Number</FormLabel>
                           <FormControl>
-                            <Input 
-                              placeholder="e.g., L-101" 
+                            <Input
+                              placeholder="e.g., P-101"
                               {...field}
-                              disabled={!isProjectSelected} 
+                              disabled={!isProjectSelected}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    
                     <FormField
-                      control={lineForm.control}
-                      name="description"
+                      control={pidForm.control}
+                      name="lines"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Description</FormLabel>
+                          <FormLabel>Lines (one per line)</FormLabel>
                           <FormControl>
-                            <Input 
-                              placeholder="Enter line description" 
+                            <Textarea
+                              placeholder="Enter line numbers, one per line (e.g., L-101\nL-102\nL-103)"
                               {...field}
-                              disabled={!isProjectSelected} 
+                              disabled={!isProjectSelected}
+                              rows={5}
                             />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    
-                    <FormField
-                      control={lineForm.control}
-                      name="typeId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Line Type</FormLabel>
-                          <Select
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            disabled={!isProjectSelected}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select line type" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {mockLineTypes.map((type) => (
-                                <SelectItem key={type.id} value={type.id}>
-                                  {type.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={lineForm.control}
-                      name="pidId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Associated P&ID</FormLabel>
-                          <Select
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            disabled={!isProjectSelected}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select P&ID" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="pid-1">P-101</SelectItem>
-                              <SelectItem value="pid-2">P-102</SelectItem>
-                              <SelectItem value="pid-3">P-103</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       className="w-full"
                       disabled={!isProjectSelected}
                     >
-                      Save Line
+                      Save P&ID and Lines
                     </Button>
                   </form>
                 </Form>
               </CardContent>
             </Card>
           </TabsContent>
-          
-          {/* Equipment Form */}
           <TabsContent value="equipment" className="space-y-4">
             <Card>
               <CardHeader>
@@ -418,90 +575,34 @@ const DataEntryDashboard = () => {
               </CardHeader>
               <CardContent>
                 <Form {...equipmentForm}>
-                  <form onSubmit={equipmentForm.handleSubmit(onEquipmentSubmit)} className="space-y-4">
-                    <FormField
-                      control={equipmentForm.control}
-                      name="equipmentNumber"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Equipment Number</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="e.g., P-101" 
-                              {...field}
-                              disabled={!isProjectSelected} 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={equipmentForm.control}
-                      name="description"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Description</FormLabel>
-                          <FormControl>
-                            <Input 
-                              placeholder="Enter equipment description" 
-                              {...field}
-                              disabled={!isProjectSelected} 
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={equipmentForm.control}
-                      name="typeId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Equipment Type</FormLabel>
-                          <Select
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            disabled={!isProjectSelected}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select equipment type" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {mockEquipmentTypes.map((type) => (
-                                <SelectItem key={type.id} value={type.id}>
-                                  {type.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    
+                  <form
+                    onSubmit={equipmentForm.handleSubmit(onEquipmentSubmit)}
+                    className="space-y-4"
+                  >
                     <FormField
                       control={equipmentForm.control}
                       name="areaId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Area</FormLabel>
+                          <FormLabel>Area Number (Optional)</FormLabel>
                           <Select
                             value={field.value}
                             onValueChange={field.onChange}
-                            disabled={!isProjectSelected}
+                            disabled={!isProjectSelected || areas.length === 0}
                           >
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Select area" />
+                                <SelectValue
+                                  placeholder={
+                                    areas.length === 0
+                                      ? "No areas available"
+                                      : "Select area"
+                                  }
+                                />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {mockAreas.map((area) => (
+                              {areas.map((area) => (
                                 <SelectItem key={area.id} value={area.id}>
                                   {area.name}
                                 </SelectItem>
@@ -512,9 +613,26 @@ const DataEntryDashboard = () => {
                         </FormItem>
                       )}
                     />
-                    
-                    <Button 
-                      type="submit" 
+                    <FormField
+                      control={equipmentForm.control}
+                      name="equipmentList"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Equipment (one per line)</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Enter equipment numbers, one per line (e.g., E-101\nE-102\nE-103)"
+                              {...field}
+                              disabled={!isProjectSelected}
+                              rows={5}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <Button
+                      type="submit"
                       className="w-full"
                       disabled={!isProjectSelected}
                     >
