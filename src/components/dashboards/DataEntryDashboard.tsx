@@ -36,7 +36,7 @@ import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
-const API_URL = "http://localhost:3000/api";
+const API_URL = "http://localhost:3000/api"; // Updated to match port 3000
 
 const DataEntryDashboard = () => {
   const { isAuthenticated } = useAuth();
@@ -650,3 +650,4 @@ const DataEntryDashboard = () => {
 };
 
 export default DataEntryDashboard;
+// This code is a React component for a data entry dashboard that allows users to add P&IDs and equipment to selected projects and areas. It includes form handling, API calls, and user feedback using toast notifications.

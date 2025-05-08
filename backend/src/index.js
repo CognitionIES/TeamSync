@@ -16,6 +16,13 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
+let equipmentRoutes;
+try {
+  equipmentRoutes = require("./routes/equipment.routes");
+} catch (error) {
+  console.error("Failed to load equipment.routes.js:", error.message);
+}
+
 // Routes
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/projects", require("./routes/projects.routes"));
@@ -25,7 +32,17 @@ app.use("/api/audit-logs", require("./routes/auditLogs.routes"));
 app.use("/api/areas", require("./routes/areas.routes"));
 app.use("/api/pids", require("./routes/pids.routes"));
 app.use("/api/lines", require("./routes/lines.routes"));
+if (equipmentRoutes) {
+  app.use("/api/equipment", equipmentRoutes);
+  console.log("Mounted /api/equipment route");
+} else {
+  console.error("Equipment routes not mounted due to loading error");
+}
 
+console.log("Routes loaded:", {
+
+  equipment: !!equipmentRoutes,
+});
 // Health check route
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Server is running" });

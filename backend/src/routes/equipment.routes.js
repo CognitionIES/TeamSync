@@ -3,47 +3,34 @@ const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
 
-// @desc    Get all P&IDs
-// @route   GET /api/pids
+// @desc    Get all equipment
+// @route   GET /api/equipment
 // @access  Private
 router.get("/", protect, async (req, res) => {
   try {
-    const { rows } = await db.query("SELECT * FROM pids");
+    const { rows } = await db.query("SELECT * FROM equipment");
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching P&IDs:", error.stack);
+    console.error("Error fetching equipment:", error.stack);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// @desc    Get all P&IDs for an area
-// @route   GET /api/pids/area/:areaId
-// @access  Private
-router.get("/area/:areaId", protect, async (req, res) => {
-  try {
-    const { areaId } = req.params;
-    const { rows } = await db.query("SELECT * FROM pids WHERE area_id = $1", [
-      areaId,
-    ]);
-    res.status(200).json({ data: rows });
-  } catch (error) {
-    console.error("Error fetching P&IDs for area:", error.stack);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// @desc    Create a new P&ID
-// @route   POST /api/pids
+// @desc    Create a new equipment
+// @route   POST /api/equipment
 // @access  Private
 router.post("/", protect, async (req, res) => {
-  console.log("Using updated pids.routes.js with pid_number");
+  console.log("Hit POST /api/equipment route");
   try {
-    console.log("Creating P&ID with body:", req.body);
-    const { pidNumber, description, areaId, projectId } = req.body;
-    if (!pidNumber || !projectId) {
+    console.log("Creating equipment with body:", req.body);
+    const { equipmentNumber, description, typeId, areaId, projectId } =
+      req.body;
+
+    // Validate required fields
+    if (!equipmentNumber || !projectId) {
       return res
         .status(400)
-        .json({ message: "P&ID number and project ID are required" });
+        .json({ message: "Equipment number and project ID are required" });
     }
 
     // Verify projectId exists
@@ -53,6 +40,17 @@ router.post("/", protect, async (req, res) => {
     );
     if (projectCheck.rows.length === 0) {
       return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    // Verify typeId if provided
+    if (typeId) {
+      const typeCheck = await db.query(
+        "SELECT id FROM equipment_types WHERE id = $1",
+        [typeId]
+      );
+      if (typeCheck.rows.length === 0) {
+        return res.status(400).json({ message: "Invalid type ID" });
+      }
     }
 
     // Verify areaId if provided
@@ -68,9 +66,18 @@ router.post("/", protect, async (req, res) => {
       }
     }
 
+    // Insert the equipment
     const { rows } = await db.query(
-      "INSERT INTO pids (pid_number, description, area_id, project_id, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [pidNumber, description, areaId || null, projectId, new Date()]
+      "INSERT INTO equipment (equipment_number, description, type_id, area_id, project_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+      [
+        equipmentNumber,
+        description,
+        typeId || null,
+        areaId || null,
+        projectId,
+        "Assigned",
+        new Date(),
+      ]
     );
 
     // Log the action in audit logs
@@ -79,10 +86,10 @@ router.post("/", protect, async (req, res) => {
       await db.query(
         "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
         [
-          "P&ID Creation",
-          pidNumber,
+          "Equipment Creation",
+          equipmentNumber,
           req.user.userId,
-          `P&ID ${pidNumber}`,
+          `Equipment ${equipmentNumber}`,
           new Date(),
         ]
       );
@@ -92,7 +99,7 @@ router.post("/", protect, async (req, res) => {
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating P&ID:", error.stack);
+    console.error("Error creating equipment:", error.stack);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });

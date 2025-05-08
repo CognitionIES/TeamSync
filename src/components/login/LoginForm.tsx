@@ -32,7 +32,7 @@ const LoginForm = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
 
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, token } = useAuth();
   const navigate = useNavigate();
 
   // Update name options when role changes
@@ -62,12 +62,19 @@ const LoginForm = () => {
     }
   };
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated and token exists
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate("/dashboard");
+    if (isAuthenticated && token && token !== "null") {
+      console.log(
+        "User is authenticated with token, redirecting to dashboard..."
+      );
+      navigate("/dashboard", { replace: true });
+    } else {
+      console.log(
+        "User not authenticated or no token, staying on login page..."
+      );
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, token, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,9 +90,12 @@ const LoginForm = () => {
       const success = await login(role as UserRole, name, password);
       console.log("Login result:", success);
       if (success) {
-        navigate("/dashboard");
+        console.log(
+          "Login successful, teamsync_token in localStorage:",
+          localStorage.getItem("teamsync_token")
+        );
       } else {
-        console.log("Login failed");
+        console.log("Login failed, no token set");
       }
     } catch (error) {
       console.error("Login error:", error);

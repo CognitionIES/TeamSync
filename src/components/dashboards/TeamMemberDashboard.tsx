@@ -1,212 +1,144 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Navbar from "../shared/Navbar";
 import TaskCard from "../shared/TaskCard";
 import { Button } from "@/components/ui/button";
-import { Task, TaskItem, TaskComment } from "@/types";
+import { Task, TaskItem, TaskComment, TaskType, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import TaskComments from "../shared/TaskComments";
 import TaskTypeIndicator from "../shared/TaskTypeIndicator";
 import { InfoIcon } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import axios, { AxiosError } from "axios";
+import { useAuth } from "@/context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
-// Mock comments data
-const mockComments: TaskComment[] = [
-  {
-    id: "comment-1",
-    userId: "user-1",
-    userName: "John Smith",
-    userRole: "Team Lead",
-    comment: "Please check line 103 carefully, it's connecting to a critical system.",
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: "comment-2",
-    userId: "user-3",
-    userName: "Charlie Brown",
-    userRole: "Team Member",
-    comment: "I've verified line 103. All connections look correct.",
-    createdAt: new Date(Date.now() - 1800000).toISOString(),
-  }
-];
+const API_URL = "http://localhost:3000/api";
 
-// Mock data for lines in PIDs
-const mockLines = [
-  { id: "line-1", name: "Line-101", pidId: "pid-1" },
-  { id: "line-2", name: "Line-102", pidId: "pid-1" },
-  { id: "line-3", name: "Line-103", pidId: "pid-2" },
-  { id: "line-4", name: "Line-104", pidId: "pid-2" },
-  { id: "line-5", name: "Line-105", pidId: "pid-3" }
-];
+interface Line {
+  id: string;
+  name: string;
+  pidId: string;
+}
 
-// Mock data for tasks
-const mockTasks: Task[] = [
-  {
-    id: "task-1",
-    type: "Redline",
-    assignee: "Charlie Brown",
-    assigneeId: "user-3",
-    status: "Assigned",
-    isComplex: false,
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-    completedAt: null,
-    progress: 0,
-    items: [
-      {
-        id: "pid-1",
-        name: "P-101",
-        type: "PID",
-        completed: false,
-      }
-    ],
-    comments: [mockComments[0]]
-  },
-  {
-    id: "task-2",
-    type: "UPV",
-    assignee: "Charlie Brown",
-    assigneeId: "user-3",
-    status: "In Progress",
-    isComplex: true,
-    createdAt: new Date(Date.now() - 172800000).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-    completedAt: null,
-    progress: 60,
-    items: [
-      {
-        id: "line-1",
-        name: "Line-101",
-        type: "Line",
-        completed: true
-      },
-      {
-        id: "line-2",
-        name: "Line-102",
-        type: "Line",
-        completed: true
-      },
-      {
-        id: "line-3",
-        name: "Line-103",
-        type: "Line",
-        completed: false
-      }
-    ],
-    comments: [mockComments[0], mockComments[1]]
-  },
-  {
-    id: "task-3",
-    type: "QC",
-    assignee: "Charlie Brown",
-    assigneeId: "user-3", 
-    status: "Completed",
-    isComplex: false,
-    createdAt: new Date(Date.now() - 259200000).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-    completedAt: new Date(Date.now() - 86400000).toISOString(),
-    progress: 100,
-    items: [
-      {
-        id: "equip-1",
-        name: "Pump-101",
-        type: "Equipment",
-        completed: true
-      }
-    ]
-  }
-];
-
-// Format time in HH:MM 24-hour format
-const formatTime = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit', 
-    hour12: false 
-  });
-};
-
-// Extended TaskCard component to show lines for Redline tasks
-const RedlineTaskCard = ({ 
-  task, 
+const RedlineTaskCard = ({
+  task,
   onStatusChange,
-  onItemToggle, 
+  onItemToggle,
   onLineToggle,
-  onOpenComments
-}: { 
-  task: Task, 
-  onStatusChange?: (taskId: string, newStatus: "Assigned" | "In Progress" | "Completed") => void,
-  onItemToggle?: (taskId: string, itemId: string, isCompleted: boolean) => void,
-  onLineToggle?: (taskId: string, lineId: string, isCompleted: boolean) => void,
-  onOpenComments?: (task: Task) => void
+  onOpenComments,
+}: {
+  task: Task;
+  onStatusChange?: (taskId: string, newStatus: TaskStatus) => Promise<void>;
+  onItemToggle?: (
+    taskId: string,
+    itemId: string,
+    isCompleted: boolean
+  ) => Promise<void>;
+  onLineToggle?: (
+    taskId: string,
+    lineId: string,
+    isCompleted: boolean
+  ) => Promise<void>;
+  onOpenComments?: (task: Task) => void;
 }) => {
-  const [pidLines, setPidLines] = useState<{id: string, name: string, completed: boolean}[]>([]);
-  
+  const [pidLines, setPidLines] = useState<
+    { id: string; name: string; completed: boolean }[]
+  >([]);
+
   useEffect(() => {
-    if (task.type === "Redline") {
-      // Find the PID item in the task
-      const pidItem = task.items.find(item => item.type === "PID");
-      
-      if (pidItem) {
-        // Get all lines for this PID
-        const pidId = pidItem.id;
-        const linesForPid = mockLines
-          .filter(line => line.pidId === pidId)
-          .map(line => {
-            // Check if this line is already in items and completed
-            const lineInItems = task.items.find(item => item.id === line.id);
-            return {
-              id: line.id,
-              name: line.name,
-              completed: lineInItems?.completed || false
-            };
-          });
-        
-        setPidLines(linesForPid);
+    const fetchLines = async () => {
+      if (task.type === "Redline") {
+        const pidItem = task.items.find((item) => item.type === "PID");
+        if (pidItem) {
+          try {
+            const token = localStorage.getItem("teamsync_token");
+            if (!token) throw new Error("No authentication token found");
+
+            const response = await axios.get<{
+              data: { id: number; line_number: string; pid_id: number }[];
+            }>(`${API_URL}/lines`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+
+            const linesData = response.data.data
+              .filter((line) => line.pid_id.toString() === pidItem.id)
+              .map((line) => {
+                const lineInItems = task.items.find(
+                  (item) => item.id === line.id.toString()
+                );
+                return {
+                  id: line.id.toString(),
+                  name: line.line_number,
+                  completed: lineInItems?.completed || false,
+                };
+              });
+
+            setPidLines(linesData);
+          } catch (error) {
+            const axiosError = error as AxiosError<{ message: string }>;
+            console.error("Error fetching lines:", axiosError);
+            toast.error(
+              axiosError.response?.data?.message || "Failed to fetch lines"
+            );
+          }
+        }
       }
-    }
+    };
+
+    fetchLines();
   }, [task]);
-  
+
   const handleLineToggle = (lineId: string, checked: boolean) => {
-    // Check if task is in progress
-    if (task.status !== 'In Progress' && checked) {
+    if (task.status !== "In Progress" && checked) {
       toast.error("You must start the task before marking lines as completed");
       return;
     }
-    
-    // Cannot uncheck items once checked
-    const lineCompleted = pidLines.find(line => line.id === lineId)?.completed || false;
+
+    const lineCompleted =
+      pidLines.find((line) => line.id === lineId)?.completed || false;
     if (!checked && lineCompleted) {
       toast.error("Lines cannot be unchecked once completed");
       return;
     }
-    
+
     if (onLineToggle) {
-      onLineToggle(task.id, lineId, checked);
-      
-      // Update local state
-      setPidLines(prevLines =>
-        prevLines.map(line => 
-          line.id === lineId ? { ...line, completed: checked } : line
-        )
-      );
+      onLineToggle(task.id, lineId, checked)
+        .then(() => {
+          setPidLines((prevLines) =>
+            prevLines.map((line) =>
+              line.id === lineId ? { ...line, completed: checked } : line
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Error toggling line:", error);
+        });
     }
   };
-  
-  // Count PID and lines
-  const pidItem = task.items.find(item => item.type === "PID");
+
+  const pidItem = task.items.find((item) => item.type === "PID");
   const pidCount = pidItem ? 1 : 0;
   const lineCount = pidLines.length;
-  
-  // If this is not a Redline task, use the regular TaskCard
+
   if (task.type !== "Redline") {
     return (
-      <TaskCard 
+      <TaskCard
         task={task}
         onStatusChange={onStatusChange}
         onItemToggle={onItemToggle}
@@ -214,20 +146,24 @@ const RedlineTaskCard = ({
       />
     );
   }
-  
+
   return (
     <Card className="shadow-md hover:shadow-lg transition-all duration-300">
-      <CardHeader className={`
+      <CardHeader
+        className={`
         pb-2 
-        ${task.status === "Completed" ? 'bg-green-50' : 
-          task.status === "In Progress" ? 'bg-orange-50' : 'bg-blue-50'}`
-      }>
+        ${
+          task.status === "Completed"
+            ? "bg-green-50"
+            : task.status === "In Progress"
+            ? "bg-orange-50"
+            : "bg-blue-50"
+        }`}
+      >
         <div className="flex justify-between items-start">
           <div className="space-y-1">
             <TaskTypeIndicator type={task.type} />
-            <h3 className="text-lg font-semibold">
-              Redline Task
-            </h3>
+            <h3 className="text-lg font-semibold">Redline Task</h3>
           </div>
           <div className="text-sm px-2 py-1 rounded-full bg-blue-100 text-blue-800">
             {task.status}
@@ -238,29 +174,24 @@ const RedlineTaskCard = ({
             P&ID: {pidCount}, Lines: {lineCount}
           </p>
           {pidItem && (
-            <p className="text-sm text-blue-700 mt-1">
-              {pidItem.name}
-            </p>
+            <p className="text-sm text-blue-700 mt-1">{pidItem.name}</p>
           )}
         </div>
       </CardHeader>
       <CardContent className="pt-4">
         <div className="flex flex-col gap-2 text-sm text-gray-600 mb-4">
+          <div>Assigned at: {formatTime(task.createdAt)}</div>
           <div>
-            Assigned at: {formatTime(task.createdAt)}
-          </div>
-          <div>
-            {task.completedAt ? 
-              `Completed at: ${formatTime(task.completedAt)}` : 
-              "Not completed"
-            }
+            {task.completedAt
+              ? `Completed at: ${formatTime(task.completedAt)}`
+              : "Not completed"}
           </div>
         </div>
-        
+
         <h4 className="text-sm font-medium mb-2">Lines to Review:</h4>
         <div className="space-y-2 max-h-60 overflow-y-auto">
           {pidLines.length > 0 ? (
-            pidLines.map(line => (
+            pidLines.map((line) => (
               <div key={line.id} className="flex items-center space-x-2">
                 <TooltipProvider>
                   <Tooltip>
@@ -269,8 +200,15 @@ const RedlineTaskCard = ({
                         <Checkbox
                           id={`line-${line.id}`}
                           checked={line.completed}
-                          disabled={task.status === "Completed" || (task.status !== "In Progress" && !line.completed) || line.completed}
-                          onCheckedChange={(checked) => handleLineToggle(line.id, !!checked)}
+                          disabled={
+                            task.status === "Completed" ||
+                            (task.status !== "In Progress" &&
+                              !line.completed) ||
+                            line.completed
+                          }
+                          onCheckedChange={(checked) =>
+                            handleLineToggle(line.id, !!checked)
+                          }
                         />
                         <label htmlFor={`line-${line.id}`} className="text-sm">
                           {line.name}
@@ -278,18 +216,20 @@ const RedlineTaskCard = ({
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {task.status !== 'In Progress' && !line.completed ? 
-                        "Start task to enable this checkbox" : 
-                        line.completed ? 
-                          "This item cannot be unchecked" : 
-                          "Mark as completed"}
+                      {task.status !== "In Progress" && !line.completed
+                        ? "Start task to enable this checkbox"
+                        : line.completed
+                        ? "This item cannot be unchecked"
+                        : "Mark as completed"}
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
             ))
           ) : (
-            <p className="text-sm text-gray-500">No lines found for this P&ID</p>
+            <p className="text-sm text-gray-500">
+              No lines found for this P&ID
+            </p>
           )}
         </div>
         <div className="mt-4">
@@ -301,27 +241,28 @@ const RedlineTaskCard = ({
                 onClick={() => onOpenComments(task)}
                 className="text-sm"
               >
-                Comments {task.comments?.length ? `(${task.comments.length})` : ''}
+                Comments{" "}
+                {task.comments?.length ? `(${task.comments.length})` : ""}
               </Button>
             )}
-            
+
             <div className="flex space-x-2">
               {task.status === "Assigned" && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => onStatusChange?.(task.id, "In Progress")}
                   className="bg-orange-50 text-orange-600 hover:bg-orange-100"
                 >
                   Start Task
                 </Button>
               )}
-              
+
               {task.status === "In Progress" && (
-                <Button 
+                <Button
                   size="sm"
                   onClick={() => onStatusChange?.(task.id, "Completed")}
-                  disabled={pidLines.some(line => !line.completed)}
+                  disabled={pidLines.some((line) => !line.completed)}
                   className="bg-green-500 text-white hover:bg-green-600"
                 >
                   Complete Task
@@ -335,248 +276,297 @@ const RedlineTaskCard = ({
   );
 };
 
+// Format time in HH:MM 24-hour format
+const formatTime = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+};
+
 const TeamMemberDashboard = () => {
+  const { isAuthenticated, user } = useAuth();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
-  
+
+  // Check for token on mount
+  const token = localStorage.getItem("teamsync_token");
+
+  // Redirect to login if not authenticated, not a Team Member, or no token
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      toast.error("Please log in to access the dashboard.");
+      navigate("/login", { replace: true });
+    } else if (user?.role !== "Team Member") {
+      toast.error("You are not authorized to access this dashboard.");
+      navigate("/", { replace: true });
+    }
+  }, [isAuthenticated, user, token, navigate]);
+
+  // Helper to get the headers with the token
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem("teamsync_token");
+    if (!token) {
+      throw new Error("No authentication token found");
+    }
+    return {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    };
+  };
+
+  // Fetch tasks assigned to the team member
+  const fetchTasks = async () => {
+    try {
+      setIsLoading(true);
+      const response = await axios.get<{ data: any[] }>(
+        `${API_URL}/tasks`,
+        getAuthHeaders()
+      );
+      console.log("Fetch tasks response:", response.data);
+      const tasksData = response.data.data.map((task) => ({
+        id: task.id.toString(),
+        type: task.type as TaskType,
+        assignee: task.assignee || "Unknown",
+        assigneeId: task.assignee_id.toString(),
+        status: task.status,
+        isComplex: task.is_complex,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at,
+        completedAt: task.completed_at,
+        progress: task.progress,
+        items: task.items.map((item: any) => ({
+          id: item.id.toString(),
+          name: item.item_name,
+          type: item.item_type as "PID" | "Line" | "Equipment",
+          completed: item.completed,
+        })),
+        comments:
+          // Deduplicate comments by id to prevent duplicate keys
+          Array.from(
+            new Map(
+              task.comments.map((comment: any) => [
+                comment.id,
+                {
+                  id: comment.id.toString(),
+                  userId: comment.user_id.toString(),
+                  userName: comment.user_name,
+                  userRole: comment.user_role,
+                  comment: comment.comment,
+                  createdAt: comment.created_at,
+                },
+              ])
+            ).values()
+          ) || [],
+      }));
+      console.log("Mapped tasks:", tasksData);
+      setTasks(tasksData);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching tasks:", {
+        message: axiosError.message,
+        status: axiosError.response?.status,
+        data: axiosError.response?.data,
+      });
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch tasks"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Load tasks on initial render
   useEffect(() => {
-    // Simulate API call to fetch tasks
-    setTimeout(() => {
-      setTasks(mockTasks);
-      setIsLoading(false);
-    }, 1000);
-  }, []);
-  
+    if (isAuthenticated && user?.role === "Team Member" && token) {
+      fetchTasks();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user, token]);
+
   const handleRefresh = () => {
-    setIsLoading(true);
-    
-    // Simulate API call to refresh tasks
-    setTimeout(() => {
-      setTasks(mockTasks);
-      setIsLoading(false);
-      toast.success("Tasks refreshed");
-    }, 500);
+    fetchTasks()
+      .then(() => {
+        toast.success("Tasks refreshed");
+      })
+      .catch((error) => {
+        console.error("Error refreshing tasks:", error);
+        toast.error("Failed to refresh tasks");
+      });
   };
-  
-  const handleStatusChange = async (
-    taskId: string, 
-    newStatus: "Assigned" | "In Progress" | "Completed"
+
+  const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    try {
+      const authHeaders = getAuthHeaders();
+      await axios.patch(
+        `${API_URL}/tasks/${taskId}/status`,
+        { status: newStatus },
+        authHeaders
+      );
+      await fetchTasks();
+      if (newStatus === "In Progress") {
+        toast.success("Task started successfully");
+      } else if (newStatus === "Completed") {
+        toast.success("Task completed successfully");
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error updating task status:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update task status"
+      );
+      throw error;
+    }
+  };
+
+  const handleItemToggle = async (
+    taskId: string,
+    itemId: string,
+    isCompleted: boolean
   ) => {
-    // Simulate API call to update task status
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        setTasks(prevTasks =>
-          prevTasks.map(task => {
-            if (task.id === taskId) {
-              return {
-                ...task,
-                status: newStatus,
-                updatedAt: new Date().toISOString(),
-                completedAt: newStatus === "Completed" ? new Date().toISOString() : task.completedAt,
-                progress: newStatus === "Completed" ? 100 : task.progress
-              };
-            }
-            return task;
-          })
-        );
-        
-        if (newStatus === "In Progress") {
-          toast.success("Task started successfully");
-        } else if (newStatus === "Completed") {
-          toast.success("Task completed successfully");
-        }
-        
-        resolve();
-      }, 500);
-    });
-  };
-  
-  const handleItemToggle = async (taskId: string, itemId: string, isCompleted: boolean) => {
-    // Get the task
-    const task = tasks.find(t => t.id === taskId);
-    
-    // Check if task is in progress
-    if (task && task.status !== 'In Progress' && isCompleted) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && task.status !== "In Progress" && isCompleted) {
       toast.error("You must start the task before marking items as completed");
       return Promise.reject("Task not started");
     }
-    
-    // Check if item is already completed
-    const item = task?.items.find(i => i.id === itemId);
+
+    const item = task?.items.find((i) => i.id === itemId);
     if (item?.completed && !isCompleted) {
       toast.error("Items cannot be unchecked once completed");
       return Promise.reject("Item cannot be unchecked");
     }
-    
-    // Simulate API call to update item status
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        setTasks(prevTasks =>
-          prevTasks.map(task => {
-            if (task.id === taskId) {
-              const updatedItems = task.items.map(item =>
-                item.id === itemId ? { ...item, completed: isCompleted } : item
-              );
-              
-              // Calculate new progress
-              const completedCount = updatedItems.filter(item => item.completed).length;
-              const progress = Math.round((completedCount / updatedItems.length) * 100);
-              
-              return {
-                ...task,
-                items: updatedItems,
-                progress,
-                updatedAt: new Date().toISOString()
-              };
-            }
-            return task;
-          })
-        );
-        resolve();
-      }, 200);
-    });
+
+    try {
+      const authHeaders = getAuthHeaders();
+      await axios.patch(
+        `${API_URL}/tasks/${taskId}/items/${itemId}`,
+        { completed: isCompleted },
+        authHeaders
+      );
+      await fetchTasks();
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error updating item status:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update item status"
+      );
+      throw error;
+    }
   };
-  
-  const handleLineToggle = async (taskId: string, lineId: string, isCompleted: boolean) => {
-    // Get the task
-    const task = tasks.find(t => t.id === taskId);
-    
-    // Check if task is in progress
-    if (task && task.status !== 'In Progress' && isCompleted) {
+
+  const handleLineToggle = async (
+    taskId: string,
+    lineId: string,
+    isCompleted: boolean
+  ) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task && task.status !== "In Progress" && isCompleted) {
       toast.error("You must start the task before marking lines as completed");
       return Promise.reject("Task not started");
     }
-    
-    // Check if line is already in items and completed
-    const lineItem = task?.items.find(item => item.id === lineId);
+
+    const lineItem = task?.items.find((item) => item.id === lineId);
     if (lineItem?.completed && !isCompleted) {
       toast.error("Lines cannot be unchecked once completed");
       return Promise.reject("Line cannot be unchecked");
     }
-    
-    // Simulate API call to update line status for redline tasks
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        setTasks(prevTasks =>
-          prevTasks.map(task => {
-            if (task.id === taskId && task.type === "Redline") {
-              // Check if line is already in items
-              const lineExists = task.items.some(item => item.id === lineId);
-              
-              let updatedItems;
-              
-              if (lineExists) {
-                // Update existing line
-                updatedItems = task.items.map(item =>
-                  item.id === lineId ? { ...item, completed: isCompleted } : item
-                );
-              } else {
-                // Add new line to items
-                const lineInfo = mockLines.find(line => line.id === lineId);
-                if (lineInfo) {
-                  const newLine: TaskItem = {
-                    id: lineId,
-                    name: lineInfo.name,
-                    type: "Line",
-                    completed: isCompleted
-                  };
-                  updatedItems = [...task.items, newLine];
-                } else {
-                  updatedItems = task.items;
-                }
-              }
-              
-              // Calculate new progress based on PID and line items
-              const pidCount = updatedItems.filter(item => item.type === "PID").length;
-              const lineItems = updatedItems.filter(item => item.type === "Line");
-              const lineCount = lineItems.length;
-              const completedLineCount = lineItems.filter(item => item.completed).length;
-              
-              // Progress is based on completed lines if there are lines, otherwise it's 0
-              const progress = lineCount > 0 ? Math.round((completedLineCount / lineCount) * 100) : 0;
-              
-              return {
-                ...task,
-                items: updatedItems,
-                progress,
-                updatedAt: new Date().toISOString()
-              };
-            }
-            return task;
-          })
+
+    try {
+      const authHeaders = getAuthHeaders();
+      const lineExists = task?.items.some((item) => item.id === lineId);
+      if (lineExists) {
+        await axios.patch(
+          `${API_URL}/tasks/${taskId}/items/${lineId}`,
+          { completed: isCompleted },
+          authHeaders
         );
-        
-        if (isCompleted) {
-          toast.success("Line marked as completed");
+      } else {
+        const lineResponse = await axios.get<{
+          data: { id: number; line_number: string; pid_id: number }[];
+        }>(`${API_URL}/lines`, authHeaders);
+        const lineInfo = lineResponse.data.data.find(
+          (line) => line.id.toString() === lineId
+        );
+        if (lineInfo) {
+          await axios.post(
+            `${API_URL}/tasks/${taskId}/items`,
+            {
+              itemId: lineId,
+              itemType: "Line",
+              itemName: lineInfo.line_number,
+              completed: isCompleted,
+            },
+            authHeaders
+          );
         }
-        
-        resolve();
-      }, 200);
-    });
+      }
+      await fetchTasks();
+      if (isCompleted) {
+        toast.success("Line marked as completed");
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error updating line status:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update line status"
+      );
+      throw error;
+    }
   };
-  
+
   const handleOpenComments = (task: Task) => {
     setSelectedTask(task);
     setIsCommentsOpen(true);
   };
-  
+
   const handleAddComment = async (taskId: string, comment: string) => {
-    // Simulate API call to add comment
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        const newComment: TaskComment = {
-          id: `comment-${Date.now()}`,
-          userId: "user-3",
-          userName: "Charlie Brown",
-          userRole: "Team Member",
-          comment,
-          createdAt: new Date().toISOString()
-        };
-        
-        setTasks(prevTasks =>
-          prevTasks.map(task => {
-            if (task.id === taskId) {
-              return {
-                ...task,
-                comments: [newComment, ...(task.comments || [])]
-              };
-            }
-            return task;
-          })
-        );
-        
-        // Also update selectedTask if it's the one we're commenting on
-        if (selectedTask?.id === taskId) {
-          setSelectedTask({
-            ...selectedTask,
-            comments: [newComment, ...(selectedTask.comments || [])]
-          });
-        }
-        
-        resolve();
-      }, 500);
-    });
+    try {
+      const authHeaders = getAuthHeaders();
+      await axios.post(
+        `${API_URL}/tasks/${taskId}/comments`,
+        { comment },
+        authHeaders
+      );
+      // Fetch updated tasks and ensure selectedTask is updated synchronously
+      await fetchTasks();
+      const updatedTask = tasks.find((task) => task.id === taskId);
+      if (updatedTask && selectedTask?.id === taskId) {
+        setSelectedTask(updatedTask);
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error adding comment:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to add comment"
+      );
+      throw error;
+    }
   };
-  
-  // Filter tasks by status
-  const assignedTasks = tasks.filter(task => task.status === "Assigned");
-  const inProgressTasks = tasks.filter(task => task.status === "In Progress");
-  const completedTasks = tasks.filter(task => task.status === "Completed");
-  
-  // Task counts for stats
+
+  if (!isAuthenticated || user?.role !== "Team Member" || !token) {
+    return null;
+  }
+
+  const assignedTasks = tasks.filter((task) => task.status === "Assigned");
+  const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
+  const completedTasks = tasks.filter((task) => task.status === "Completed");
+
   const taskCounts = {
     assigned: assignedTasks.length,
     inProgress: inProgressTasks.length,
-    completed: completedTasks.length
+    completed: completedTasks.length,
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar onRefresh={handleRefresh} />
-      
+
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold">Team Member Dashboard</h1>
@@ -596,9 +586,12 @@ const TeamMemberDashboard = () => {
         {assignedTasks.length > 0 && (
           <Alert className="mb-6 bg-blue-50 border-blue-200">
             <InfoIcon className="h-4 w-4 text-blue-600" />
-            <AlertTitle className="text-blue-800">Task Workflow Reminder</AlertTitle>
+            <AlertTitle className="text-blue-800">
+              Task Workflow Reminder
+            </AlertTitle>
             <AlertDescription className="text-blue-700">
-              Remember to click "Start Task" before you can mark items as completed. Once marked complete, items cannot be unchecked.
+              Remember to click "Start Task" before you can mark items as
+              completed. Once marked complete, items cannot be unchecked.
             </AlertDescription>
           </Alert>
         )}
@@ -610,12 +603,12 @@ const TeamMemberDashboard = () => {
               <TabsTrigger value="inProgress">In Progress</TabsTrigger>
               <TabsTrigger value="completed">Completed</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="assigned" className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map(task => (
+                assignedTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -626,15 +619,17 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No assigned tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No assigned tasks
+                </div>
               )}
             </TabsContent>
-            
+
             <TabsContent value="inProgress" className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map(task => (
+                inProgressTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -645,15 +640,17 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No in-progress tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No in-progress tasks
+                </div>
               )}
             </TabsContent>
-            
+
             <TabsContent value="completed" className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map(task => (
+                completedTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -661,25 +658,25 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No completed tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No completed tasks
+                </div>
               )}
             </TabsContent>
           </Tabs>
         </div>
 
         <div className="hidden md:grid md:grid-cols-3 gap-6">
-          {/* Assigned Column */}
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-teamsync-assigned rounded-full mr-2"></div>
               Assigned
             </h2>
-            
             <div className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map(task => (
+                assignedTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -690,23 +687,23 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No assigned tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No assigned tasks
+                </div>
               )}
             </div>
           </div>
-          
-          {/* In Progress Column */}
+
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-teamsync-inProgress rounded-full mr-2"></div>
               In Progress
             </h2>
-            
             <div className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map(task => (
+                inProgressTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -717,23 +714,23 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No in-progress tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No in-progress tasks
+                </div>
               )}
             </div>
           </div>
-          
-          {/* Completed Column */}
+
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-teamsync-completed rounded-full mr-2"></div>
               Completed
             </h2>
-            
             <div className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8">Loading tasks...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map(task => (
+                completedTasks.map((task) => (
                   <RedlineTaskCard
                     key={task.id}
                     task={task}
@@ -741,13 +738,14 @@ const TeamMemberDashboard = () => {
                   />
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">No completed tasks</div>
+                <div className="text-center py-8 text-gray-500">
+                  No completed tasks
+                </div>
               )}
             </div>
           </div>
         </div>
-        
-        {/* Comments Dialog */}
+
         <Dialog open={isCommentsOpen} onOpenChange={setIsCommentsOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>

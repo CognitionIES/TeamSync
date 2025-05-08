@@ -1,53 +1,70 @@
+/* eslint-disable react-refresh/only-export-components */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-import React, { createContext, useState, useContext, useEffect } from "react";
-import { User, UserRole, AuthContextType } from "@/types";
+import { createContext, useState, useContext, useEffect } from "react";
+import { User, UserRole } from "@/types";
 import { toast } from "sonner";
 import axios from "axios";
 
+export interface AuthContextType {
+  user: User | null;
+  token: string | null;
+  login: (role: UserRole, name: string, password: string) => Promise<boolean>;
+  logout: () => void;
+  isAuthenticated: boolean;
+}
 // Create the auth context
 export const AuthContext = createContext<AuthContextType | null>(null);
 
 // API URL - will be taken from environment in production
 const API_URL = "http://localhost:3000/api";
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   // Check for existing session on mount
   useEffect(() => {
     const storedUser = localStorage.getItem("teamsync_user");
-    if (storedUser) {
+    const storedToken = localStorage.getItem("teamsync_token");
+    if (storedUser && storedToken) {
       try {
         const parsedUser = JSON.parse(storedUser);
+        console.log("Found stored user and token on mount:", { user: parsedUser, token: storedToken });
         setUser(parsedUser);
-
-        // Validate token with backend
-        validateToken();
+        setToken(storedToken);
+        validateToken(storedToken);
       } catch (error) {
         console.error("Failed to parse stored user:", error);
         localStorage.removeItem("teamsync_user");
+        localStorage.removeItem("teamsync_token");
+        setToken(null);
       }
+    } else {
+      console.log("No stored user or token found on mount");
     }
   }, []);
 
   // Validate token with backend
-  const validateToken = async () => {
+  const validateToken = async (tokenToValidate: string) => {
     try {
-      const token = localStorage.getItem("teamsync_token");
-      if (!token) {
+      if (!tokenToValidate) {
+        console.log("No token to validate, logging out...");
         logout();
         return;
       }
-  
+
+      console.log("Validating token with backend...");
       const response = await axios.get(`${API_URL}/auth/validate`, {
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${tokenToValidate}`,
         },
       });
-  
-      if (!response.data.user) { // Check for user object instead of valid
+
+      console.log("Token validation response:", response.data);
+      if (!response.data.user) {
+        console.log("Token validation failed: No user in response, logging out...");
         logout();
       }
     } catch (error) {
@@ -63,30 +80,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     password: string
   ): Promise<boolean> => {
     try {
+      console.log("AuthContext login called with:", { role, name, password });
       const response = await axios.post(`${API_URL}/auth/login`, {
         name,
         password,
         role,
       });
-      console.log("Login API response:", response.data); // For debugging
+      console.log("Login API response:", response.data);
 
       if (response.data.token) {
         const userData = {
-          id: response.data.id, // Use response.data.id instead of response.data.user.id
-          name: response.data.name, // Use response.data.name instead of response.data.user.name
-          role: response.data.role, // Use response.data.role instead of response.data.user.role
+          id: response.data.id,
+          name: response.data.name,
+          role: response.data.role,
         };
 
         setUser(userData);
+        setToken(response.data.token);
         localStorage.setItem("teamsync_user", JSON.stringify(userData));
         localStorage.setItem("teamsync_token", response.data.token);
+        console.log("Token set in localStorage:", response.data.token);
         toast.success("Login successful!");
         return true;
       } else {
+        console.log("No token in login response");
         toast.error("Authentication failed");
         return false;
       }
     } catch (error: any) {
+      console.error("Login error:", error);
       const errorMsg = error.response?.data?.message || "Login failed";
       toast.error(errorMsg);
       return false;
@@ -95,7 +117,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Logout function
   const logout = () => {
+    console.log("Logging out...");
     setUser(null);
+    setToken(null);
     localStorage.removeItem("teamsync_user");
     localStorage.removeItem("teamsync_token");
     toast.success("Logged out successfully");
@@ -105,6 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     <AuthContext.Provider
       value={{
         user,
+        token,
         login,
         logout,
         isAuthenticated: !!user,

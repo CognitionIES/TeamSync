@@ -2,7 +2,9 @@ const express = require('express');
 const { 
   getUsers,
   getUserById,
-  getUsersByRole
+  getUsersByRole,
+  getTeamMembers,
+  getUserByName,
 } = require('../controllers/users.controller');
 const { protect, authorize } = require('../middleware/auth');
 const db = require('../config/db');
@@ -22,11 +24,20 @@ router.get('/test', async (req, res) => {
 // Public route to fetch users by role (needed for login page dropdown)
 router.get('/role/:role', getUsersByRole);
 
-// All routes below are protected and limited to Admin
+// All routes below are protected
 router.use(protect);
 
+// Fetch team members (for Team Lead dashboard dropdown)
+router.get('/team-members', authorize(['Team Lead']), getTeamMembers);
+
+// Fetch user by name (for task assignment)
+router.get('/by-name', authorize(['Team Lead']), getUserByName);
+
+// All routes below are restricted to Admin only
+router.use(authorize(['Admin']));
+
 // Get all users (Admin only)
-router.get('/', authorize(['Admin']), getUsers);
+router.get('/', getUsers);
 
 // Get specific user
 router.get('/:id', getUserById);
