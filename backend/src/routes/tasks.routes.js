@@ -6,136 +6,116 @@ const { protect } = require("../middleware/auth");
 // GET /api/tasks - Fetch tasks based on user role
 router.get("/", protect, async (req, res) => {
   try {
-    if (req.user.role === "Team Lead") {
-      console.log("Team Lead ID:", req.user.id);
+    console.log("User role:", req.user.role);
+    console.log("User ID:", req.user.id);
 
-      // Fetch team member IDs
-      console.log("Fetching team members...");
-      const { rows: teamMembers } = await db.query(
-        `
-        SELECT member_id
-        FROM team_members
-        WHERE lead_id = $1
-        `,
-        [req.user.id]
-      );
-
-      const teamMemberIds = teamMembers.map((tm) => tm.member_id);
-      console.log("Team member IDs:", teamMemberIds);
-
-      if (teamMemberIds.length === 0) {
-        console.log(
-          "No team members found for Team Lead. Returning empty task list."
-        );
-        return res.status(200).json({ data: [] });
-      }
-
-      // Fetch tasks
-      console.log("Fetching tasks for team members:", teamMemberIds);
-      const { rows } = await db.query(
-        `
-        SELECT t.id, t.type, t.assignee_id, t.is_complex, t.created_at, t.updated_at, 
-               t.completed_at, t.status, t.progress,
-               u.name as assignee,
-               json_agg(
-                 json_build_object(
+    if (req.user.role === "Project Manager") {
+      console.log("Fetching all tasks for Project Manager...");
+      const query = `
+        SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
+               t.created_at, t.updated_at, t.completed_at, t.progress,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
                    'id', ti.id,
-                   'item_name', ti.item_name,
+                   'name', ti.item_name,
                    'item_type', ti.item_type,
                    'completed', ti.completed
-                 )
-               ) FILTER (WHERE ti.id IS NOT NULL) as items,
-               json_agg(
-                 json_build_object(
+                 ))
+                 FROM task_items ti
+                 WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+               ), '[]') as items,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
                    'id', tc.id,
                    'user_id', tc.user_id,
                    'user_name', tc.user_name,
                    'user_role', tc.user_role,
                    'comment', tc.comment,
-                   'created_at', tc.created_at
-                 )
-               ) FILTER (WHERE tc.id IS NOT NULL) as comments
+                   'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                 ))
+                 FROM task_comments tc
+                 WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+               ), '[]') as comments
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
-        LEFT JOIN task_items ti ON t.id = ti.task_id
-        LEFT JOIN task_comments tc ON t.id = tc.task_id
-        WHERE t.assignee_id = ANY($1)
-        GROUP BY t.id, u.name
-        `,
-        [teamMemberIds]
-      );
-
-      const tasks = rows.map((task) => ({
-        id: task.id,
-        type: task.type,
-        assignee: task.assignee,
-        assignee_id: task.assignee_id,
-        status: task.status,
-        is_complex: task.is_complex,
-        created_at: task.created_at,
-        updated_at: task.updated_at,
-        completed_at: task.completed_at,
-        progress: task.progress,
-        items: task.items || [],
-        comments: task.comments || [],
-      }));
-
-      console.log("Tasks fetched for Team Lead:", tasks);
-      res.status(200).json({ data: tasks });
+        WHERE t.assignee_id IN (
+          SELECT member_id FROM team_members WHERE lead_id = $1
+        )
+      `;
+      const { rows } = await db.query(query, [req.user.id]); // Add the values array
+      console.log("Tasks fetched for Project Manager:", rows);
+      res.status(200).json({ data: rows });
+    } else if (req.user.role === "Team Lead") {
+      console.log("Fetching tasks for Team Lead ID:", req.user.id);
+      const query = `
+      SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
+             t.created_at, t.updated_at, t.completed_at, t.progress,
+             COALESCE((
+               SELECT json_agg(json_build_object(
+                 'id', ti.id,
+                 'name', ti.item_name,
+                 'item_type', ti.item_type,
+                 'completed', ti.completed
+               ))
+               FROM task_items ti
+               WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+             ), '[]') as items,
+             COALESCE((
+               SELECT json_agg(json_build_object(
+                 'id', tc.id,
+                 'user_id', tc.user_id,
+                 'user_name', tc.user_name,
+                 'user_role', tc.user_role,
+                 'comment', tc.comment,
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+               ))
+               FROM task_comments tc
+               WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+             ), '[]') as comments
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      WHERE t.assignee_id IN (
+        SELECT member_id FROM team_members WHERE lead_id = $1
+      )
+    `;
+      const { rows } = await db.query(query, [req.user.id]);
+      console.log("Tasks fetched for Team Lead:", rows);
+      res.status(200).json({ data: rows });
     } else if (req.user.role === "Team Member") {
       console.log("Fetching tasks for Team Member ID:", req.user.id);
-      const { rows } = await db.query(
-        `
-        SELECT t.id, t.type, t.assignee_id, t.is_complex, t.created_at, t.updated_at, 
-               t.completed_at, t.status, t.progress,
-               u.name as assignee,
-               json_agg(
-                 json_build_object(
+      const query = `
+        SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
+               t.created_at, t.updated_at, t.completed_at, t.progress,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
                    'id', ti.id,
-                   'item_name', ti.item_name,
+                   'name', ti.item_name,
                    'item_type', ti.item_type,
                    'completed', ti.completed
-                 )
-               ) FILTER (WHERE ti.id IS NOT NULL) as items,
-               json_agg(
-                 json_build_object(
+                 ))
+                 FROM task_items ti
+                 WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+               ), '[]') as items,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
                    'id', tc.id,
                    'user_id', tc.user_id,
                    'user_name', tc.user_name,
                    'user_role', tc.user_role,
                    'comment', tc.comment,
-                   'created_at', tc.created_at
-                 )
-               ) FILTER (WHERE tc.id IS NOT NULL) as comments
+                   'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                 ))
+                 FROM task_comments tc
+                 WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+               ), '[]') as comments
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
-        LEFT JOIN task_items ti ON t.id = ti.task_id
-        LEFT JOIN task_comments tc ON t.id = tc.task_id
         WHERE t.assignee_id = $1
-        GROUP BY t.id, u.name
-        `,
-        [req.user.id]
-      );
-
-      const tasks = rows.map((task) => ({
-        id: task.id,
-        type: task.type,
-        assignee: task.assignee,
-        assignee_id: task.assignee_id,
-        status: task.status,
-        is_complex: task.is_complex,
-        created_at: task.created_at,
-        updated_at: task.updated_at,
-        completed_at: task.completed_at,
-        progress: task.progress,
-        items: task.items || [],
-        comments: task.comments || [],
-      }));
-
-      console.log("Tasks fetched for Team Member:", tasks);
-      res.status(200).json({ data: tasks });
-    }  
-    else {
+      `;
+      const { rows } = await db.query(query, [req.user.id]);
+      console.log("Tasks fetched for Team Member:", rows);
+      res.status(200).json({ data: rows });
+    } else {
       return res.status(403).json({
         message: `User role ${req.user.role} is not authorized to view tasks`,
       });
@@ -165,14 +145,12 @@ router.post("/", protect, async (req, res) => {
       items,
     });
 
-    // Validate input
     if (!type || !assigneeId) {
       return res
         .status(400)
         .json({ message: "Type and assigneeId are required" });
     }
 
-    // Validate assigneeId exists in users table
     console.log("Validating assigneeId:", assigneeId);
     const { rows: userRows } = await db.query(
       `
@@ -186,7 +164,6 @@ router.post("/", protect, async (req, res) => {
         .json({ message: `Assignee with ID ${assigneeId} does not exist` });
     }
 
-    // Validate req.user.id exists in users table
     console.log("Validating user id:", req.user.id);
     const { rows: userIdRows } = await db.query(
       `
@@ -200,28 +177,31 @@ router.post("/", protect, async (req, res) => {
         .json({ message: `User with ID ${req.user.id} does not exist` });
     }
 
-    // Check if any of the items are already assigned to existing tasks
     console.log("Checking for already assigned items...");
-    const itemIds = items.map(item => parseInt(item.itemId));
-    const itemTypes = items.map(item => item.itemType);
-    
+    const itemIds = items.map((item) => parseInt(item.itemId));
+    const itemTypes = items.map((item) => item.itemType);
+
+    // Check for duplicates within the same task type
     const { rows: existingItems } = await db.query(
       `
-      SELECT item_id, item_type, item_name FROM task_items
-      WHERE (item_id = ANY($1) AND item_type = ANY($2))
+      SELECT ti.item_id, ti.item_type, ti.item_name, t.type as task_type
+      FROM task_items ti
+      JOIN tasks t ON ti.task_id = t.id
+      WHERE (ti.item_id = ANY($1) AND ti.item_type = ANY($2)) AND t.type = $3
       `,
-      [itemIds, itemTypes]
+      [itemIds, itemTypes, type]
     );
-    
+
     if (existingItems.length > 0) {
       console.log("Found already assigned items:", existingItems);
-      const alreadyAssignedNames = existingItems.map(item => item.item_name).join(", ");
+      const alreadyAssignedNames = existingItems
+        .map((item) => item.item_name)
+        .join(", ");
       return res.status(400).json({
-        message: `Some items are already assigned to tasks: ${alreadyAssignedNames}`
+        message: `Some items are already assigned to ${type} tasks: ${alreadyAssignedNames}`,
       });
     }
 
-    // Insert the task
     console.log("Inserting into tasks table...");
     const { rows: taskRows } = await db.query(
       `
@@ -235,7 +215,6 @@ router.post("/", protect, async (req, res) => {
     const task = taskRows[0];
     console.log("Inserted task:", task);
 
-    // Deduplicate items based on itemId and itemType
     const uniqueItems = [];
     const seen = new Set();
     for (const item of items) {
@@ -247,7 +226,6 @@ router.post("/", protect, async (req, res) => {
     }
     console.log("Deduplicated items:", uniqueItems);
 
-    // Insert task items
     if (uniqueItems.length > 0) {
       console.log("Inserting into task_items table...");
       for (const item of uniqueItems) {
@@ -268,7 +246,6 @@ router.post("/", protect, async (req, res) => {
       console.log("Inserted task items:", uniqueItems);
     }
 
-    // Fetch the task with items for response
     console.log("Fetching full task for response...");
     const { rows: fullTaskRows } = await db.query(
       `
@@ -288,7 +265,7 @@ router.post("/", protect, async (req, res) => {
                  'user_name', tc.user_name,
                  'user_role', tc.user_role,
                  'comment', tc.comment,
-                 'created_at', tc.created_at
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                )
              ) FILTER (WHERE tc.id IS NOT NULL) as comments
       FROM tasks t
@@ -339,7 +316,6 @@ router.patch("/:id/status", protect, async (req, res) => {
     const taskId = parseInt(req.params.id);
     const { status } = req.body;
 
-    // Validate input
     if (!status) {
       return res.status(400).json({ message: "Status is required" });
     }
@@ -349,7 +325,6 @@ router.patch("/:id/status", protect, async (req, res) => {
       return res.status(400).json({ message: `Invalid status: ${status}` });
     }
 
-    // Check if task exists and is assigned to the user
     const { rows: taskRows } = await db.query(
       `
       SELECT * FROM tasks
@@ -359,26 +334,31 @@ router.patch("/:id/status", protect, async (req, res) => {
     );
 
     if (taskRows.length === 0) {
-      return res.status(404).json({ message: "Task not found or not assigned to you" });
+      return res
+        .status(404)
+        .json({ message: "Task not found or not assigned to you" });
     }
 
     const task = taskRows[0];
 
-    // Validate status transition
     if (task.status === "Completed") {
       return res.status(400).json({ message: "Task is already completed" });
     }
 
     if (task.status === "Assigned" && status !== "In Progress") {
-      return res.status(400).json({ message: "Task must be started before it can be completed" });
+      return res
+        .status(400)
+        .json({ message: "Task must be started before it can be completed" });
     }
 
     if (task.status === "In Progress" && status === "Assigned") {
-      return res.status(400).json({ message: "Cannot revert task to Assigned status" });
+      return res
+        .status(400)
+        .json({ message: "Cannot revert task to Assigned status" });
     }
 
-    // Update the task status
-    const completedAtUpdate = status === "Completed" ? "completed_at = CURRENT_TIMESTAMP," : "";
+    const completedAtUpdate =
+      status === "Completed" ? "completed_at = CURRENT_TIMESTAMP," : "";
     const { rows: updatedTaskRows } = await db.query(
       `
       UPDATE tasks
@@ -395,7 +375,6 @@ router.patch("/:id/status", protect, async (req, res) => {
     const updatedTask = updatedTaskRows[0];
     console.log("Updated task status:", updatedTask);
 
-    // Fetch the updated task with items for response
     const { rows: fullTaskRows } = await db.query(
       `
       SELECT t.*, u.name as assignee,
@@ -414,7 +393,7 @@ router.patch("/:id/status", protect, async (req, res) => {
                  'user_name', tc.user_name,
                  'user_role', tc.user_role,
                  'comment', tc.comment,
-                 'created_at', tc.created_at
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                )
              ) FILTER (WHERE tc.id IS NOT NULL) as comments
       FROM tasks t
@@ -446,11 +425,13 @@ router.patch("/:id/status", protect, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating task status:", error.message, error.stack);
-    res.status(500).json({ message: "Failed to update task status", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to update task status", error: error.message });
   }
 });
 
-// PATCH /api/tasks/:id/items/:itemId - Update task item status (e.g., mark line as completed)
+// PATCH /api/tasks/:id/items/:itemId - Update task item status
 router.patch("/:id/items/:itemId", protect, async (req, res) => {
   try {
     if (req.user.role !== "Team Member") {
@@ -463,12 +444,12 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     const itemId = parseInt(req.params.itemId);
     const { completed } = req.body;
 
-    // Validate input
     if (typeof completed !== "boolean") {
-      return res.status(400).json({ message: "Completed status must be a boolean" });
+      return res
+        .status(400)
+        .json({ message: "Completed status must be a boolean" });
     }
 
-    // Check if task exists and is assigned to the user
     const { rows: taskRows } = await db.query(
       `
       SELECT * FROM tasks
@@ -478,17 +459,19 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     );
 
     if (taskRows.length === 0) {
-      return res.status(404).json({ message: "Task not found or not assigned to you" });
+      return res
+        .status(404)
+        .json({ message: "Task not found or not assigned to you" });
     }
 
     const task = taskRows[0];
 
-    // Check if task is in progress
     if (task.status !== "In Progress") {
-      return res.status(400).json({ message: "Task must be in progress to update items" });
+      return res
+        .status(400)
+        .json({ message: "Task must be in progress to update items" });
     }
 
-    // Check if task item exists
     const { rows: itemRows } = await db.query(
       `
       SELECT * FROM task_items
@@ -503,12 +486,12 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 
     const item = itemRows[0];
 
-    // Prevent unchecking a completed item
     if (item.completed && !completed) {
-      return res.status(400).json({ message: "Cannot uncheck a completed item" });
+      return res
+        .status(400)
+        .json({ message: "Cannot uncheck a completed item" });
     }
 
-    // Update the task item
     const { rows: updatedItemRows } = await db.query(
       `
       UPDATE task_items
@@ -523,7 +506,6 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     const updatedItem = updatedItemRows[0];
     console.log("Updated task item:", updatedItem);
 
-    // Update task progress
     const { rows: allItems } = await db.query(
       `
       SELECT COUNT(*) as total, SUM(CASE WHEN completed = true THEN 1 ELSE 0 END) as completed_count
@@ -534,7 +516,8 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     );
 
     const { total, completed_count } = allItems[0];
-    const progress = total > 0 ? Math.round((completed_count / total) * 100) : 0;
+    const progress =
+      total > 0 ? Math.round((completed_count / total) * 100) : 0;
 
     await db.query(
       `
@@ -547,7 +530,6 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       [progress, taskId]
     );
 
-    // Fetch the updated task with items for response
     const { rows: fullTaskRows } = await db.query(
       `
       SELECT t.*, u.name as assignee,
@@ -566,7 +548,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
                  'user_name', tc.user_name,
                  'user_role', tc.user_role,
                  'comment', tc.comment,
-                 'created_at', tc.created_at
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                )
              ) FILTER (WHERE tc.id IS NOT NULL) as comments
       FROM tasks t
@@ -598,7 +580,9 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating task item:", error.message, error.stack);
-    res.status(500).json({ message: "Failed to update task item", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to update task item", error: error.message });
   }
 });
 
@@ -608,12 +592,18 @@ router.post("/:id/comments", protect, async (req, res) => {
     const taskId = parseInt(req.params.id);
     const { comment } = req.body;
 
-    // Validate input
-    if (!comment || typeof comment !== "string" || comment.trim().length === 0) {
-      return res.status(400).json({ message: "Comment is required and must be a non-empty string" });
+    // Validate comment input
+    if (
+      !comment ||
+      typeof comment !== "string" ||
+      comment.trim().length === 0
+    ) {
+      return res.status(400).json({
+        message: "Comment is required and must be a non-empty string",
+      });
     }
 
-    // Check if task exists
+    // Check if the task exists
     const { rows: taskRows } = await db.query(
       `
       SELECT * FROM tasks
@@ -626,7 +616,7 @@ router.post("/:id/comments", protect, async (req, res) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
-    // Insert the comment
+    // Insert the comment into task_comments
     const { rows: commentRows } = await db.query(
       `
       INSERT INTO task_comments (task_id, user_id, user_name, user_role, comment)
@@ -639,7 +629,17 @@ router.post("/:id/comments", protect, async (req, res) => {
     const newComment = commentRows[0];
     console.log("Added comment:", newComment);
 
-    // Fetch the updated task with items and comments for response
+    // Update the task's updated_at timestamp
+    await db.query(
+      `
+      UPDATE tasks
+      SET updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [taskId]
+    );
+
+    // Fetch the updated task with all details
     const { rows: fullTaskRows } = await db.query(
       `
       SELECT t.*, u.name as assignee,
@@ -658,7 +658,7 @@ router.post("/:id/comments", protect, async (req, res) => {
                  'user_name', tc.user_name,
                  'user_role', tc.user_role,
                  'comment', tc.comment,
-                 'created_at', tc.created_at
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                )
              ) FILTER (WHERE tc.id IS NOT NULL) as comments
       FROM tasks t
@@ -689,8 +689,10 @@ router.post("/:id/comments", protect, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error adding comment:", error.message, error.stack);
-    res.status(500).json({ message: "Failed to add comment", error: error.message });
+    console.error("Error adding comment to task:", error.message, error.stack);
+    res
+      .status(500)
+      .json({ message: "Failed to add comment", error: error.message });
   }
 });
 

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,12 +81,31 @@ const AdminDashboard = () => {
   const { isAuthenticated, token } = useAuth();
 
   // Fetch all necessary data
+  // Fetch all necessary data
   const fetchData = async () => {
     setIsLoading(true);
     try {
       if (!token) {
         throw new Error("Token missing during fetchData");
       }
+
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Cache-Control": "no-cache",
+        },
+      };
+
+      // Build query parameters for filtering
+      const queryParams = new URLSearchParams();
+      if (selectedProject !== "all") {
+        queryParams.append("project", selectedProject);
+      }
+      if (selectedTeam !== "all") {
+        queryParams.append("team", selectedTeam);
+      }
+      const queryString = queryParams.toString();
+      const urlSuffix = queryString ? `?${queryString}` : "";
 
       const [
         projectsResponse,
@@ -94,11 +114,11 @@ const AdminDashboard = () => {
         statusResponse,
         logsResponse,
       ] = await Promise.all([
-        axios.get(`${API_URL}/projects`),
-        axios.get(`${API_URL}/teams`),
-        axios.get(`${API_URL}/project-stats`),
-        axios.get(`${API_URL}/task-status`),
-        axios.get(`${API_URL}/audit-logs`),
+        axios.get(`${API_URL}/projects${urlSuffix}`, config),
+        axios.get(`${API_URL}/teams${urlSuffix}`, config),
+        axios.get(`${API_URL}/project-stats${urlSuffix}`, config),
+        axios.get(`${API_URL}/task-status${urlSuffix}`, config),
+        axios.get(`${API_URL}/audit-logs${urlSuffix}`, config),
       ]);
 
       const projectsData = projectsResponse.data;
@@ -135,7 +155,9 @@ const AdminDashboard = () => {
       toast.success("Data refreshed");
     } catch (error) {
       console.error("Error fetching data:", error);
-      toast.error(error.message || "Failed to fetch data");
+      toast.error(
+        error.response?.data?.message || error.message || "Failed to fetch data"
+      );
       if (
         error.response?.status === 401 &&
         location.pathname !== "/login" &&
@@ -148,6 +170,39 @@ const AdminDashboard = () => {
       setIsLoading(false);
     }
   };
+
+  // Fetch data on component mount if authenticated and when filters change
+  useEffect(() => {
+    if (location.pathname === "/login") {
+      console.log("Already on login page, skipping redirect...");
+      return;
+    }
+
+    if (isRedirecting) {
+      console.log(
+        "Redirect already in progress, skipping authentication check..."
+      );
+      return;
+    }
+
+    if (!isAuthenticated || !token) {
+      console.log("Not authenticated or no token, redirecting to login...");
+      setIsRedirecting(true);
+      navigate("/login", { replace: true });
+      return;
+    }
+
+    console.log("User is authenticated, fetching data...");
+    setIsRedirecting(false);
+    fetchData();
+  }, [
+    isAuthenticated,
+    token,
+    navigate,
+    location.pathname,
+    selectedProject,
+    selectedTeam,
+  ]);
 
   // Fetch data on component mount if authenticated
   useEffect(() => {

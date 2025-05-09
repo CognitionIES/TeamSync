@@ -8,11 +8,24 @@ const { protect, authorize } = require("../middleware/auth");
 // @access  Private
 router.get("/", protect, async (req, res) => {
   try {
-    const projects = await db.query("SELECT * FROM projects");
-    res.status(200).json({ data: projects.rows }); // Ensure the response is wrapped in "data"
+    console.log("User role:", req.user.role);
+    console.log("User ID:", req.user.id);
+
+    if (["Admin", "Project Manager", "Data Entry"].includes(req.user.role)) {
+      console.log(`Fetching projects for ${req.user.role}...`);
+      const { rows } = await db.query("SELECT id, name FROM projects");
+      console.log("Projects fetched:", rows);
+      res.status(200).json({ data: rows });
+    } else {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to view projects`,
+      });
+    }
   } catch (error) {
-    console.error("Error fetching projects:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error fetching projects:", error.message, error.stack);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch projects", error: error.message });
   }
 });
 

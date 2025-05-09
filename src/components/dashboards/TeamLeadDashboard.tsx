@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Task, TaskType } from "@/types";
+import { Task, TaskComment, TaskItem, TaskType } from "@/types";
 import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import TaskTable from "../shared/TaskTable";
@@ -48,9 +49,11 @@ interface Equipment {
 }
 
 interface AssignedItems {
-  pids: string[];
-  lines: string[];
-  equipment: string[];
+  upvLines: string[];
+  upvEquipment: string[];
+  qcLines: string[];
+  qcEquipment: string[];
+  redlinePIDs: string[];
 }
 
 const TeamLeadDashboard = () => {
@@ -61,15 +64,13 @@ const TeamLeadDashboard = () => {
   const [pids, setPIDs] = useState<PID[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-
+  const [isLoading, setIsLoading] = useState(false); // Ensure this is defined
   // Form state
   const [taskType, setTaskType] = useState<TaskType | "">("");
   const [assignmentType, setAssignmentType] = useState<
     "PID" | "Line" | "Equipment" | ""
   >("");
   const [selectedPIDs, setSelectedPIDs] = useState<string[]>([]);
-  const [selectedPID, setSelectedPID] = useState<string>("");
-  const [showPIDLines, setShowPIDLines] = useState<boolean>(false);
   const [selectedLines, setSelectedLines] = useState<string[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [assignee, setAssignee] = useState("");
@@ -78,9 +79,11 @@ const TeamLeadDashboard = () => {
 
   // Track assigned items to prevent duplicates
   const [assignedItems, setAssignedItems] = useState<AssignedItems>({
-    pids: [],
-    lines: [],
-    equipment: [],
+    upvLines: [],
+    upvEquipment: [],
+    qcLines: [],
+    qcEquipment: [],
+    redlinePIDs: [],
   });
 
   // Check for token on mount
@@ -103,14 +106,15 @@ const TeamLeadDashboard = () => {
     if (!token) {
       throw new Error("No authentication token found");
     }
-    console.log("Token being sent:", token); // Add logging
+    console.log("Token being sent:", token);
     return {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     };
   };
-
+  console.log("setIsLoading type:", typeof setIsLoading);
+  console.log("setIsLoading value:", setIsLoading);
   // Fetch team members
   const fetchTeamMembers = async () => {
     try {
@@ -204,44 +208,88 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Fetch tasks
   const fetchTasks = async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      console.log("Starting fetchTasks..."); // Line 252
+      console.log("Setting isLoading to true..."); // Line 253
+      setIsLoading(true); // Line 254
+      console.log("isLoading set to true"); // Line 255
+
+      console.log("Making API request to /api/tasks..."); // Line 257
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
-      console.log("Fetch tasks response:", response.data);
-      if (!response.data.data || response.data.data.length === 0) {
-        console.log("No tasks returned from API");
-      }
-      const tasksData = response.data.data.map((task) => {
+      console.log("Fetch tasks response:", response.data); // Line 262
+
+      const tasksData = response.data.data.map((task, taskIndex) => {
         console.log("Mapping task:", task);
+        const commentMap = new Map<string, TaskComment>();
+        (task.comments || []).forEach((comment: any, commentIndex: number) => {
+          if (
+            !comment ||
+            !comment.id ||
+            !comment.user_id ||
+            !comment.created_at
+          ) {
+            console.warn(
+              `Invalid comment at task index ${taskIndex}, comment index ${commentIndex}:`,
+              comment
+            );
+            return;
+          }
+          const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
+          if (!commentMap.has(key)) {
+            commentMap.set(key, {
+              id: comment.id.toString(),
+              userId: comment.user_id.toString(),
+              userName: comment.user_name || "Unknown",
+              userRole: comment.user_role || "Unknown",
+              comment: comment.comment || "",
+              createdAt: comment.created_at,
+            });
+          }
+        });
+        const uniqueComments = Array.from(commentMap.values());
+
+        const mappedItems = (task.items || [])
+          .map((item: any, itemIndex: number) => {
+            if (!item || !item.id) {
+              console.warn(
+                `Invalid item at task index ${taskIndex}, item index ${itemIndex}:`,
+                item
+              );
+              return null;
+            }
+            return {
+              id: item.id.toString(),
+              name: item.name || "Unnamed Item",
+              type: item.item_type || "Unknown",
+              completed: item.completed || false,
+            };
+          })
+          .filter((item): item is TaskItem => item !== null);
+
         return {
           id: task.id.toString(),
           type: task.type as TaskType,
           assignee: task.assignee || "Unknown",
           assigneeId: task.assignee_id.toString(),
-          status: task.status,
-          isComplex: task.is_complex,
-          createdAt: task.created_at,
-          updatedAt: task.updated_at,
-          completedAt: task.completed_at,
-          progress: task.progress,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          items: task.items.map((item: any) => ({
-            id: item.id.toString(),
-            name: item.item_name,
-            type: item.item_type as "PID" | "Line" | "Equipment",
-            completed: item.completed,
-          })),
-          comments: task.comments || [],
+          status: task.status || "Assigned",
+          isComplex: task.is_complex || false,
+          createdAt: task.created_at || new Date().toISOString(),
+          updatedAt: task.updated_at || new Date().toISOString(),
+          completedAt: task.completed_at || null,
+          progress: task.progress || 0,
+          items: mappedItems,
+          comments: uniqueComments,
         };
       });
-      console.log("Mapped tasks:", tasksData);
+
+      console.log("Mapped tasks:", tasksData); // Line 328
       setTasks(tasksData);
     } catch (error) {
+      console.error("Raw error in fetchTasks:", error);
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching tasks:", {
         message: axiosError.message,
@@ -251,6 +299,10 @@ const TeamLeadDashboard = () => {
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch tasks"
       );
+    } finally {
+      console.log("Setting isLoading to false..."); // Line 343
+      setIsLoading(false); // Line 344
+      console.log("isLoading set to false"); // Line 345
     }
   };
 
@@ -272,28 +324,40 @@ const TeamLeadDashboard = () => {
 
   // Update assigned items when tasks change
   useEffect(() => {
-    const assignedPids: string[] = [];
-    const assignedLines: string[] = [];
-    const assignedEquipment: string[] = [];
+    const upvLines: string[] = [];
+    const upvEquipment: string[] = [];
+    const qcLines: string[] = [];
+    const qcEquipment: string[] = [];
+    const redlinePIDs: string[] = [];
 
     tasks.forEach((task) => {
       task.items.forEach((item) => {
-        if (item.type === "PID") assignedPids.push(item.id);
-        if (item.type === "Line") assignedLines.push(item.id);
-        if (item.type === "Equipment") assignedEquipment.push(item.id);
+        if (task.type === "Redline" && item.type === "PID") {
+          redlinePIDs.push(item.id);
+        } else if (task.type === "UPV") {
+          if (item.type === "Line") upvLines.push(item.id);
+          if (item.type === "Equipment") upvEquipment.push(item.id);
+        } else if (task.type === "QC") {
+          if (item.type === "Line") qcLines.push(item.id);
+          if (item.type === "Equipment") qcEquipment.push(item.id);
+        }
       });
     });
 
     setAssignedItems({
-      pids: assignedPids,
-      lines: assignedLines,
-      equipment: assignedEquipment,
+      upvLines,
+      upvEquipment,
+      qcLines,
+      qcEquipment,
+      redlinePIDs,
     });
 
     console.log("Updated assignedItems:", {
-      pids: assignedPids,
-      lines: assignedLines,
-      equipment: assignedEquipment,
+      upvLines,
+      upvEquipment,
+      qcLines,
+      qcEquipment,
+      redlinePIDs,
     });
   }, [tasks]);
 
@@ -302,8 +366,6 @@ const TeamLeadDashboard = () => {
     setTaskType(value as TaskType);
     setAssignmentType("");
     setSelectedPIDs([]);
-    setSelectedPID("");
-    setShowPIDLines(false);
     setSelectedLines([]);
     setSelectedEquipment([]);
   };
@@ -317,55 +379,40 @@ const TeamLeadDashboard = () => {
       value === ""
     ) {
       setAssignmentType(value);
-
-      // Reset selections when assignment type changes
-      if (value === "PID") {
-        setSelectedLines([]);
-        setSelectedEquipment([]);
-        setShowPIDLines(false);
-      } else if (value === "Line") {
-        setSelectedPIDs([]);
-        setSelectedEquipment([]);
-      } else if (value === "Equipment") {
-        setSelectedPIDs([]);
-        setSelectedLines([]);
-        setShowPIDLines(false);
-      }
-    }
-  };
-
-  // Handle PID selection for showing lines
-  const handlePIDSelection = (pidId: string, checked: boolean) => {
-    if (taskType === "Redline") {
-      if (checked) {
-        setSelectedPIDs([pidId]);
-        setSelectedPID(pidId);
-        setShowPIDLines(true);
-      } else {
-        setSelectedPIDs([]);
-        setSelectedPID("");
-        setShowPIDLines(false);
-      }
-    } else {
-      if (checked) {
-        setSelectedPIDs([...selectedPIDs, pidId]);
-      } else {
-        setSelectedPIDs(selectedPIDs.filter((id) => id !== pidId));
-      }
+      setSelectedPIDs([]);
+      setSelectedLines([]);
+      setSelectedEquipment([]);
     }
   };
 
   // Filter selectable items based on task type and what's already assigned
   const getSelectableItems = () => {
-    const availablePIDs = pids.filter(
-      (pid) => !assignedItems.pids.includes(pid.id)
-    );
-    const availableLines = lines.filter(
-      (line) => !assignedItems.lines.includes(line.id)
-    );
-    const availableEquipment = equipment.filter(
-      (equip) => !assignedItems.equipment.includes(equip.id)
-    );
+    let availablePIDs: PID[] = [];
+    let availableLines: Line[] = [];
+    let availableEquipment: Equipment[] = [];
+
+    if (taskType === "Redline") {
+      availablePIDs = pids.filter(
+        (pid) => !assignedItems.redlinePIDs.includes(pid.id)
+      );
+    } else if (taskType === "UPV") {
+      availableLines = lines.filter(
+        (line) => !assignedItems.upvLines.includes(line.id)
+      );
+      availableEquipment = equipment.filter(
+        (equip) => !assignedItems.upvEquipment.includes(equip.id)
+      );
+    } else if (taskType === "QC") {
+      availablePIDs = pids.filter(
+        (pid) => !assignedItems.redlinePIDs.includes(pid.id)
+      ); // PIDs can be assigned in QC even if used in Redline
+      availableLines = lines.filter(
+        (line) => !assignedItems.qcLines.includes(line.id)
+      );
+      availableEquipment = equipment.filter(
+        (equip) => !assignedItems.qcEquipment.includes(equip.id)
+      );
+    }
 
     console.log("Selectable items:", {
       availablePIDs,
@@ -373,32 +420,11 @@ const TeamLeadDashboard = () => {
       availableEquipment,
     });
 
-    switch (taskType) {
-      case "Redline":
-        return {
-          pids: availablePIDs,
-          lines: availableLines,
-          equipment: [] as Equipment[],
-        };
-      case "UPV":
-        return {
-          pids: [] as PID[],
-          lines: availableLines,
-          equipment: availableEquipment,
-        };
-      case "QC":
-        return {
-          pids: availablePIDs,
-          lines: availableLines,
-          equipment: availableEquipment,
-        };
-      default:
-        return {
-          pids: [] as PID[],
-          lines: [] as Line[],
-          equipment: [] as Equipment[],
-        };
-    }
+    return {
+      pids: availablePIDs,
+      lines: availableLines,
+      equipment: availableEquipment,
+    };
   };
 
   const {
@@ -406,19 +432,6 @@ const TeamLeadDashboard = () => {
     lines: selectableLines,
     equipment: selectableEquipment,
   } = getSelectableItems();
-
-  // Get lines for selected PID in Redline task
-  const getSelectedPIDLines = () => {
-    if (!selectedPID) return [];
-    const pidLines = lines.filter(
-      (line) =>
-        line.pidId === selectedPID && !assignedItems.lines.includes(line.id)
-    );
-    console.log("Lines for selected PID:", { selectedPID, pidLines });
-    return pidLines;
-  };
-
-  const pidLines = getSelectedPIDLines();
 
   const handleRefresh = () => {
     Promise.all([
@@ -443,7 +456,6 @@ const TeamLeadDashboard = () => {
       return;
     }
 
-    // Validate assignee is a numeric string
     const assigneeId = parseInt(assignee);
     if (isNaN(assigneeId)) {
       toast.error("Invalid assignee selected");
@@ -457,89 +469,77 @@ const TeamLeadDashboard = () => {
       itemName: string;
     }[] = [];
 
-    if (taskType === "Redline") {
+    if (taskType === "Redline" && assignmentType === "PID") {
       if (selectedPIDs.length > 0) {
         validSelection = true;
-        selectedItems = [
-          ...selectedPIDs.map((pid) => {
-            const pidObj = pids.find((p) => p.id === pid);
-            return {
-              itemId: pid,
-              itemType: "PID",
-              itemName: pidObj?.name || pid,
-            };
-          }),
-        ];
-
-        if (showPIDLines && selectedLines.length > 0) {
-          selectedItems = [
-            ...selectedItems,
-            ...selectedLines.map((line) => {
-              const lineObj = lines.find((l) => l.id === line);
-              return {
-                itemId: line,
-                itemType: "Line",
-                itemName: lineObj?.name || line,
-              };
-            }),
-          ];
-        }
+        selectedItems = selectedPIDs.map((pid) => {
+          const pidObj = pids.find((p) => p.id === pid);
+          return {
+            itemId: pid,
+            itemType: "PID",
+            itemName: pidObj?.name || pid,
+          };
+        });
       }
     } else if (taskType === "UPV") {
-      if (selectedLines.length > 0 || selectedEquipment.length > 0) {
+      if (assignmentType === "Line" && selectedLines.length > 0) {
         validSelection = true;
-        selectedItems = [
-          ...selectedLines.map((line) => {
-            const lineObj = lines.find((l) => l.id === line);
-            return {
-              itemId: line,
-              itemType: "Line",
-              itemName: lineObj?.name || line,
-            };
-          }),
-          ...selectedEquipment.map((equip) => {
-            const equipObj = equipment.find((e) => e.id === equip);
-            return {
-              itemId: equip,
-              itemType: "Equipment",
-              itemName: equipObj?.name || equip,
-            };
-          }),
-        ];
-      }
-    } else if (taskType === "QC") {
-      if (
-        selectedPIDs.length > 0 ||
-        selectedLines.length > 0 ||
+        selectedItems = selectedLines.map((line) => {
+          const lineObj = lines.find((l) => l.id === line);
+          return {
+            itemId: line,
+            itemType: "Line",
+            itemName: lineObj?.name || line,
+          };
+        });
+      } else if (
+        assignmentType === "Equipment" &&
         selectedEquipment.length > 0
       ) {
         validSelection = true;
-        selectedItems = [
-          ...selectedPIDs.map((pid) => {
-            const pidObj = pids.find((p) => p.id === pid);
-            return {
-              itemId: pid,
-              itemType: "PID",
-              itemName: pidObj?.name || pid,
-            };
-          }),
-          ...selectedLines.map((line) => {
-            const lineObj = lines.find((l) => l.id === line);
-            return {
-              itemId: line,
-              itemType: "Line",
-              itemName: lineObj?.name || line,
-            };
-          }),
-          ...selectedEquipment.map((equip) => {
-            const equipObj = equipment.find((e) => e.id === equip);
-            return {
-              itemId: equip,
-              itemType: "Equipment",
-              itemName: equipObj?.name || equip,
-            };
-          }),
-        ];
+        selectedItems = selectedEquipment.map((equip) => {
+          const equipObj = equipment.find((e) => e.id === equip);
+          return {
+            itemId: equip,
+            itemType: "Equipment",
+            itemName: equipObj?.name || equip,
+          };
+        });
+      }
+    } else if (taskType === "QC") {
+      if (assignmentType === "PID" && selectedPIDs.length > 0) {
+        validSelection = true;
+        selectedItems = selectedPIDs.map((pid) => {
+          const pidObj = pids.find((p) => p.id === pid);
+          return {
+            itemId: pid,
+            itemType: "PID",
+            itemName: pidObj?.name || pid,
+          };
+        });
+      } else if (assignmentType === "Line" && selectedLines.length > 0) {
+        validSelection = true;
+        selectedItems = selectedLines.map((line) => {
+          const lineObj = lines.find((l) => l.id === line);
+          return {
+            itemId: line,
+            itemType: "Line",
+            itemName: lineObj?.name || line,
+          };
+        });
+      } else if (
+        assignmentType === "Equipment" &&
+        selectedEquipment.length > 0
+      ) {
+        validSelection = true;
+        selectedItems = selectedEquipment.map((equip) => {
+          const equipObj = equipment.find((e) => e.id === equip);
+          return {
+            itemId: equip,
+            itemType: "Equipment",
+            itemName: equipObj?.name || equip,
+          };
+        });
       }
     }
 
@@ -562,12 +562,12 @@ const TeamLeadDashboard = () => {
 
       const newTask = {
         type: taskType,
-        assigneeId, // Use the validated assigneeId
+        assigneeId,
         isComplex,
         items: selectedItems,
       };
 
-      console.log("Sending POST request with data:", newTask); // Add logging
+      console.log("Sending POST request with data:", newTask);
 
       const response = await axios.post(
         `${API_URL}/tasks`,
@@ -576,14 +576,11 @@ const TeamLeadDashboard = () => {
       );
       console.log("Task creation response:", response.data);
 
-      // Re-fetch tasks to update the table and assigned items
       await fetchTasks();
 
       setTaskType("");
       setAssignmentType("");
       setSelectedPIDs([]);
-      setSelectedPID("");
-      setShowPIDLines(false);
       setSelectedLines([]);
       setSelectedEquipment([]);
       setAssignee("");
@@ -630,7 +627,6 @@ const TeamLeadDashboard = () => {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              {/* Task Type */}
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Task Type
@@ -647,7 +643,6 @@ const TeamLeadDashboard = () => {
                 </Select>
               </div>
 
-              {/* Assignment Type */}
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Assignment Type
@@ -670,11 +665,13 @@ const TeamLeadDashboard = () => {
                     {(taskType === "UPV" || taskType === "QC") && (
                       <SelectItem value="Equipment">Equipment</SelectItem>
                     )}
+                    {taskType === "QC" && (
+                      <SelectItem value="PID">P&ID</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Assignee */}
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Assign To
@@ -703,7 +700,6 @@ const TeamLeadDashboard = () => {
                 </Select>
               </div>
 
-              {/* Mark Complex */}
               <div className="flex items-end">
                 <div className="flex items-center space-x-2 h-10">
                   <Checkbox
@@ -721,7 +717,6 @@ const TeamLeadDashboard = () => {
                 </div>
               </div>
 
-              {/* Assign Button */}
               <div className="flex items-end">
                 <Button
                   onClick={handleAssign}
@@ -733,7 +728,6 @@ const TeamLeadDashboard = () => {
               </div>
             </div>
 
-            {/* Selection Area */}
             {taskType && assignmentType && (
               <div className="border p-4 rounded-md">
                 <h3 className="font-medium mb-3">
@@ -746,6 +740,9 @@ const TeamLeadDashboard = () => {
                 </h3>
 
                 <div className="max-h-60 overflow-y-auto space-y-2">
+                  {assignmentType === "PID" && selectablePIDs.length === 0 && (
+                    <p className="text-sm text-gray-500">No available P&IDs</p>
+                  )}
                   {assignmentType === "PID" &&
                     selectablePIDs.map((pid) => (
                       <div key={pid.id} className="flex items-center space-x-2">
@@ -753,7 +750,13 @@ const TeamLeadDashboard = () => {
                           id={pid.id}
                           checked={selectedPIDs.includes(pid.id)}
                           onCheckedChange={(checked) => {
-                            handlePIDSelection(pid.id, !!checked);
+                            if (checked) {
+                              setSelectedPIDs([...selectedPIDs, pid.id]);
+                            } else {
+                              setSelectedPIDs(
+                                selectedPIDs.filter((id) => id !== pid.id)
+                              );
+                            }
                           }}
                         />
                         <label htmlFor={pid.id} className="text-sm">
@@ -762,6 +765,12 @@ const TeamLeadDashboard = () => {
                       </div>
                     ))}
 
+                  {assignmentType === "Line" &&
+                    selectableLines.length === 0 && (
+                      <p className="text-sm text-gray-500">
+                        No available lines
+                      </p>
+                    )}
                   {assignmentType === "Line" &&
                     selectableLines.map((line) => (
                       <div
@@ -787,6 +796,12 @@ const TeamLeadDashboard = () => {
                       </div>
                     ))}
 
+                  {assignmentType === "Equipment" &&
+                    selectableEquipment.length === 0 && (
+                      <p className="text-sm text-gray-500">
+                        No available equipment
+                      </p>
+                    )}
                   {assignmentType === "Equipment" &&
                     selectableEquipment.map((equip) => (
                       <div
@@ -819,60 +834,26 @@ const TeamLeadDashboard = () => {
                 </div>
               </div>
             )}
-
-            {/* Show Lines for Selected PID in Redline task */}
-            {taskType === "Redline" && showPIDLines && (
-              <div className="border p-4 rounded-md mt-4">
-                <h3 className="font-medium mb-3">Lines in Selected P&ID</h3>
-                <div className="max-h-60 overflow-y-auto space-y-2">
-                  {pidLines.length > 0 ? (
-                    pidLines.map((line) => (
-                      <div
-                        key={line.id}
-                        className="flex items-center space-x-2"
-                      >
-                        <Checkbox
-                          id={`line-${line.id}`}
-                          checked={selectedLines.includes(line.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedLines([...selectedLines, line.id]);
-                            } else {
-                              setSelectedLines(
-                                selectedLines.filter((id) => id !== line.id)
-                              );
-                            }
-                          }}
-                        />
-                        <label htmlFor={`line-${line.id}`} className="text-sm">
-                          {line.name}
-                        </label>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-500">
-                      No available lines found for this P&ID
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
-
-        {/* Task Table */}
         <Card>
           <CardHeader>
             <CardTitle>Team Tasks</CardTitle>
           </CardHeader>
           <CardContent>
-            <TaskTable
-              tasks={tasks}
-              teamMembers={teamMembers.map((member) => member.name)}
-              showFilters={true}
-              showProgress={true}
-              showCurrentWork={true}
-            />
+            {isLoading ? (
+              <p className="text-gray-500">Loading tasks...</p>
+            ) : tasks.length === 0 ? (
+              <p className="text-gray-500">No tasks available.</p>
+            ) : (
+              <TaskTable
+                tasks={tasks}
+                teamMembers={teamMembers.map((member) => member.name)}
+                showFilters={true}
+                showProgress={true}
+                showCurrentWork={true}
+              />
+            )}
           </CardContent>
         </Card>
       </div>

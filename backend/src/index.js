@@ -28,10 +28,13 @@ app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/projects", require("./routes/projects.routes"));
 app.use("/api/tasks", require("./routes/tasks.routes"));
 app.use("/api/users", require("./routes/users.routes"));
+app.use("/api/teams", require("./routes/teams.routes")); // Add this
 app.use("/api/audit-logs", require("./routes/auditLogs.routes"));
 app.use("/api/areas", require("./routes/areas.routes"));
 app.use("/api/pids", require("./routes/pids.routes"));
 app.use("/api/lines", require("./routes/lines.routes"));
+app.use("/api/project-stats", require("./routes/projectStats.routes")); // Add this
+app.use("/api/task-status", require("./routes/taskStatus.routes")); // Add this
 if (equipmentRoutes) {
   app.use("/api/equipment", equipmentRoutes);
   console.log("Mounted /api/equipment route");
@@ -40,9 +43,9 @@ if (equipmentRoutes) {
 }
 
 console.log("Routes loaded:", {
-
   equipment: !!equipmentRoutes,
 });
+
 // Health check route
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Server is running" });

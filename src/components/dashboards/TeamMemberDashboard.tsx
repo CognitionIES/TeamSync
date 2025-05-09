@@ -14,16 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Task, TaskItem, TaskComment, TaskType, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import TaskComments from "../shared/TaskComments";
 import TaskTypeIndicator from "../shared/TaskTypeIndicator";
 import { InfoIcon } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -40,7 +33,6 @@ const RedlineTaskCard = ({
   task,
   onStatusChange,
   onItemToggle,
-  onLineToggle,
   onOpenComments,
 }: {
   task: Task;
@@ -48,11 +40,6 @@ const RedlineTaskCard = ({
   onItemToggle?: (
     taskId: string,
     itemId: string,
-    isCompleted: boolean
-  ) => Promise<void>;
-  onLineToggle?: (
-    taskId: string,
-    lineId: string,
     isCompleted: boolean
   ) => Promise<void>;
   onOpenComments?: (task: Task) => void;
@@ -78,16 +65,11 @@ const RedlineTaskCard = ({
 
             const linesData = response.data.data
               .filter((line) => line.pid_id.toString() === pidItem.id)
-              .map((line) => {
-                const lineInItems = task.items.find(
-                  (item) => item.id === line.id.toString()
-                );
-                return {
-                  id: line.id.toString(),
-                  name: line.line_number,
-                  completed: lineInItems?.completed || false,
-                };
-              });
+              .map((line) => ({
+                id: line.id.toString(),
+                name: line.line_number,
+                completed: false, // Not tracking completion since we're not showing checkboxes
+              }));
 
             setPidLines(linesData);
           } catch (error) {
@@ -104,35 +86,11 @@ const RedlineTaskCard = ({
     fetchLines();
   }, [task]);
 
-  const handleLineToggle = (lineId: string, checked: boolean) => {
-    if (task.status !== "In Progress" && checked) {
-      toast.error("You must start the task before marking lines as completed");
-      return;
-    }
-
-    const lineCompleted =
-      pidLines.find((line) => line.id === lineId)?.completed || false;
-    if (!checked && lineCompleted) {
-      toast.error("Lines cannot be unchecked once completed");
-      return;
-    }
-
-    if (onLineToggle) {
-      onLineToggle(task.id, lineId, checked)
-        .then(() => {
-          setPidLines((prevLines) =>
-            prevLines.map((line) =>
-              line.id === lineId ? { ...line, completed: checked } : line
-            )
-          );
-        })
-        .catch((error) => {
-          console.error("Error toggling line:", error);
-        });
-    }
-  };
-
   const pidItem = task.items.find((item) => item.type === "PID");
+  if (pidItem && !pidItem.id) {
+    console.warn("Invalid PID item in task:", task, pidItem);
+    return;
+  }
   const pidCount = pidItem ? 1 : 0;
   const lineCount = pidLines.length;
 
@@ -188,47 +146,15 @@ const RedlineTaskCard = ({
           </div>
         </div>
 
-        <h4 className="text-sm font-medium mb-2">Lines to Review:</h4>
+        <h4 className="text-sm font-medium mb-2">Lines in P&ID:</h4>
         <div className="space-y-2 max-h-60 overflow-y-auto">
           {pidLines.length > 0 ? (
-            pidLines.map((line) => (
-              <div key={line.id} className="flex items-center space-x-2">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center space-x-2 flex-grow">
-                        <Checkbox
-                          id={`line-${line.id}`}
-                          checked={line.completed}
-                          disabled={
-                            task.status === "Completed" ||
-                            (task.status !== "In Progress" &&
-                              !line.completed) ||
-                            line.completed
-                          }
-                          onCheckedChange={(checked) =>
-                            handleLineToggle(line.id, !!checked)
-                          }
-                        />
-                        <label htmlFor={`line-${line.id}`} className="text-sm">
-                          {line.name}
-                        </label>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {task.status !== "In Progress" && !line.completed
-                        ? "Start task to enable this checkbox"
-                        : line.completed
-                        ? "This item cannot be unchecked"
-                        : "Mark as completed"}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            ))
+            <p className="text-sm text-gray-600">
+              This P&ID contains {pidLines.length} lines.
+            </p>
           ) : (
             <p className="text-sm text-gray-500">
-              No lines found for this P&ID
+              No lines found for this P&ID.
             </p>
           )}
         </div>
@@ -262,7 +188,6 @@ const RedlineTaskCard = ({
                 <Button
                   size="sm"
                   onClick={() => onStatusChange?.(task.id, "Completed")}
-                  disabled={pidLines.some((line) => !line.completed)}
                   className="bg-green-500 text-white hover:bg-green-600"
                 >
                   Complete Task
@@ -324,52 +249,89 @@ const TeamMemberDashboard = () => {
   // Fetch tasks assigned to the team member
   const fetchTasks = async () => {
     try {
-      setIsLoading(true);
+      console.log("Starting fetchTasks...");
+      console.log("Setting isLoading to true...");
+      setIsLoading(true); // Line 214
+      console.log("isLoading set to true");
+
+      console.log("Making API request to /api/tasks...");
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
       console.log("Fetch tasks response:", response.data);
-      const tasksData = response.data.data.map((task) => ({
-        id: task.id.toString(),
-        type: task.type as TaskType,
-        assignee: task.assignee || "Unknown",
-        assigneeId: task.assignee_id.toString(),
-        status: task.status,
-        isComplex: task.is_complex,
-        createdAt: task.created_at,
-        updatedAt: task.updated_at,
-        completedAt: task.completed_at,
-        progress: task.progress,
-        items: task.items.map((item: any) => ({
-          id: item.id.toString(),
-          name: item.item_name,
-          type: item.item_type as "PID" | "Line" | "Equipment",
-          completed: item.completed,
-        })),
-        comments:
-          // Deduplicate comments by id to prevent duplicate keys
-          Array.from(
-            new Map(
-              task.comments.map((comment: any) => [
-                comment.id,
-                {
-                  id: comment.id.toString(),
-                  userId: comment.user_id.toString(),
-                  userName: comment.user_name,
-                  userRole: comment.user_role,
-                  comment: comment.comment,
-                  createdAt: comment.created_at,
-                },
-              ])
-            ).values()
-          ) || [],
-      }));
+
+      const tasksData = response.data.data.map((task, taskIndex) => {
+        console.log("Mapping task:", task);
+        const commentMap = new Map<string, TaskComment>();
+        (task.comments || []).forEach((comment: any, commentIndex: number) => {
+          if (
+            !comment ||
+            !comment.id ||
+            !comment.user_id ||
+            !comment.created_at
+          ) {
+            console.warn(
+              `Invalid comment at task index ${taskIndex}, comment index ${commentIndex}:`,
+              comment
+            );
+            return;
+          }
+          const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
+          if (!commentMap.has(key)) {
+            commentMap.set(key, {
+              id: comment.id.toString(),
+              userId: comment.user_id.toString(),
+              userName: comment.user_name || "Unknown",
+              userRole: comment.user_role || "Unknown",
+              comment: comment.comment || "",
+              createdAt: comment.created_at,
+            });
+          }
+        });
+        const uniqueComments = Array.from(commentMap.values());
+
+        const mappedItems = (task.items || [])
+          .map((item: any, itemIndex: number) => {
+            if (!item || !item.id) {
+              console.warn(
+                `Invalid item at task index ${taskIndex}, item index ${itemIndex}:`,
+                item
+              );
+              return null;
+            }
+            return {
+              id: item.id.toString(),
+              name: item.name || "Unnamed Item",
+              type: item.item_type || "Unknown",
+              completed: item.completed || false,
+            };
+          })
+          .filter((item): item is TaskItem => item !== null);
+
+        return {
+          id: task.id.toString(),
+          type: task.type as TaskType,
+          assignee: task.assignee || "Unknown",
+          assigneeId: task.assignee_id.toString(),
+          status: task.status || "Assigned",
+          isComplex: task.is_complex || false,
+          createdAt: task.created_at || new Date().toISOString(),
+          updatedAt: task.updated_at || new Date().toISOString(),
+          completedAt: task.completed_at || null,
+          progress: task.progress || 0,
+          items: mappedItems,
+          comments: uniqueComments,
+        };
+      });
+
       console.log("Mapped tasks:", tasksData);
       setTasks(tasksData);
     } catch (error) {
+      console.error("Raw error in fetchTasks:", error); // Line 284
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching tasks:", {
+        // Line 286
         message: axiosError.message,
         status: axiosError.response?.status,
         data: axiosError.response?.data,
@@ -378,7 +340,9 @@ const TeamMemberDashboard = () => {
         axiosError.response?.data?.message || "Failed to fetch tasks"
       );
     } finally {
+      console.log("Setting isLoading to false..."); // Line 295
       setIsLoading(false);
+      console.log("isLoading set to false");
     }
   };
 
@@ -387,7 +351,7 @@ const TeamMemberDashboard = () => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
       fetchTasks();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user, token]);
 
   const handleRefresh = () => {
@@ -455,66 +419,6 @@ const TeamMemberDashboard = () => {
       console.error("Error updating item status:", axiosError);
       toast.error(
         axiosError.response?.data?.message || "Failed to update item status"
-      );
-      throw error;
-    }
-  };
-
-  const handleLineToggle = async (
-    taskId: string,
-    lineId: string,
-    isCompleted: boolean
-  ) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (task && task.status !== "In Progress" && isCompleted) {
-      toast.error("You must start the task before marking lines as completed");
-      return Promise.reject("Task not started");
-    }
-
-    const lineItem = task?.items.find((item) => item.id === lineId);
-    if (lineItem?.completed && !isCompleted) {
-      toast.error("Lines cannot be unchecked once completed");
-      return Promise.reject("Line cannot be unchecked");
-    }
-
-    try {
-      const authHeaders = getAuthHeaders();
-      const lineExists = task?.items.some((item) => item.id === lineId);
-      if (lineExists) {
-        await axios.patch(
-          `${API_URL}/tasks/${taskId}/items/${lineId}`,
-          { completed: isCompleted },
-          authHeaders
-        );
-      } else {
-        const lineResponse = await axios.get<{
-          data: { id: number; line_number: string; pid_id: number }[];
-        }>(`${API_URL}/lines`, authHeaders);
-        const lineInfo = lineResponse.data.data.find(
-          (line) => line.id.toString() === lineId
-        );
-        if (lineInfo) {
-          await axios.post(
-            `${API_URL}/tasks/${taskId}/items`,
-            {
-              itemId: lineId,
-              itemType: "Line",
-              itemName: lineInfo.line_number,
-              completed: isCompleted,
-            },
-            authHeaders
-          );
-        }
-      }
-      await fetchTasks();
-      if (isCompleted) {
-        toast.success("Line marked as completed");
-      }
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error updating line status:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to update line status"
       );
       throw error;
     }
@@ -614,7 +518,6 @@ const TeamMemberDashboard = () => {
                     task={task}
                     onStatusChange={handleStatusChange}
                     onItemToggle={handleItemToggle}
-                    onLineToggle={handleLineToggle}
                     onOpenComments={handleOpenComments}
                   />
                 ))
@@ -635,7 +538,6 @@ const TeamMemberDashboard = () => {
                     task={task}
                     onStatusChange={handleStatusChange}
                     onItemToggle={handleItemToggle}
-                    onLineToggle={handleLineToggle}
                     onOpenComments={handleOpenComments}
                   />
                 ))
@@ -682,7 +584,6 @@ const TeamMemberDashboard = () => {
                     task={task}
                     onStatusChange={handleStatusChange}
                     onItemToggle={handleItemToggle}
-                    onLineToggle={handleLineToggle}
                     onOpenComments={handleOpenComments}
                   />
                 ))
@@ -709,7 +610,6 @@ const TeamMemberDashboard = () => {
                     task={task}
                     onStatusChange={handleStatusChange}
                     onItemToggle={handleItemToggle}
-                    onLineToggle={handleLineToggle}
                     onOpenComments={handleOpenComments}
                   />
                 ))

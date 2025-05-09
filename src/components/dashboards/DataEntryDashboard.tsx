@@ -84,7 +84,6 @@ const DataEntryDashboard = () => {
       navigate("/login", { replace: true });
     }
   }, [isAuthenticated, navigate]);
-
   const fetchProjects = async () => {
     setIsLoadingProjects(true);
     try {
@@ -98,12 +97,25 @@ const DataEntryDashboard = () => {
         throw new Error("Unexpected response format from projects API");
       }
 
-      setProjects(
-        projectData.map((project: any) => ({
+      // Validate that each project has id and name
+      const validatedProjects = projectData
+        .filter(
+          (project) =>
+            project &&
+            typeof project === "object" &&
+            "id" in project &&
+            "name" in project
+        )
+        .map((project: any) => ({
           id: project.id.toString(),
           name: project.name,
-        }))
-      );
+        }));
+
+      if (validatedProjects.length === 0 && projectData.length > 0) {
+        console.warn("No valid projects found in response:", projectData);
+      }
+
+      setProjects(validatedProjects);
     } catch (error: any) {
       console.error("Error fetching projects:", error);
       const errorMessage =
@@ -114,7 +126,6 @@ const DataEntryDashboard = () => {
       setIsLoadingProjects(false);
     }
   };
-
   const fetchAreas = async () => {
     try {
       const response = await axios.get(

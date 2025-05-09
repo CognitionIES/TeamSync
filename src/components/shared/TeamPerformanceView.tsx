@@ -26,14 +26,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
-
-interface TeamMember {
-  id: string;
-  name: string;
-  role?: string;
-  team?: string;
-}
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  LabelList,
+} from "recharts";
 
 interface TeamLead {
   name: string;
@@ -58,7 +61,9 @@ interface TeamPerformanceData {
 const formatMinutes = (minutes: number): string => {
   const hours = Math.floor(minutes / 60);
   const mins = Math.round(minutes % 60);
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+  return `${hours.toString().padStart(2, "0")}:${mins
+    .toString()
+    .padStart(2, "0")}`;
 };
 
 // Calculate time difference between two dates in minutes
@@ -68,7 +73,10 @@ const getTimeDifferenceInMinutes = (startDate: string, endDate: string): number 
   return Math.round((end - start) / (1000 * 60));
 };
 
-const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads }) => {
+const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({
+  tasks,
+  teamLeads,
+}) => {
   const [timeFilter, setTimeFilter] = useState<string>("all");
   const [isExporting, setIsExporting] = useState(false);
 
@@ -80,9 +88,9 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
 
     switch (timeFilter) {
       case "week":
-        return tasks.filter(task => new Date(task.createdAt) >= weekAgo);
+        return tasks.filter((task) => new Date(task.createdAt) >= weekAgo);
       case "month":
-        return tasks.filter(task => new Date(task.createdAt) >= monthAgo);
+        return tasks.filter((task) => new Date(task.createdAt) >= monthAgo);
       case "all":
       default:
         return tasks;
@@ -94,32 +102,40 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
   // Calculate team performance metrics
   const calculateTeamPerformance = (): TeamPerformanceData[] => {
     const teamPerformance: { [team: string]: TeamPerformanceData } = {};
-    
-    // Initialize team data
-    teamLeads.forEach(lead => {
+
+    // Initialize team data for team leads
+    teamLeads.forEach((lead) => {
       teamPerformance[lead.name] = {
         team: lead.name,
         assigned: 0,
         inProgress: 0,
         completed: 0,
         avgCompletionTime: 0,
-        totalTimeSpentMinutes: 0
+        totalTimeSpentMinutes: 0,
       };
     });
-    
+
+    // Initialize a "Miscellaneous" category for users not in teams
+    teamPerformance["Miscellaneous"] = {
+      team: "Miscellaneous",
+      assigned: 0,
+      inProgress: 0,
+      completed: 0,
+      avgCompletionTime: 0,
+      totalTimeSpentMinutes: 0,
+    };
+
     // Calculate completed counts and completion times
-    filteredTasks.forEach(task => {
+    filteredTasks.forEach((task) => {
       // Find which team this task belongs to
-      let taskTeam = "";
+      let taskTeam = "Miscellaneous"; // Default to Miscellaneous
       for (const lead of teamLeads) {
         if (lead.team.includes(task.assignee)) {
           taskTeam = lead.name;
           break;
         }
       }
-      
-      if (!taskTeam) return; // Skip if task doesn't belong to a team
-      
+
       // Increment task count by status
       if (task.status === "Assigned") {
         teamPerformance[taskTeam].assigned++;
@@ -127,58 +143,77 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
         teamPerformance[taskTeam].inProgress++;
       } else if (task.status === "Completed" && task.completedAt) {
         teamPerformance[taskTeam].completed++;
-        
+
         // Calculate completion time
-        const completionTime = getTimeDifferenceInMinutes(task.createdAt, task.completedAt);
+        const completionTime = getTimeDifferenceInMinutes(
+          task.createdAt,
+          task.completedAt
+        );
         teamPerformance[taskTeam].totalTimeSpentMinutes += completionTime;
       }
     });
-    
+
     // Calculate average completion time
-    Object.keys(teamPerformance).forEach(team => {
+    Object.keys(teamPerformance).forEach((team) => {
       if (teamPerformance[team].completed > 0) {
         teamPerformance[team].avgCompletionTime = Math.round(
-          teamPerformance[team].totalTimeSpentMinutes / teamPerformance[team].completed
+          teamPerformance[team].totalTimeSpentMinutes /
+            teamPerformance[team].completed
         );
       }
     });
-    
-    return Object.values(teamPerformance);
+
+    // Filter out "Miscellaneous" if it has no tasks
+    const result = Object.values(teamPerformance).filter(
+      (team) => team.assigned + team.inProgress + team.completed > 0
+    );
+
+    return result;
   };
 
   const teamPerformance = calculateTeamPerformance();
 
   const handleExport = () => {
     setIsExporting(true);
-    
+
     try {
       // Format data for CSV
-      const headers = ["Team", "Assigned Tasks", "In Progress Tasks", "Completed Tasks", "Total Time Spent", "Avg Completion Time"];
-      const rows = teamPerformance.map(team => [
+      const headers = [
+        "Team",
+        "Assigned Tasks",
+        "In Progress Tasks",
+        "Completed Tasks",
+        "Total Time Spent",
+        "Avg Completion Time",
+      ];
+      const rows = teamPerformance.map((team) => [
         team.team,
         team.assigned,
         team.inProgress,
         team.completed,
         formatMinutes(team.totalTimeSpentMinutes),
-        formatMinutes(team.avgCompletionTime)
+        formatMinutes(team.avgCompletionTime),
       ]);
-      
-      const csvContent = [
-        headers.join(','),
-        ...rows.map(row => row.join(','))
-      ].join('\n');
-      
+
+      const csvContent = [headers.join(","), ...rows.map((row) => row.join(","))].join(
+        "\n"
+      );
+
       // Create download link
-      const encodedUri = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
+      const encodedUri =
+        "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `team_performance_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute(
+        "download",
+        `team_performance_${new Date().toISOString().split("T")[0]}.csv`
+      );
       document.body.appendChild(link);
-      
+
       // Trigger download
       link.click();
       document.body.removeChild(link);
-      
+
       toast.success("Team performance data exported successfully");
     } catch (error) {
       toast.error("Failed to export data");
@@ -189,12 +224,12 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
   };
 
   // Prepare chart data
-  const chartData = teamPerformance.map(team => ({
+  const chartData = teamPerformance.map((team) => ({
     name: team.team,
     assigned: team.assigned,
     inProgress: team.inProgress,
     completed: team.completed,
-    avgTime: team.avgCompletionTime / 60 // Convert to hours for better visualization
+    avgTime: team.avgCompletionTime / 60, // Convert to hours for better visualization
   }));
 
   return (
@@ -204,7 +239,7 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
           <h2 className="text-2xl font-bold">Team Performance</h2>
           <p className="text-gray-500">Performance metrics across teams</p>
         </div>
-        
+
         <div className="flex flex-wrap gap-2">
           <div>
             <Select value={timeFilter} onValueChange={setTimeFilter}>
@@ -219,7 +254,7 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
               </SelectContent>
             </Select>
           </div>
-          
+
           <Button
             variant="outline"
             size="sm"
@@ -232,125 +267,175 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({ tasks, teamLeads 
           </Button>
         </div>
       </div>
-      
-      {/* Task Count by Team */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Task Distribution</CardTitle>
-          <CardDescription>Number of assigned, in progress, and completed tasks per team</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{
-                  top: 20,
-                  right: 30,
-                  left: 20,
-                  bottom: 30,
-                }}
+
+      {teamPerformance.length === 0 ? (
+        <Card>
+          <CardContent className="text-center py-10 text-gray-500">
+            <p>No team performance data available.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Task Count by Team */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Task Distribution</CardTitle>
+              <CardDescription>
+                Number of assigned, in progress, and completed tasks per team
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    margin={{
+                      top: 20,
+                      right: 30,
+                      left: 20,
+                      bottom: 30,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip formatter={(value) => [value, "Tasks"]} />
+                    <Legend />
+                    <Bar
+                      dataKey="assigned"
+                      name="Assigned"
+                      fill="#3b82f6"
+                      stackId="a"
+                    >
+                      <LabelList dataKey="assigned" position="top" />
+                    </Bar>
+                    <Bar
+                      dataKey="inProgress"
+                      name="In Progress"
+                      fill="#f97316"
+                      stackId="a"
+                    >
+                      <LabelList dataKey="inProgress" position="top" />
+                    </Bar>
+                    <Bar
+                      dataKey="completed"
+                      name="Completed"
+                      fill="#16a34a"
+                      stackId="a"
+                    >
+                      <LabelList dataKey="completed" position="top" />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Average Completion Time */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Team Time Metrics</CardTitle>
+              <CardDescription>
+                Average task completion time in hours
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    margin={{
+                      top: 20,
+                      right: 30,
+                      left: 20,
+                      bottom: 30,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip
+                      formatter={(value) => [
+                        `${
+                          typeof value === "number" ? value.toFixed(2) : value
+                        } hrs`,
+                        "Avg Time",
+                      ]}
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="avgTime"
+                      name="Avg Completion Time (hours)"
+                      fill="#8b5cf6"
+                    >
+                      <LabelList
+                        dataKey="avgTime"
+                        position="top"
+                        formatter={(value: number) => value.toFixed(1)}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Detailed Metrics Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Detailed Team Metrics</CardTitle>
+              <CardDescription>
+                Complete breakdown of team performance
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Team</TableHead>
+                    <TableHead>Assigned</TableHead>
+                    <TableHead>In Progress</TableHead>
+                    <TableHead>Completed</TableHead>
+                    <TableHead>Total Tasks</TableHead>
+                    <TableHead>Total Time Spent</TableHead>
+                    <TableHead>Avg Completion Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {teamPerformance.map((team, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{team.team}</TableCell>
+                      <TableCell>{team.assigned}</TableCell>
+                      <TableCell>{team.inProgress}</TableCell>
+                      <TableCell>{team.completed}</TableCell>
+                      <TableCell>
+                        {team.assigned + team.inProgress + team.completed}
+                      </TableCell>
+                      <TableCell>{formatMinutes(team.totalTimeSpentMinutes)}</TableCell>
+                      <TableCell>
+                        {team.completed > 0
+                          ? formatMinutes(team.avgCompletionTime)
+                          : "N/A"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+            <CardFooter className="border-t px-6 py-4">
+              <Button
+                variant="outline"
+                className="ml-auto flex items-center gap-2"
+                onClick={handleExport}
+                disabled={isExporting}
               >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip formatter={(value) => [value, 'Tasks']} />
-                <Legend />
-                <Bar dataKey="assigned" name="Assigned" fill="#3b82f6" stackId="a">
-                  <LabelList dataKey="assigned" position="top" />
-                </Bar>
-                <Bar dataKey="inProgress" name="In Progress" fill="#f97316" stackId="a">
-                  <LabelList dataKey="inProgress" position="top" />
-                </Bar>
-                <Bar dataKey="completed" name="Completed" fill="#16a34a" stackId="a">
-                  <LabelList dataKey="completed" position="top" />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-      
-      {/* Average Completion Time */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Team Time Metrics</CardTitle>
-          <CardDescription>Average task completion time in hours</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{
-                  top: 20,
-                  right: 30,
-                  left: 20,
-                  bottom: 30,
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip formatter={(value) => [`${typeof value === 'number' ? value.toFixed(2) : value} hrs`, 'Avg Time']} />
-                <Legend />
-                <Bar dataKey="avgTime" name="Avg Completion Time (hours)" fill="#8b5cf6">
-                  <LabelList dataKey="avgTime" position="top" formatter={(value: number) => value.toFixed(1)} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
-      
-      {/* Detailed Metrics Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Detailed Team Metrics</CardTitle>
-          <CardDescription>Complete breakdown of team performance</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Team</TableHead>
-                <TableHead>Assigned</TableHead>
-                <TableHead>In Progress</TableHead>
-                <TableHead>Completed</TableHead>
-                <TableHead>Total Tasks</TableHead>
-                <TableHead>Total Time Spent</TableHead>
-                <TableHead>Avg Completion Time</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {teamPerformance.map((team, index) => (
-                <TableRow key={index}>
-                  <TableCell className="font-medium">{team.team}</TableCell>
-                  <TableCell>{team.assigned}</TableCell>
-                  <TableCell>{team.inProgress}</TableCell>
-                  <TableCell>{team.completed}</TableCell>
-                  <TableCell>{team.assigned + team.inProgress + team.completed}</TableCell>
-                  <TableCell>{formatMinutes(team.totalTimeSpentMinutes)}</TableCell>
-                  <TableCell>
-                    {team.completed > 0 ? formatMinutes(team.avgCompletionTime) : "N/A"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-        <CardFooter className="border-t px-6 py-4">
-          <Button
-            variant="outline"
-            className="ml-auto flex items-center gap-2"
-            onClick={handleExport}
-            disabled={isExporting}
-          >
-            <Download size={16} />
-            Export Metrics
-          </Button>
-        </CardFooter>
-      </Card>
+                <Download size={16} />
+                Export Metrics
+              </Button>
+            </CardFooter>
+          </Card>
+        </>
+      )}
     </div>
   );
 };

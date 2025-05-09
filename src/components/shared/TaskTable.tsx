@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import StatusBadge from "./StatusBadge";
 import { Task, TaskStatus, TaskType } from "@/types";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Tooltip,
   TooltipProvider,
@@ -23,72 +23,17 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
-import { formatDistance } from "date-fns";
-import { ArrowUpDown, Clock } from "lucide-react";
+import { formatDistanceToNow, parseISO } from "date-fns";
+import { ArrowUpDown, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-// Interface for API response data (snake_case)
-interface ApiTask {
-  id: string;
-  type: TaskType;
-  assignee: string;
-  assignee_id: string;
-  status: TaskStatus;
-  is_complex: boolean;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  progress: number;
-  items: Array<{
-    id: string;
-    item_name: string;
-    item_type: string;
-    completed: boolean;
-  }>;
-  comments: Array<{
-    id: string;
-    user_id: string;
-    user_name: string;
-    user_role: string;
-    comment: string;
-    created_at: string;
-  }>;
-}
-
-// Transform API data to match the expected Task type (camelCase)
-const transformTask = (apiTask: ApiTask): Task => ({
-  id: apiTask.id,
-  type: apiTask.type,
-  assignee: apiTask.assignee,
-  assigneeId: apiTask.assignee_id,
-  status: apiTask.status,
-  isComplex: apiTask.is_complex,
-  createdAt: apiTask.created_at,
-  updatedAt: apiTask.updated_at,
-  completedAt: apiTask.completed_at,
-  progress: apiTask.progress,
-  items: apiTask.items.map((item) => ({
-    id: item.id,
-    name: item.item_name,
-    type: item.item_type,
-    completed: item.completed,
-  })),
-  comments: apiTask.comments.map((comment) => ({
-    id: comment.id,
-    userId: comment.user_id,
-    userName: comment.user_name,
-    userRole: comment.user_role,
-    comment: comment.comment,
-    createdAt: comment.created_at,
-  })),
-});
-
 interface TaskTableProps {
-  tasks: ApiTask[];
+  tasks: Task[];
   teamMembers?: string[];
   showFilters?: boolean;
   showProgress?: boolean;
   showCurrentWork?: boolean;
+  loading?: boolean;
 }
 
 // Helper function to truncate text
@@ -113,380 +58,561 @@ const getCurrentWork = (task: Task): string => {
   return "No active items";
 };
 
-// Convert task time to HH:MM format
-const formatTaskTime = (minutes: number): string => {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hours}:${mins.toString().padStart(2, "0")}`;
-};
-
-// Calculate estimated time based on complexity and type
-const getEstimatedTime = (task: Task): string => {
-  const baseMinutes = task.isComplex ? 120 : 60;
-  const typeMultiplier =
-    task.type === "Redline" ? 1.5 : task.type === "UPV" ? 1.2 : 1;
-  const totalMinutes = baseMinutes * typeMultiplier;
-  return formatTaskTime(Math.round(totalMinutes));
-};
-
-// Calculate actual time spent
-const getActualTime = (task: Task): string => {
-  if (task.status === "Assigned") return "0:00";
-
-  const estimatedMinutes =
-    parseInt(getEstimatedTime(task).split(":")[0]) * 60 +
-    parseInt(getEstimatedTime(task).split(":")[1]);
-
-  let actualMinutes;
-
-  if (task.status === "Completed") {
-    const randomFactor = Math.random() * 0.4 + 0.8; // 80% to 120% of estimated
-    actualMinutes = Math.round(estimatedMinutes * randomFactor);
-  } else {
-    actualMinutes = Math.round(estimatedMinutes * (task.progress / 100));
+// Format the date in GMT+5:30
+const formatDateTime = (dateStr: string | null, label: string): string => {
+  if (!dateStr) return `Not ${label}`;
+  try {
+    const date = parseISO(dateStr);
+    // Adjust for GMT+5:30 (5 hours and 30 minutes ahead of UTC)
+    const offsetMinutes = 5 * 60 + 30; // 5 hours 30 minutes in minutes
+    const adjustedDate = new Date(date.getTime() + offsetMinutes * 60 * 1000);
+    return (
+      adjustedDate.toLocaleString("en-US", {
+        timeZone: "UTC", // We manually adjusted the time, so we use UTC as the base
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }) + ""
+    );
+  } catch (error) {
+    console.error(`Invalid date format: ${dateStr}`, error);
+    return "Invalid Date";
   }
-
-  return formatTaskTime(actualMinutes);
 };
 
-const TaskTable = ({
-  tasks: apiTasks,
+// Skeleton loading component
+const TableSkeleton = () => (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead className="w-[100px]">
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+        <TableHead>
+          <div className="h-4 bg-gray-200 rounded animate-pulse" />
+        </TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {[...Array(5)].map((_, index) => (
+        <TableRow key={index}>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+          <TableCell>
+            <div className="h-4 bg-gray-200 rounded animate-pulse" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
+
+const TaskTable: React.FC<TaskTableProps> = ({
+  tasks,
   teamMembers,
-  showFilters = false,
-  showProgress = false,
-  showCurrentWork = false,
-}: TaskTableProps) => {
-  // Log the received tasks prop
-  console.log("TaskTable received tasks:", apiTasks);
-
-  // Transform API tasks to match the expected Task type
-  const tasks = apiTasks.map(transformTask);
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | "All">("All");
-  const [typeFilter, setTypeFilter] = useState<TaskType | "All">("All");
-  const [assigneeFilter, setAssigneeFilter] = useState<string | "All">("All");
-  const [sortField, setSortField] = useState<string>("updatedAt");
+  showFilters,
+  showProgress,
+  showCurrentWork,
+  loading = false,
+}) => {
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | "All">("All");
+  const [filterType, setFilterType] = useState<TaskType | "All">("All");
+  const [filterAssignee, setFilterAssignee] = useState<string | "All">("All");
+  const [sortColumn, setSortColumn] =
+    useState<keyof (typeof rows)[0]>("updated");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const tasksPerPage = 20;
 
-  // Apply filters to tasks
   const filteredTasks = tasks.filter((task) => {
-    const matchesStatus =
-      statusFilter === "All" || task.status === statusFilter;
-    const matchesType = typeFilter === "All" || task.type === typeFilter;
-    const matchesAssignee =
-      assigneeFilter === "All" || task.assignee === assigneeFilter;
-
-    return matchesStatus && matchesType && matchesAssignee;
+    const statusMatch = filterStatus === "All" || task.status === filterStatus;
+    const typeMatch = filterType === "All" || task.type === filterType;
+    const assigneeMatch =
+      filterAssignee === "All" || task.assignee === filterAssignee;
+    return statusMatch && typeMatch && assigneeMatch;
   });
 
-  // Log filtered tasks to check if filters are excluding tasks
-  console.log("Filtered tasks in TaskTable:", filteredTasks);
+  const rows = filteredTasks.map((task) => {
+    const parseSafeDate = (dateStr: string | null) => {
+      if (!dateStr) return null;
+      try {
+        return parseISO(dateStr);
+      } catch (error) {
+        console.error(`Invalid date format: ${dateStr}`, error);
+        return null;
+      }
+    };
 
-  // Sort tasks
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    let aValue, bValue;
+    const updatedAt = parseSafeDate(task.updatedAt);
+    const completedAt = parseSafeDate(task.completedAt);
 
-    switch (sortField) {
-      case "type":
-        aValue = a.type;
-        bValue = b.type;
-        break;
-      case "assignee":
-        aValue = a.assignee;
-        bValue = b.assignee;
-        break;
-      case "status":
-        aValue = a.status;
-        bValue = b.status;
-        break;
-      case "progress":
-        aValue = a.progress;
-        bValue = b.progress;
-        break;
-      case "createdAt":
-        aValue = new Date(a.createdAt).getTime();
-        bValue = new Date(b.createdAt).getTime();
-        break;
-      case "completedAt":
-        aValue = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-        bValue = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-        break;
-      default:
-        aValue = new Date(a.updatedAt).getTime();
-        bValue = new Date(b.updatedAt).getTime();
-    }
-
-    if (sortDirection === "asc") {
-      return aValue > bValue ? 1 : -1;
+    // Update the "Updated" column to show "In Progress" for in-progress tasks
+    let updated: string;
+    if (task.status === "In Progress") {
+      updated = "In Progress";
     } else {
-      return aValue < bValue ? 1 : -1;
+      updated = completedAt
+        ? `Completed ${formatDistanceToNow(completedAt, { addSuffix: true })}`
+        : updatedAt
+        ? `Updated ${formatDistanceToNow(updatedAt, { addSuffix: true })}`
+        : "Not Updated";
     }
+
+    const assignedTime = formatDateTime(task.createdAt, "Assigned");
+    const completedTime = formatDateTime(task.completedAt, "Completed");
+
+    return {
+      id: task.id,
+      type: task.type,
+      assignee: task.assignee,
+      progress: task.progress,
+      currentWork: truncateText(getCurrentWork(task), 20),
+      status: task.status,
+      assignedTime: assignedTime, // Renamed from 'time' to 'assignedTime'
+      completedTime: completedTime, // New field for completion time
+      updated: updated,
+      updatedAt: updatedAt || completedAt || new Date(0),
+    };
+  });
+
+  const sortedRows = [...rows].sort((a, b) => {
+    const aValue = a[sortColumn];
+    const bValue = b[sortColumn];
+    if (sortColumn === "updatedAt") {
+      const aDate = a.updatedAt?.getTime() || 0;
+      const bDate = b.updatedAt?.getTime() || 0;
+      return sortDirection === "asc" ? aDate - bDate : bDate - aDate;
+    }
+    if (typeof aValue === "string" && typeof bValue === "string") {
+      return sortDirection === "asc"
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue);
+    }
+    return sortDirection === "asc"
+      ? (aValue as number) - (bValue as number)
+      : (bValue as number) - (aValue as number);
   });
 
   // Pagination logic
-  const itemsPerPage = 50;
-  const paginatedTasks = sortedTasks.slice(
-    (page - 1) * itemsPerPage,
-    page * itemsPerPage
-  );
+  const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
+  const startIndex = (currentPage - 1) * tasksPerPage;
+  const endIndex = startIndex + tasksPerPage;
+  const paginatedRows = sortedRows.slice(startIndex, endIndex);
 
-  useEffect(() => {
-    setTotalPages(Math.ceil(sortedTasks.length / itemsPerPage));
-  }, [sortedTasks]);
-
-  const handleSort = (field: string) => {
-    if (sortField === field) {
+  const handleSort = (column: keyof (typeof rows)[0]) => {
+    if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
-      setSortField(field);
-      setSortDirection("desc");
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+    setCurrentPage(1); // Reset to first page on sort
+  };
+
+  const clearFilters = () => {
+    setFilterStatus("All");
+    setFilterType("All");
+    setFilterAssignee("All");
+    setCurrentPage(1); // Reset to first page on filter clear
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
     }
   };
 
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-6 bg-white rounded-lg shadow-md">
+        <TableSkeleton />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="p-6 bg-white rounded-lg shadow-md">
       {showFilters && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <div className="w-full sm:w-auto">
-            <Select
-              value={statusFilter}
-              onValueChange={(value) =>
-                setStatusFilter(value as TaskStatus | "All")
-              }
-            >
-              <SelectTrigger className="w-full sm:w-[150px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Statuses</SelectItem>
-                <SelectItem value="Assigned">Assigned</SelectItem>
-                <SelectItem value="In Progress">In Progress</SelectItem>
-                <SelectItem value="Completed">Completed</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="w-full sm:w-auto">
-            <Select
-              value={typeFilter}
-              onValueChange={(value) =>
-                setTypeFilter(value as TaskType | "All")
-              }
-            >
-              <SelectTrigger className="w-full sm:w-[150px]">
-                <SelectValue placeholder="Task Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Types</SelectItem>
-                <SelectItem value="Redline">Redline</SelectItem>
-                <SelectItem value="UPV">UPV</SelectItem>
-                <SelectItem value="QC">QC</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {teamMembers && teamMembers.length > 0 && (
-            <div className="w-full sm:w-auto">
-              <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="Team Member" />
+        <div className="mb-6">
+          <div className="flex items-end space-x-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Status
+              </label>
+              <Select
+                onValueChange={(value) => {
+                  setFilterStatus(value as TaskStatus | "All");
+                  setCurrentPage(1);
+                }}
+                value={filterStatus}
+              >
+                <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
+                  <SelectValue placeholder="Filter by Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="All">All Team Members</SelectItem>
-                  {teamMembers.map((member) => (
-                    <SelectItem key={member} value={member}>
-                      {member}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="All">All Statuses</SelectItem>
+                  <SelectItem value="Assigned">Assigned</SelectItem>
+                  <SelectItem value="In Progress">In Progress</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Task Type
+              </label>
+              <Select
+                onValueChange={(value) => {
+                  setFilterType(value as TaskType | "All");
+                  setCurrentPage(1);
+                }}
+                value={filterType}
+              >
+                <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
+                  <SelectValue placeholder="Filter by Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Types</SelectItem>
+                  <SelectItem value="Redline">Redline</SelectItem>
+                  <SelectItem value="UPV">UPV</SelectItem>
+                  <SelectItem value="QC">QC</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {teamMembers && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Assignee
+                </label>
+                <Select
+                  onValueChange={(value) => {
+                    setFilterAssignee(value);
+                    setCurrentPage(1);
+                  }}
+                  value={filterAssignee}
+                >
+                  <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
+                    <SelectValue placeholder="Filter by Assignee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All Assignees</SelectItem>
+                    {teamMembers.map((member) => (
+                      <SelectItem key={member} value={member}>
+                        {member}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              onClick={clearFilters}
+              className="ml-4 flex items-center space-x-2 text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+              aria-label="Clear all filters"
+            >
+              <RefreshCw className="h-4 w-4" />
+              <span>Clear Filters</span>
+            </Button>
+          </div>
         </div>
       )}
 
-      <div className="rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead
-                className="cursor-pointer hover:bg-muted/70 transition-colors"
-                onClick={() => handleSort("type")}
-              >
-                <div className="flex items-center">
-                  Type
-                  {sortField === "type" && (
-                    <ArrowUpDown className="ml-2 h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-              <TableHead
-                className="cursor-pointer hover:bg-muted/70 transition-colors"
-                onClick={() => handleSort("assignee")}
-              >
-                <div className="flex items-center">
-                  Assignee
-                  {sortField === "assignee" && (
-                    <ArrowUpDown className="ml-2 h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-              {showProgress && (
-                <TableHead
-                  className="cursor-pointer hover:bg-muted/70 transition-colors"
-                  onClick={() => handleSort("progress")}
-                >
-                  <div className="flex items-center">
-                    Progress
-                    {sortField === "progress" && (
-                      <ArrowUpDown className="ml-2 h-3 w-3" />
-                    )}
-                  </div>
+      {paginatedRows.length === 0 ? (
+        <div className="text-center py-10 text-gray-500">
+          <p>No tasks found.</p>
+        </div>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gray-50 border-b border-gray-200">
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("type")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Type"
+                  >
+                    <span>Type</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "type" && sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
                 </TableHead>
-              )}
-              {showCurrentWork && <TableHead>Current Work</TableHead>}
-              <TableHead
-                className="cursor-pointer hover:bg-muted/70 transition-colors"
-                onClick={() => handleSort("status")}
-              >
-                <div className="flex items-center">
-                  Status
-                  {sortField === "status" && (
-                    <ArrowUpDown className="ml-2 h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-              <TableHead>
-                <div className="flex items-center">
-                  <Clock className="mr-1 h-4 w-4" />
-                  Time (HH:MM)
-                </div>
-              </TableHead>
-              <TableHead
-                className="cursor-pointer hover:bg-muted/70 transition-colors"
-                onClick={() => handleSort("updatedAt")}
-              >
-                <div className="flex items-center">
-                  Updated
-                  {sortField === "updatedAt" && (
-                    <ArrowUpDown className="ml-2 h-3 w-3" />
-                  )}
-                </div>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paginatedTasks.length > 0 ? (
-              paginatedTasks.map((task) => (
-                <TableRow key={task.id}>
-                  <TableCell>{task.type}</TableCell>
-                  <TableCell>{task.assignee}</TableCell>
-                  {showProgress && (
-                    <TableCell>
-                      <Progress
-                        value={task.progress}
-                        className={`w-full h-2 ${
-                          task.status === "Completed"
-                            ? "bg-green-500"
-                            : task.progress > 66
-                            ? "bg-emerald-500"
-                            : task.progress > 33
-                            ? "bg-amber-500"
-                            : "bg-blue-500"
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("assignee")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Assignee"
+                  >
+                    <span>Assignee</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "assignee" && sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </TableHead>
+                {showProgress && (
+                  <TableHead>
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleSort("progress")}
+                      className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                      aria-label="Sort by Progress"
+                    >
+                      <span>Progress</span>
+                      <ArrowUpDown
+                        className={`h-4 w-4 ${
+                          sortColumn === "progress" && sortDirection === "asc"
+                            ? "rotate-180"
+                            : ""
                         }`}
                       />
-                      <span className="text-xs text-gray-500 mt-1">{task.progress}%</span>
-                    </TableCell>
-                  )}
-                  {showCurrentWork && (
-                    <TableCell>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger className="cursor-help text-left">
-                            <span className="text-sm">{truncateText(getCurrentWork(task))}</span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{getCurrentWork(task)}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </TableCell>
-                  )}
-                  <TableCell>
-                    <StatusBadge status={task.status} isComplex={task.isComplex} />
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-xs space-y-1">
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Est:</span>
-                        <span className="font-mono">{getEstimatedTime(task)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Act:</span>
-                        <span
-                          className={`font-mono ${
-                            task.status === "Completed" ? "text-green-600 font-medium" : ""
-                          }`}
-                        >
-                          {getActualTime(task)}
-                        </span>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-500">
-                    {task.status === "Completed" && task.completedAt
-                      ? `Completed ${formatDistance(
-                          new Date(task.completedAt),
-                          new Date(),
-                          { addSuffix: true }
-                        )}`
-                      : task.status === "In Progress"
-                      ? `Updated ${formatDistance(
-                          new Date(task.updatedAt),
-                          new Date(),
-                          { addSuffix: true }
-                        )}`
-                      : `Assigned ${formatDistance(
-                          new Date(task.createdAt),
-                          new Date(),
-                          { addSuffix: true }
-                        )}`}
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={showProgress ? (showCurrentWork ? 7 : 6) : (showCurrentWork ? 6 : 5)}
-                  className="h-24 text-center"
-                >
-                  No tasks found
-                </TableCell>
+                    </Button>
+                  </TableHead>
+                )}
+                {showCurrentWork && (
+                  <TableHead className="text-gray-700">Current Work</TableHead>
+                )}
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("status")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Status"
+                  >
+                    <span>Status</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "status" && sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("assignedTime")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Assigned Time"
+                  >
+                    <span>Assigned</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "assignedTime" && sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("completedTime")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Completed Time"
+                  >
+                    <span>Completed</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "completedTime" &&
+                        sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </TableHead>
+                <TableHead>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("updatedAt")}
+                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                    aria-label="Sort by Updated"
+                  >
+                    <span>Updated</span>
+                    <ArrowUpDown
+                      className={`h-4 w-4 ${
+                        sortColumn === "updatedAt" && sortDirection === "asc"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {paginatedRows.map((row, index) => (
+                <TooltipProvider key={row.id} delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TableRow
+                        className={`border-b border-gray-100 transition-colors duration-200 ${
+                          index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                        } hover:bg-blue-50 cursor-pointer`}
+                      >
+                        <TableCell className="py-4">{row.type}</TableCell>
+                        <TableCell className="py-4">{row.assignee}</TableCell>
+                        {showProgress && (
+                          <TableCell className="py-4">
+                            <div className="flex items-center space-x-2">
+                              <Progress
+                                value={row.progress}
+                                className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
+                              />
+                              <span className="text-sm text-gray-600">
+                                {row.progress}%
+                              </span>
+                            </div>
+                          </TableCell>
+                        )}
+                        {showCurrentWork && (
+                          <TableCell className="py-4">
+                            {row.currentWork}
+                          </TableCell>
+                        )}
+                        <TableCell className="py-4">
+                          <StatusBadge
+                            status={row.status}
+                            className={
+                              row.status === "Completed"
+                                ? "bg-green-100 text-green-800"
+                                : row.status === "In Progress"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : "bg-gray-100 text-gray-800"
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="py-4">
+                          <div className="flex items-center space-x-1 text-gray-600">
+                            <Clock className="h-4 w-4" />
+                            <span>{row.assignedTime}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-4">
+                          <div className="flex items-center space-x-1 text-gray-600">
+                            <Clock className="h-4 w-4" />
+                            <span>{row.completedTime}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-4">{row.updated}</TableCell>
+                      </TableRow>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-gray-800 text-white rounded-md shadow-lg p-4 max-w-xs">
+                      <div>
+                        <h4 className="font-semibold text-sm mb-2">Comments</h4>
+                        {tasks.find((task) => task.id === row.id)?.comments
+                          ?.length ? (
+                          <ul className="space-y-1">
+                            {tasks
+                              .find((task) => task.id === row.id)
+                              ?.comments?.map((comment) => (
+                                <li key={comment.id} className="text-xs">
+                                  <strong>
+                                    {comment.userName} ({comment.userRole}):
+                                  </strong>{" "}
+                                  {comment.comment}
+                                </li>
+                              ))}
+                          </ul>
+                        ) : (
+                          <p className="text-xs">No comments</p>
+                        )}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
+            </TableBody>
+          </Table>
 
-      {/* Pagination Controls */}
-      <div className="flex justify-between items-center">
-        <Button
-          disabled={page === 1}
-          onClick={() => setPage((prev) => prev - 1)}
-        >
-          Previous
-        </Button>
-        <span>
-          Page {page} of {totalPages}
-        </span>
-        <Button
-          disabled={page === totalPages}
-          onClick={() => setPage((prev) => prev + 1)}
-        >
-          Next
-        </Button>
-      </div>
+          {/* Pagination Controls */}
+          {sortedRows.length > tasksPerPage && (
+            <div className="flex justify-between items-center mt-4">
+              <Button
+                variant="outline"
+                onClick={handlePreviousPage}
+                disabled={currentPage === 1}
+                className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-gray-600">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages}
+                className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };
