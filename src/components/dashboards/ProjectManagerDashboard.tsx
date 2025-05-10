@@ -63,14 +63,35 @@ interface ApiTask {
 }
 
 // Interface for raw API team lead data
+// Interface for raw API team lead data
 interface ApiTeamLead {
-  name: string;
-  team: Array<{
+  id: string;
+  team_lead: string;
+  team_members: Array<{
     id: string;
-    name: string;
+    member_id: string;
+    member_name: string;
+  }>;
+  tasks: Array<{
+    id: string;
+    type: string;
+    assignee: string;
+    assignee_id: string;
+    status: string;
+    items: Array<{
+      id: string;
+      name: string;
+      item_type: string;
+      completed: boolean;
+    }>;
   }>;
 }
 
+// Transform API team lead data to match TeamLead type
+const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
+  name: apiTeamLead.team_lead, // Map team_lead to name
+  team: apiTeamLead.team_members.map((member) => member.member_name), // Map team_members to team, extracting member_name
+});
 // Interface for raw API user data
 interface ApiUser {
   id: string;
@@ -110,12 +131,6 @@ const transformTask = (apiTask: ApiTask): Task => ({
     comment: comment.comment,
     createdAt: comment.created_at,
   })),
-});
-
-// Transform API team lead data to match TeamLead type
-const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
-  name: apiTeamLead.name,
-  team: apiTeamLead.team.map((member) => member.name),
 });
 
 const ProjectManagerDashboard = () => {
@@ -182,8 +197,9 @@ const ProjectManagerDashboard = () => {
       }
       const transformedTasks = tasksData.data.map(transformTask);
       setTasks(transformedTasks);
-
-      // Fetch team leads (with error handling to continue on failure)
+      console.log("Transformed Tasks:", transformedTasks);
+      // Fetch team leads
+      // Fetch team leads
       let teamLeadsData = [];
       try {
         const teamsResponse = await fetch("/api/teams", {
@@ -193,7 +209,15 @@ const ProjectManagerDashboard = () => {
           },
         });
 
+        console.log("Teams Response Status:", teamsResponse.status);
+        console.log(
+          "Teams Response Headers:",
+          teamsResponse.headers.get("content-type")
+        );
+
         const teamsText = await teamsResponse.text();
+        console.log("Teams Response Body:", teamsText.substring(0, 200));
+
         if (!teamsResponse.ok) {
           let errorMessage = `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`;
           const contentType = teamsResponse.headers.get("content-type");
@@ -207,73 +231,105 @@ const ProjectManagerDashboard = () => {
             errorMessage += ` - ${teamsText.substring(0, 100)}`;
           }
           console.warn(errorMessage);
-          toast.error("Failed to fetch teams data");
+          throw new Error(errorMessage); // Throw to trigger the catch block
+        }
+
+        const teamsContentType = teamsResponse.headers.get("content-type");
+        if (
+          !teamsContentType ||
+          !teamsContentType.includes("application/json")
+        ) {
+          throw new Error(
+            `Teams API returned non-JSON response: ${teamsText.substring(
+              0,
+              100
+            )}`
+          );
+        }
+
+        let teamsData;
+        try {
+          teamsData = JSON.parse(teamsText);
+          console.log("Parsed Teams Data:", teamsData);
+        } catch (parseError) {
+          console.error("Error parsing teams response:", parseError.message);
+          throw new Error(
+            `Failed to parse Teams API response: ${teamsText.substring(0, 100)}`
+          );
+        }
+
+        if (
+          !teamsData ||
+          typeof teamsData !== "object" ||
+          !("data" in teamsData)
+        ) {
+          throw new Error("Teams API response missing or invalid 'data' field");
+        }
+
+        if (!Array.isArray(teamsData.data)) {
+          throw new Error("Teams API 'data' field is not an array");
+        }
+
+        teamLeadsData = teamsData.data.map(transformTeamLead);
+      } catch (teamError) {
+        console.error("Error fetching teams:", teamError.message);
+        toast.error("Failed to fetch teams data");
+      }
+      setTeamLeads(teamLeadsData);
+      // Fetch users
+      let usersData = [];
+      try {
+        const usersResponse = await fetch("/api/users", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        });
+
+        const usersText = await usersResponse.text();
+        if (!usersResponse.ok) {
+          let errorMessage = `Users API error: ${usersResponse.status} ${usersResponse.statusText}`;
+          const contentType = usersResponse.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = JSON.parse(usersText);
+            errorMessage += ` - ${errorData.message || "Unknown error"}`;
+            if (errorData.error) {
+              errorMessage += `: ${errorData.error}`;
+            }
+          } else {
+            errorMessage += ` - ${usersText.substring(0, 100)}`;
+          }
+          console.warn(errorMessage);
+          toast.error("Failed to fetch users data");
         } else {
-          const teamsContentType = teamsResponse.headers.get("content-type");
+          const usersContentType = usersResponse.headers.get("content-type");
           if (
-            !teamsContentType ||
-            !teamsContentType.includes("application/json")
+            !usersContentType ||
+            !usersContentType.includes("application/json")
           ) {
             throw new Error(
-              `Teams API returned non-JSON response: ${teamsText.substring(
+              `Users API returned non-JSON response: ${usersText.substring(
                 0,
                 100
               )}`
             );
           }
 
-          const teamsData = JSON.parse(teamsText);
-          if (!teamsData.data) {
-            throw new Error("Teams API response missing 'data' field");
+          const usersDataResponse = JSON.parse(usersText);
+          if (!usersDataResponse.data) {
+            throw new Error("Users API response missing 'data' field");
           }
-          teamLeadsData = teamsData.data.map(transformTeamLead);
+          usersData = usersDataResponse.data;
         }
-      } catch (teamError) {
-        console.error("Error fetching teams:", teamError.message);
-        toast.error("Failed to fetch teams data");
+      } catch (userError) {
+        console.error("Error fetching users:", userError.message);
+        toast.error("Failed to fetch users data");
       }
-      setTeamLeads(teamLeadsData);
-
-      // Fetch users
-      const usersResponse = await fetch("/api/users", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Cache-Control": "no-cache",
-        },
-      });
-
-      const usersText = await usersResponse.text();
-      if (!usersResponse.ok) {
-        let errorMessage = `Users API error: ${usersResponse.status} ${usersResponse.statusText}`;
-        const contentType = usersResponse.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = JSON.parse(usersText);
-          errorMessage += ` - ${errorData.message || "Unknown error"}`;
-          if (errorData.error) {
-            errorMessage += `: ${errorData.error}`;
-          }
-        } else {
-          errorMessage += ` - ${usersText.substring(0, 100)}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const usersContentType = usersResponse.headers.get("content-type");
-      if (!usersContentType || !usersContentType.includes("application/json")) {
-        throw new Error(
-          `Users API returned non-JSON response: ${usersText.substring(0, 100)}`
-        );
-      }
-
-      const usersData = JSON.parse(usersText);
-      if (!usersData.data) {
-        throw new Error("Users API response missing 'data' field");
-      }
-      setUsers(usersData.data);
+      setUsers(usersData);
 
       toast.success("Data refreshed");
     } catch (error) {
-      console.error("Fetch error:", error);
+      console.error("Fetch error:", error.message);
       setError(error.message || "Failed to fetch data");
       toast.error(error.message || "Failed to fetch data");
     } finally {
@@ -324,16 +380,16 @@ const ProjectManagerDashboard = () => {
   const completionRate =
     totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
 
-    const handleRefresh = () => {
-      fetchData()
-        .then(() => {
-          toast.success("Data refreshed");
-        })
-        .catch((error) => {
-          console.error("Error refreshing data:", error);
-          toast.error("Failed to refresh data");
-        });
-    };
+  const handleRefresh = () => {
+    fetchData()
+      .then(() => {
+        toast.success("Data refreshed");
+      })
+      .catch((error) => {
+        console.error("Error refreshing data:", error);
+        toast.error("Failed to refresh data");
+      });
+  };
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -553,10 +609,10 @@ const ProjectManagerDashboard = () => {
                       <p className="text-4xl font-bold text-blue-600">
                         {completionRate}%
                       </p>
-                      <p className="text-sm text-gray-500 mb-1">completion</p>
+                      <p className="text-sm text-gray-500 mb-1">Completion</p>
                     </div>
                     <p className="text-sm text-gray-500 mt-1">
-                      {completedCount} of {totalTasks} tasks completed
+                      {completedCount} of {totalTasks} Tasks Completed
                     </p>
                   </CardContent>
                 </Card>
@@ -574,7 +630,7 @@ const ProjectManagerDashboard = () => {
                     <p className="text-4xl font-bold text-indigo-600">
                       {assignedToday}
                     </p>
-                    <p className="text-sm text-gray-500 mt-1">new tasks</p>
+                    <p className="text-sm text-gray-500 mt-1">New Tasks</p>
                   </CardContent>
                 </Card>
 
@@ -592,7 +648,7 @@ const ProjectManagerDashboard = () => {
                       {startedToday}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">
-                      tasks in progress
+                      Tasks in Progress
                     </p>
                   </CardContent>
                 </Card>
@@ -610,7 +666,7 @@ const ProjectManagerDashboard = () => {
                     <p className="text-4xl font-bold text-green-600">
                       {completedToday}
                     </p>
-                    <p className="text-sm text-gray-500 mt-1">tasks finished</p>
+                    <p className="text-sm text-gray-500 mt-1">tasks Finished</p>
                   </CardContent>
                 </Card>
               </div>

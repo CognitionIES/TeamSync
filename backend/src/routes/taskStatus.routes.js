@@ -20,18 +20,15 @@ router.get("/", protect, async (req, res) => {
       const values = [];
 
       if (project && project !== "all") {
-        query += `
-          JOIN projects p ON t.project_id = p.id
-        `;
-        conditions.push(`p.name = $${values.length + 1}`);
+        conditions.push(`t.project_name = $${values.length + 1}`);
         values.push(project);
       }
       if (team && team !== "all") {
         query += `
-          JOIN users u ON t.assignee_id = u.id
-          JOIN team_members tm ON tm.member_id = u.id
+          LEFT JOIN team_members tm ON t.assignee_id = tm.member_id
+          LEFT JOIN users u ON tm.lead_id = u.id
         `;
-        conditions.push(`tm.team_name = $${values.length + 1}`);
+        conditions.push(`u.name = $${values.length + 1}`);
         values.push(team);
       }
 
@@ -65,18 +62,15 @@ router.get("/", protect, async (req, res) => {
       let query = `
         SELECT status, COUNT(*) as count
         FROM tasks t
-        JOIN users u ON t.assignee_id = u.id
-        JOIN team_members tm ON tm.member_id = u.id
-        WHERE tm.lead_id = $1
+        WHERE t.assignee_id IN (
+          SELECT member_id FROM team_members WHERE lead_id = $1
+        )
       `;
       const values = [req.user.id];
       const conditions = [];
 
       if (project && project !== "all") {
-        query += `
-          JOIN projects p ON t.project_id = p.id
-        `;
-        conditions.push(`p.name = $${values.length + 1}`);
+        conditions.push(`t.project_name = $${values.length + 1}`);
         values.push(project);
       }
 

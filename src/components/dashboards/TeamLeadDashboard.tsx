@@ -31,6 +31,11 @@ interface TeamMember {
   name: string;
 }
 
+interface Project {
+  id: string;
+  name: string;
+}
+
 interface PID {
   id: string;
   name: string;
@@ -61,10 +66,12 @@ const TeamLeadDashboard = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>("");
   const [pids, setPIDs] = useState<PID[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [isLoading, setIsLoading] = useState(false); // Ensure this is defined
+  const [isLoading, setIsLoading] = useState(false);
   // Form state
   const [taskType, setTaskType] = useState<TaskType | "">("");
   const [assignmentType, setAssignmentType] = useState<
@@ -113,8 +120,44 @@ const TeamLeadDashboard = () => {
       },
     };
   };
-  console.log("setIsLoading type:", typeof setIsLoading);
-  console.log("setIsLoading value:", setIsLoading);
+
+  // Fetch projects
+  // Fetch projects
+  const fetchProjects = async () => {
+    try {
+      const response = await axios.get<{
+        data: { id: number; name: string }[];
+      }>(`${API_URL}/projects`, getAuthHeaders());
+      const projectData = response.data.data.map((project) => ({
+        id: project.id.toString(),
+        name: project.name,
+      }));
+      setProjects(projectData);
+      if (projectData.length > 0) {
+        setSelectedProject(projectData[0].id);
+      } else {
+        toast.warning(
+          "No projects available. Please contact an Admin to be assigned to a project."
+        );
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching projects:", axiosError);
+      const errorMessage =
+        axiosError.response?.data?.message || "Failed to fetch projects";
+      toast.error(errorMessage);
+      if (axiosError.response?.status === 403) {
+        toast.error(
+          "You are not authorized to view projects. Redirecting to login..."
+        );
+        navigate("/login", { replace: true });
+      } else if (axiosError.response?.status === 500) {
+        toast.error(
+          "A server error occurred while fetching projects. Please try again later or contact support."
+        );
+      }
+    }
+  };
   // Fetch team members
   const fetchTeamMembers = async () => {
     try {
@@ -122,40 +165,36 @@ const TeamLeadDashboard = () => {
         `${API_URL}/users/team-members`,
         getAuthHeaders()
       );
-      console.log("Team members response:", response.data);
       const members = response.data.data.map((user) => ({
         id: user.id.toString(),
         name: user.name,
       }));
-      console.log("Team members:", members);
       if (members.length === 0) {
         toast.warning("No team members found. Please add team members.");
       }
       setTeamMembers(members);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching team members:", {
-        message: axiosError.message,
-        status: axiosError.response?.status,
-        data: axiosError.response?.data,
-      });
+      console.error("Error fetching team members:", axiosError);
       toast.error(
-        axiosError.response?.data?.message ||
-          "Failed to fetch team members. Please try again."
+        axiosError.response?.data?.message || "Failed to fetch team members."
       );
     }
   };
 
   // Fetch P&IDs
   const fetchPIDs = async () => {
+    if (!selectedProject) return;
     try {
       const response = await axios.get<{
-        data: { id: number; pid_number: string }[];
+        data: { id: number; pid_number: string; project_id: number }[];
       }>(`${API_URL}/pids`, getAuthHeaders());
-      const pidsData = response.data.data.map((pid) => ({
-        id: pid.id.toString(),
-        name: pid.pid_number,
-      }));
+      const pidsData = response.data.data
+        .filter((pid) => pid.project_id.toString() === selectedProject)
+        .map((pid) => ({
+          id: pid.id.toString(),
+          name: pid.pid_number,
+        }));
       setPIDs(pidsData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -166,38 +205,63 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Fetch lines
+  // Fetch unassigned lines for the selected project
+  // Fetch unassigned lines for the selected project
+  // Fetch unassigned lines for the selected project
   const fetchLines = async () => {
+    if (!selectedProject) return;
     try {
       const response = await axios.get<{
-        data: { id: number; line_number: string; pid_id: number }[];
-      }>(`${API_URL}/lines`, getAuthHeaders());
+        data: {
+          id: number;
+          line_number: string;
+          pid_id: number;
+          pid_number: string;
+        }[];
+      }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders()); // Line 213
       const linesData = response.data.data.map((line) => ({
         id: line.id.toString(),
         name: line.line_number,
         pidId: line.pid_id.toString(),
       }));
       setLines(linesData);
+      if (linesData.length === 0) {
+        toast.info("No unassigned lines available for this project.");
+      }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching lines:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to fetch lines"
-      );
+      console.error("Error fetching unassigned lines:", axiosError); // Line 232
+      const errorMessage =
+        axiosError.response?.data?.message ||
+        "Failed to fetch unassigned lines";
+      toast.error(errorMessage);
+      if (axiosError.response?.status === 500) {
+        toast.error(
+          "A server error occurred while fetching unassigned lines. Please try again later or contact support."
+        );
+      }
     }
   };
 
   // Fetch equipment
   const fetchEquipment = async () => {
+    if (!selectedProject) return;
     try {
       const response = await axios.get<{
-        data: { id: number; equipment_number: string; area_id?: number }[];
+        data: {
+          id: number;
+          equipment_number: string;
+          area_id?: number;
+          project_id: number;
+        }[];
       }>(`${API_URL}/equipment`, getAuthHeaders());
-      const equipmentData = response.data.data.map((equip) => ({
-        id: equip.id.toString(),
-        name: equip.equipment_number,
-        areaId: equip.area_id?.toString() || "",
-      }));
+      const equipmentData = response.data.data
+        .filter((equip) => equip.project_id.toString() === selectedProject)
+        .map((equip) => ({
+          id: equip.id.toString(),
+          name: equip.equipment_number,
+          areaId: equip.area_id?.toString() || "",
+        }));
       setEquipment(equipmentData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -210,20 +274,12 @@ const TeamLeadDashboard = () => {
 
   const fetchTasks = async () => {
     try {
-      console.log("Starting fetchTasks..."); // Line 252
-      console.log("Setting isLoading to true..."); // Line 253
-      setIsLoading(true); // Line 254
-      console.log("isLoading set to true"); // Line 255
-
-      console.log("Making API request to /api/tasks..."); // Line 257
+      setIsLoading(true);
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
-      console.log("Fetch tasks response:", response.data); // Line 262
-
       const tasksData = response.data.data.map((task, taskIndex) => {
-        console.log("Mapping task:", task);
         const commentMap = new Map<string, TaskComment>();
         (task.comments || []).forEach((comment: any, commentIndex: number) => {
           if (
@@ -286,29 +342,28 @@ const TeamLeadDashboard = () => {
         };
       });
 
-      console.log("Mapped tasks:", tasksData); // Line 328
       setTasks(tasksData);
     } catch (error) {
-      console.error("Raw error in fetchTasks:", error);
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching tasks:", {
-        message: axiosError.message,
-        status: axiosError.response?.status,
-        data: axiosError.response?.data,
-      });
+      console.error("Error fetching tasks:", axiosError);
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch tasks"
       );
     } finally {
-      console.log("Setting isLoading to false..."); // Line 343
-      setIsLoading(false); // Line 344
-      console.log("isLoading set to false"); // Line 345
+      setIsLoading(false);
     }
   };
 
   // Fetch all data on mount
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
+      fetchProjects();
+    }
+  }, [isAuthenticated, user, token]);
+
+  // Fetch project-specific data when selectedProject changes
+  useEffect(() => {
+    if (selectedProject) {
       Promise.all([
         fetchTeamMembers(),
         fetchPIDs(),
@@ -320,7 +375,7 @@ const TeamLeadDashboard = () => {
         toast.error("Failed to load dashboard data");
       });
     }
-  }, [isAuthenticated, user, token]);
+  }, [selectedProject]);
 
   // Update assigned items when tasks change
   useEffect(() => {
@@ -345,14 +400,6 @@ const TeamLeadDashboard = () => {
     });
 
     setAssignedItems({
-      upvLines,
-      upvEquipment,
-      qcLines,
-      qcEquipment,
-      redlinePIDs,
-    });
-
-    console.log("Updated assignedItems:", {
       upvLines,
       upvEquipment,
       qcLines,
@@ -385,7 +432,7 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Filter selectable items based on task type and what's already assigned
+  // Filter selectable items based on task type
   const getSelectableItems = () => {
     let availablePIDs: PID[] = [];
     let availableLines: Line[] = [];
@@ -396,29 +443,19 @@ const TeamLeadDashboard = () => {
         (pid) => !assignedItems.redlinePIDs.includes(pid.id)
       );
     } else if (taskType === "UPV") {
-      availableLines = lines.filter(
-        (line) => !assignedItems.upvLines.includes(line.id)
-      );
+      availableLines = lines; // Already filtered by the backend to be unassigned
       availableEquipment = equipment.filter(
         (equip) => !assignedItems.upvEquipment.includes(equip.id)
       );
     } else if (taskType === "QC") {
       availablePIDs = pids.filter(
         (pid) => !assignedItems.redlinePIDs.includes(pid.id)
-      ); // PIDs can be assigned in QC even if used in Redline
-      availableLines = lines.filter(
-        (line) => !assignedItems.qcLines.includes(line.id)
       );
+      availableLines = lines; // Already filtered by the backend to be unassigned
       availableEquipment = equipment.filter(
         (equip) => !assignedItems.qcEquipment.includes(equip.id)
       );
     }
-
-    console.log("Selectable items:", {
-      availablePIDs,
-      availableLines,
-      availableEquipment,
-    });
 
     return {
       pids: availablePIDs,
@@ -434,6 +471,10 @@ const TeamLeadDashboard = () => {
   } = getSelectableItems();
 
   const handleRefresh = () => {
+    if (!selectedProject) {
+      toast.error("Please select a project first.");
+      return;
+    }
     Promise.all([
       fetchTeamMembers(),
       fetchPIDs(),
@@ -451,14 +492,20 @@ const TeamLeadDashboard = () => {
   };
 
   const handleAssign = async () => {
-    if (!taskType || !assignee) {
-      toast.error("Please select task type and assignee");
+    if (!taskType || !assignee || !selectedProject) {
+      toast.error("Please select task type, assignee, and project");
       return;
     }
 
     const assigneeId = parseInt(assignee);
     if (isNaN(assigneeId)) {
       toast.error("Invalid assignee selected");
+      return;
+    }
+
+    const project = projects.find((p) => p.id === selectedProject);
+    if (!project) {
+      toast.error("Selected project not found. Please refresh and try again.");
       return;
     }
 
@@ -469,82 +516,127 @@ const TeamLeadDashboard = () => {
       itemName: string;
     }[] = [];
 
+    console.log("lines:", lines);
+    console.log("pids:", pids);
+    console.log("selectedLines:", selectedLines);
+    console.log("selectedPIDs:", selectedPIDs);
+
     if (taskType === "Redline" && assignmentType === "PID") {
       if (selectedPIDs.length > 0) {
         validSelection = true;
-        selectedItems = selectedPIDs.map((pid) => {
-          const pidObj = pids.find((p) => p.id === pid);
-          return {
-            itemId: pid,
-            itemType: "PID",
-            itemName: pidObj?.name || pid,
-          };
-        });
+        selectedItems = selectedPIDs
+          .map((pid) => {
+            const pidObj = pids.find((p) => p.id === pid);
+            if (!pidObj) {
+              console.warn(`PID with ID ${pid} not found in pids array`);
+              return null;
+            }
+            return {
+              itemId: pid,
+              itemType: "PID",
+              itemName: pidObj.name || pid,
+            };
+          })
+          .filter((item) => item !== null);
       }
     } else if (taskType === "UPV") {
       if (assignmentType === "Line" && selectedLines.length > 0) {
         validSelection = true;
-        selectedItems = selectedLines.map((line) => {
-          const lineObj = lines.find((l) => l.id === line);
-          return {
-            itemId: line,
-            itemType: "Line",
-            itemName: lineObj?.name || line,
-          };
-        });
+        selectedItems = selectedLines
+          .map((line) => {
+            const lineObj = lines.find((l) => l.id === line);
+            if (!lineObj) {
+              console.warn(`Line with ID ${line} not found in lines array`);
+              return null;
+            }
+            return {
+              itemId: line,
+              itemType: "Line",
+              itemName: lineObj.name || line,
+            };
+          })
+          .filter((item) => item !== null);
       } else if (
         assignmentType === "Equipment" &&
         selectedEquipment.length > 0
       ) {
         validSelection = true;
-        selectedItems = selectedEquipment.map((equip) => {
-          const equipObj = equipment.find((e) => e.id === equip);
-          return {
-            itemId: equip,
-            itemType: "Equipment",
-            itemName: equipObj?.name || equip,
-          };
-        });
+        selectedItems = selectedEquipment
+          .map((equip) => {
+            const equipObj = equipment.find((e) => e.id === equip);
+            if (!equipObj) {
+              console.warn(
+                `Equipment with ID ${equip} not found in equipment array`
+              );
+              return null;
+            }
+            return {
+              itemId: equip,
+              itemType: "Equipment",
+              itemName: equipObj.name || equip,
+            };
+          })
+          .filter((item) => item !== null);
       }
     } else if (taskType === "QC") {
       if (assignmentType === "PID" && selectedPIDs.length > 0) {
         validSelection = true;
-        selectedItems = selectedPIDs.map((pid) => {
-          const pidObj = pids.find((p) => p.id === pid);
-          return {
-            itemId: pid,
-            itemType: "PID",
-            itemName: pidObj?.name || pid,
-          };
-        });
+        selectedItems = selectedPIDs
+          .map((pid) => {
+            const pidObj = pids.find((p) => p.id === pid);
+            if (!pidObj) {
+              console.warn(`PID with ID ${pid} not found in pids array`);
+              return null;
+            }
+            return {
+              itemId: pid,
+              itemType: "PID",
+              itemName: pidObj.name || pid,
+            };
+          })
+          .filter((item) => item !== null);
       } else if (assignmentType === "Line" && selectedLines.length > 0) {
         validSelection = true;
-        selectedItems = selectedLines.map((line) => {
-          const lineObj = lines.find((l) => l.id === line);
-          return {
-            itemId: line,
-            itemType: "Line",
-            itemName: lineObj?.name || line,
-          };
-        });
+        selectedItems = selectedLines
+          .map((line) => {
+            const lineObj = lines.find((l) => l.id === line);
+            if (!lineObj) {
+              console.warn(`Line with ID ${line} not found in lines array`);
+              return null;
+            }
+            return {
+              itemId: line,
+              itemType: "Line",
+              itemName: lineObj.name || line,
+            };
+          })
+          .filter((item) => item !== null);
       } else if (
         assignmentType === "Equipment" &&
         selectedEquipment.length > 0
       ) {
         validSelection = true;
-        selectedItems = selectedEquipment.map((equip) => {
-          const equipObj = equipment.find((e) => e.id === equip);
-          return {
-            itemId: equip,
-            itemType: "Equipment",
-            itemName: equipObj?.name || equip,
-          };
-        });
+        selectedItems = selectedEquipment
+          .map((equip) => {
+            const equipObj = equipment.find((e) => e.id === equip);
+            if (!equipObj) {
+              console.warn(
+                `Equipment with ID ${equip} not found in equipment array`
+              );
+              return null;
+            }
+            return {
+              itemId: equip,
+              itemType: "Equipment",
+              itemName: equipObj.name || equip,
+            };
+          })
+          .filter((item) => item !== null);
       }
     }
 
-    if (!validSelection) {
-      toast.error("Please select at least one item to assign");
+    if (!validSelection || selectedItems.length === 0) {
+      toast.error("Please select at least one valid item to assign");
       return;
     }
 
@@ -564,19 +656,31 @@ const TeamLeadDashboard = () => {
         type: taskType,
         assigneeId,
         isComplex,
+        projectName: project.name,
         items: selectedItems,
       };
 
-      console.log("Sending POST request with data:", newTask);
+      console.log("newTask:", newTask);
 
       const response = await axios.post(
         `${API_URL}/tasks`,
         newTask,
         authHeaders
       );
-      console.log("Task creation response:", response.data);
+
+      // Update lines' assigned_to_id if assigning lines
+      if (assignmentType === "Line") {
+        for (const item of selectedItems) {
+          await axios.put(
+            `${API_URL}/lines/${item.itemId}/assign`,
+            { userId: assigneeId },
+            authHeaders
+          );
+        }
+      }
 
       await fetchTasks();
+      await fetchLines();
 
       setTaskType("");
       setAssignmentType("");
@@ -589,17 +693,17 @@ const TeamLeadDashboard = () => {
       toast.success(`Task assigned to ${assigneeMember.name}`);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error assigning task:", {
-        message: axiosError.message,
-        status: axiosError.response?.status,
-        data: axiosError.response?.data,
-      });
+      console.error("Error assigning task:", axiosError);
       if (axiosError.message === "No authentication token found") {
         toast.error("Session expired. Please log in again.");
         navigate("/login", { replace: true });
+      } else if (axiosError.response?.status === 403) {
+        toast.error("You are not authorized to assign tasks.");
+        navigate("/login", { replace: true });
       } else {
         toast.error(
-          axiosError.response?.data?.message || "Failed to assign task"
+          axiosError.response?.data?.message ||
+            "Failed to assign task. Please try again."
         );
       }
     } finally {
@@ -626,7 +730,28 @@ const TeamLeadDashboard = () => {
             <CardTitle>Task Assignment</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Project
+                </label>
+                <Select
+                  value={selectedProject}
+                  onValueChange={setSelectedProject}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Task Type
@@ -720,7 +845,9 @@ const TeamLeadDashboard = () => {
               <div className="flex items-end">
                 <Button
                   onClick={handleAssign}
-                  disabled={!taskType || !assignee || isSubmitting}
+                  disabled={
+                    !taskType || !assignee || isSubmitting || !selectedProject
+                  }
                   className="w-full"
                 >
                   {isSubmitting ? "Assigning..." : "Assign Task"}
@@ -765,6 +892,12 @@ const TeamLeadDashboard = () => {
                       </div>
                     ))}
 
+                  {assignmentType === "Line" &&
+                    selectableLines.length === 0 && (
+                      <p className="text-sm text-gray-500">
+                        No available lines
+                      </p>
+                    )}
                   {assignmentType === "Line" &&
                     selectableLines.length === 0 && (
                       <p className="text-sm text-gray-500">

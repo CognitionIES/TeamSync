@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
@@ -85,45 +85,38 @@ const DataEntryDashboard = () => {
     }
   }, [isAuthenticated, navigate]);
   const fetchProjects = async () => {
-    setIsLoadingProjects(true);
     try {
-      const response = await axios.get(`${API_URL}/projects`); // Interceptor adds token
-      let projectData = [];
-      if (Array.isArray(response.data)) {
-        projectData = response.data;
-      } else if (response.data.data && Array.isArray(response.data.data)) {
-        projectData = response.data.data;
+      const response = await axios.get<{
+        data: { id: number; name: string }[];
+      }>(`${API_URL}/projects`, getAuthHeaders());
+      const projectData = response.data.data.map((project) => ({
+        id: project.id.toString(),
+        name: project.name,
+      }));
+      setProjects(projectData);
+      if (projectData.length > 0) {
+        setSelectedProject(projectData[0].id);
       } else {
-        throw new Error("Unexpected response format from projects API");
+        toast.warning(
+          "No projects available. Please contact an Admin to be assigned to a project."
+        );
       }
-
-      // Validate that each project has id and name
-      const validatedProjects = projectData
-        .filter(
-          (project) =>
-            project &&
-            typeof project === "object" &&
-            "id" in project &&
-            "name" in project
-        )
-        .map((project: any) => ({
-          id: project.id.toString(),
-          name: project.name,
-        }));
-
-      if (validatedProjects.length === 0 && projectData.length > 0) {
-        console.warn("No valid projects found in response:", projectData);
-      }
-
-      setProjects(validatedProjects);
-    } catch (error: any) {
-      console.error("Error fetching projects:", error);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching projects:", axiosError);
       const errorMessage =
-        error.response?.data?.message ||
-        "Failed to fetch projects. Please try again.";
+        axiosError.response?.data?.message || "Failed to fetch projects";
       toast.error(errorMessage);
-    } finally {
-      setIsLoadingProjects(false);
+      if (axiosError.response?.status === 403) {
+        toast.error(
+          "You are not authorized to view projects. Redirecting to login..."
+        );
+        navigate("/login", { replace: true });
+      } else if (axiosError.response?.status === 500) {
+        toast.error(
+          "A server error occurred while fetching projects. Please try again later or contact support."
+        );
+      }
     }
   };
   const fetchAreas = async () => {
@@ -214,7 +207,7 @@ const DataEntryDashboard = () => {
     try {
       await axios.post(`${API_URL}/areas`, {
         name: values.areaName,
-        projectId: selectedProject,
+        project_id: selectedProject, // Change `projectId` to `project_id`
       });
       toast.success(`Area ${values.areaName} created successfully`);
       newAreaForm.reset();
@@ -236,10 +229,10 @@ const DataEntryDashboard = () => {
 
     try {
       const pidResponse = await axios.post(`${API_URL}/pids`, {
-        pidNumber: values.pidNumber,
+        pid_number: values.pidNumber,
         description: `P&ID for ${values.pidNumber}`,
-        areaId: values.areaId || null, // Allow null if no areas available
-        projectId: selectedProject,
+        area_id: values.areaId || null,
+        project_id: selectedProject,
       });
 
       const pidId = pidResponse.data.data.id;
@@ -252,11 +245,11 @@ const DataEntryDashboard = () => {
 
         for (const lineNumber of lines) {
           await axios.post(`${API_URL}/lines`, {
-            lineNumber,
+            line_number: lineNumber,
             description: `Line ${lineNumber}`,
-            typeId: 1,
-            pidId,
-            projectId: selectedProject,
+            type_id: 1,
+            pid_id: pidId,
+            project_id: selectedProject,
           });
         }
       }
@@ -268,8 +261,15 @@ const DataEntryDashboard = () => {
     } catch (error: any) {
       console.error("Error submitting P&ID:", error);
       const errorMessage =
-        error.response?.data?.message || "Failed to add P&ID and lines";
+        error.response?.data?.message ||
+        "Failed to add P&ID and lines. Please try again.";
       toast.error(errorMessage);
+      if (error.response?.status === 403) {
+        toast.error(
+          "You are not authorized to create P&IDs or lines. Please contact an admin."
+        );
+        navigate("/login", { replace: true });
+      }
     }
   };
 
@@ -661,4 +661,16 @@ const DataEntryDashboard = () => {
 };
 
 export default DataEntryDashboard;
-// This code is a React component for a data entry dashboard that allows users to add P&IDs and equipment to selected projects and areas. It includes form handling, API calls, and user feedback using toast notifications.
+
+// Replace the placeholder function at the bottom of the file
+function getAuthHeaders() {
+  const token = localStorage.getItem("teamsync_token");
+  if (!token) {
+    throw new Error("No authentication token found");
+  }
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  };
+} // This code is a React component for a data entry dashboard that allows users to add P&IDs and equipment to selected projects and areas. It includes form handling, API calls, and user feedback using toast notifications.

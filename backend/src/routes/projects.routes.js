@@ -5,27 +5,36 @@ const { protect, authorize } = require("../middleware/auth");
 
 // @desc    Get all projects
 // @route   GET /api/projects
-// @access  Private
+// @access  Private (Admin, Team Lead, Data Entry)
 router.get("/", protect, async (req, res) => {
   try {
-    console.log("User role:", req.user.role);
-    console.log("User ID:", req.user.id);
-
-    if (["Admin", "Project Manager", "Data Entry"].includes(req.user.role)) {
-      console.log(`Fetching projects for ${req.user.role}...`);
-      const { rows } = await db.query("SELECT id, name FROM projects");
-      console.log("Projects fetched:", rows);
-      res.status(200).json({ data: rows });
-    } else {
+    // Allow Admin, Team Lead, and Data Entry roles to access projects
+    if (
+      req.user.role !== "Admin" &&
+      req.user.role !== "Team Lead" &&
+      req.user.role !== "Data Entry" &&
+      req.user.role !== "Team Member"
+    ) {
       return res.status(403).json({
         message: `User role ${req.user.role} is not authorized to view projects`,
       });
     }
+
+    const { rows } = await db.query(
+      "SELECT id, name FROM projects ORDER BY name ASC"
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message:
+          "No projects found. Please contact an Admin to create a project.",
+      });
+    }
+
+    res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching projects:", error.message, error.stack);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch projects", error: error.message });
+    console.error("Error fetching projects:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -54,8 +63,8 @@ router.post("/", protect, async (req, res) => {
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating project:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error creating project:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -110,8 +119,8 @@ router.get("/:id", protect, async (req, res) => {
 
     res.status(200).json({ data: project });
   } catch (error) {
-    console.error("Error fetching project by ID:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching project by ID:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -127,8 +136,8 @@ router.get("/pids/project/:projectId", protect, async (req, res) => {
     );
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching P&IDs for project:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching P&IDs for project:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -165,8 +174,8 @@ router.post("/pids", protect, async (req, res) => {
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating P&ID:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error creating P&ID:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -183,8 +192,8 @@ router.get("/lines/project/:projectId", protect, async (req, res) => {
     );
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching lines for project:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching lines for project:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -196,8 +205,8 @@ router.get("/lines/pid/:pidId", protect, async (req, res) => {
     ]);
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching lines for PID:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching lines for PID:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -234,8 +243,8 @@ router.post("/lines", protect, async (req, res) => {
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating line:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error creating line:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -251,8 +260,8 @@ router.get("/equipment/project/:projectId", protect, async (req, res) => {
     );
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching equipment for project:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching equipment for project:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -290,8 +299,8 @@ router.post("/equipment", protect, async (req, res) => {
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating equipment:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error creating equipment:", error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

@@ -42,11 +42,13 @@ import axios from "axios";
 const API_URL = "http://localhost:3000/api";
 
 // Helper function to truncate text
-const truncateText = (text: string, maxLength: number = 20) => {
-  if (text.length <= maxLength) return text;
-  return `${text.substring(0, maxLength)}...`;
+const truncateText = (text: string | undefined | null, maxLength: number) => {
+  if (!text) return ""; // Return empty string if text is undefined or null
+  if (text.length > maxLength) {
+    return text.substring(0, maxLength) + "...";
+  }
+  return text;
 };
-
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
@@ -63,7 +65,7 @@ const AdminDashboard = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [projectStats, setProjectStats] = useState({
     pidCount: 0,
@@ -96,7 +98,6 @@ const AdminDashboard = () => {
         },
       };
 
-      // Build query parameters for filtering
       const queryParams = new URLSearchParams();
       if (selectedProject !== "all") {
         queryParams.append("project", selectedProject);
@@ -107,6 +108,46 @@ const AdminDashboard = () => {
       const queryString = queryParams.toString();
       const urlSuffix = queryString ? `?${queryString}` : "";
 
+      // Fetch data individually with error handling
+      const projectsPromise = axios
+        .get(`${API_URL}/projects${urlSuffix}`, config)
+        .catch((error) => {
+          console.error("Error fetching projects:", error);
+          return { data: { data: [] } };
+        });
+
+      const teamsPromise = axios
+        .get(`${API_URL}/teams${urlSuffix}`, config)
+        .catch((error) => {
+          console.error("Error fetching teams:", error);
+          return { data: { data: [] } };
+        });
+
+      const statsPromise = axios
+        .get(`${API_URL}/project-stats${urlSuffix}`, config)
+        .catch((error) => {
+          console.error("Error fetching project stats:", error);
+          return {
+            data: { data: { pidCount: 0, lineCount: 0, equipmentCount: 0 } },
+          };
+        });
+
+      const statusPromise = axios
+        .get(`${API_URL}/task-status${urlSuffix}`, config)
+        .catch((error) => {
+          console.error("Error fetching task status:", error);
+          return {
+            data: { data: { assigned: 0, inProgress: 0, completed: 0 } },
+          };
+        });
+
+      const logsPromise = axios
+        .get(`${API_URL}/audit-logs${urlSuffix}`, config)
+        .catch((error) => {
+          console.error("Error fetching audit logs:", error);
+          return { data: { data: [] } };
+        });
+
       const [
         projectsResponse,
         teamsResponse,
@@ -114,43 +155,52 @@ const AdminDashboard = () => {
         statusResponse,
         logsResponse,
       ] = await Promise.all([
-        axios.get(`${API_URL}/projects${urlSuffix}`, config),
-        axios.get(`${API_URL}/teams${urlSuffix}`, config),
-        axios.get(`${API_URL}/project-stats${urlSuffix}`, config),
-        axios.get(`${API_URL}/task-status${urlSuffix}`, config),
-        axios.get(`${API_URL}/audit-logs${urlSuffix}`, config),
+        projectsPromise,
+        teamsPromise,
+        statsPromise,
+        statusPromise,
+        logsPromise,
       ]);
 
-      const projectsData = projectsResponse.data;
-      const teamsData = teamsResponse.data;
-      const statsData = statsResponse.data;
-      const statusDataRaw = statusResponse.data;
-      const logsData = logsResponse.data;
-
       // Set state with fetched data
-      setProjects(projectsData.data || []);
-      setTeams(teamsData.data.map((team: { name: string }) => team.name) || []);
+      setProjects(
+        projectsResponse.data.data.map(
+          (project: { id: string; name: string }) => ({
+            id: project.id,
+            name: project.name,
+          })
+        ) || []
+      );
+      setTeams(
+        teamsResponse.data.data.map(
+          (team: { team_lead: string }) => team.team_lead
+        ) || []
+      );
       setProjectStats(
-        statsData.data || { pidCount: 0, lineCount: 0, equipmentCount: 0 }
+        statsResponse.data.data || {
+          pidCount: 0,
+          lineCount: 0,
+          equipmentCount: 0,
+        }
       );
       setStatusData([
         {
           name: "Assigned",
-          value: statusDataRaw.data.assigned || 0,
+          value: statusResponse.data.data.assigned || 0,
           color: "#1E40AF",
         },
         {
           name: "In Progress",
-          value: statusDataRaw.data.inProgress || 0,
+          value: statusResponse.data.data.inProgress || 0,
           color: "#F97316",
         },
         {
           name: "Completed",
-          value: statusDataRaw.data.completed || 0,
+          value: statusResponse.data.data.completed || 0,
           color: "#16A34A",
         },
       ]);
-      setAuditLogs(logsData.data || []);
+      setAuditLogs(logsResponse.data.data || []);
 
       toast.success("Data refreshed");
     } catch (error) {
@@ -231,7 +281,14 @@ const AdminDashboard = () => {
   }, [isAuthenticated, token, navigate, location.pathname]);
 
   const handleRefresh = () => {
-    fetchData();
+    fetchData()
+      .then(() => {
+        toast.success("Data refreshed");
+      })
+      .catch((error) => {
+        console.error("Error refreshing data:", error);
+        toast.error("Failed to refresh data");
+      });
   };
 
   const handleExport = async () => {
@@ -344,12 +401,12 @@ const AdminDashboard = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Projects</SelectItem>
-                    {projects.map((project: string) => (
+                    {projects.map((project) => (
                       <SelectItem
-                        key={project}
-                        value={project.toLowerCase().replace(/\s+/g, "-")}
+                        key={project.id}
+                        value={project.name.toLowerCase().replace(/\s+/g, "-")}
                       >
-                        {project}
+                        {project.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -484,7 +541,7 @@ const AdminDashboard = () => {
                               <UITooltip>
                                 <TooltipTrigger className="cursor-help text-left">
                                   <span className="text-sm">
-                                    {truncateText(log.currentWork)}
+                                    {truncateText(log.currentWork, 50)}
                                   </span>
                                 </TooltipTrigger>
                                 <TooltipContent>
