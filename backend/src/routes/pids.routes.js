@@ -8,7 +8,20 @@ const { protect } = require("../middleware/auth");
 // @access  Private
 router.get("/", protect, async (req, res) => {
   try {
-    const { rows } = await db.query("SELECT * FROM pids");
+    const { projectId } = req.query;
+    let query = "SELECT * FROM pids";
+    const values = [];
+
+    if (projectId) {
+      const projectIdNum = parseInt(projectId, 10);
+      if (isNaN(projectIdNum)) {
+        return res.status(400).json({ message: "projectId must be a valid number" });
+      }
+      query += " WHERE project_id = $1";
+      values.push(projectIdNum);
+    }
+
+    const { rows } = await db.query(query, values);
     res.status(200).json({ data: rows });
   } catch (error) {
     console.error("Error fetching P&IDs:", error.stack);

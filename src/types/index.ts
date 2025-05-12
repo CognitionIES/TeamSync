@@ -1,6 +1,10 @@
-
 // User roles
-export type UserRole = 'Data Entry' | 'Team Member' | 'Team Lead' | 'Project Manager' | 'Admin';
+export type UserRole =
+  | "Data Entry"
+  | "Team Member"
+  | "Team Lead"
+  | "Project Manager"
+  | "Admin";
 
 // User
 export interface User {
@@ -55,8 +59,8 @@ export interface Equipment {
 }
 
 // Task types
-export type TaskType = 'Redline' | 'UPV' | 'QC';
-export type TaskStatus = 'Assigned' | 'In Progress' | 'Completed';
+export type TaskType = "Redline" | "UPV" | "QC";
+export type TaskStatus = "Assigned" | "In Progress" | "Completed";
 
 export interface TaskComment {
   id: string;
@@ -72,20 +76,21 @@ export interface Task {
   type: TaskType;
   assignee: string;
   assigneeId: string;
-  status: TaskStatus;
+  status: string;
   isComplex: boolean;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
   progress: number;
+  projectId: string | null; // Add projectId
   items: TaskItem[];
-  comments?: TaskComment[];
+  comments: TaskComment[];
 }
 
 export interface TaskItem {
   id: string;
   name: string;
-  type: 'PID' | 'Line' | 'Equipment';
+  type: "PID" | "Line" | "Equipment";
   completed: boolean;
 }
 

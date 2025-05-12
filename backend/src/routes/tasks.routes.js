@@ -15,7 +15,7 @@ router.get("/", protect, async (req, res) => {
       console.log("Fetching all tasks for Admin...");
       let query = `
         SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-               t.created_at, t.updated_at, t.completed_at, t.progress,
+               t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
@@ -40,17 +40,18 @@ router.get("/", protect, async (req, res) => {
                ), '[]') as comments
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
       `;
       const values = [];
       const conditions = [];
 
-      // Apply project filter (assuming tasks have a project_name field)
+      // Apply project filter using project name
       if (project) {
-        conditions.push(`t.project_name = $${values.length + 1}`);
+        conditions.push(`p.name = $${values.length + 1}`);
         values.push(project);
       }
 
-      // Apply team filter (join with team_members to filter by team_name)
+      // Apply team filter
       if (team) {
         query += `
           JOIN team_members tm ON t.assignee_id = tm.member_id
@@ -65,7 +66,7 @@ router.get("/", protect, async (req, res) => {
 
       query += `
         GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
-                 t.created_at, t.updated_at, t.completed_at, t.progress,
+                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                  u.name
       `;
 
@@ -73,11 +74,10 @@ router.get("/", protect, async (req, res) => {
       console.log("Tasks fetched for Admin:", rows);
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Project Manager") {
-      // Existing Project Manager logic (unchanged)
       console.log("Fetching all tasks for Project Manager...");
       const query = `
         SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-               t.created_at, t.updated_at, t.completed_at, t.progress,
+               t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
@@ -106,18 +106,17 @@ router.get("/", protect, async (req, res) => {
           )
         )
         GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
-                 t.created_at, t.updated_at, t.completed_at, t.progress,
+                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                  u.name
       `;
       const { rows } = await db.query(query, [req.user.id]);
       console.log("Tasks fetched for Project Manager:", rows);
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Team Lead") {
-      // Existing Team Lead logic (unchanged)
       console.log("Fetching tasks for Team Lead ID:", req.user.id);
       const query = `
         SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-               t.created_at, t.updated_at, t.completed_at, t.progress,
+               t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
@@ -145,16 +144,18 @@ router.get("/", protect, async (req, res) => {
         WHERE t.assignee_id IN (
           SELECT member_id FROM team_members WHERE lead_id = $1
         )
+        GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
+                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
+                 u.name
       `;
       const { rows } = await db.query(query, [req.user.id]);
       console.log("Tasks fetched for Team Lead:", rows);
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Team Member") {
-      // Existing Team Member logic (unchanged)
       console.log("Fetching tasks for Team Member ID:", req.user.id);
       const query = `
         SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-               t.created_at, t.updated_at, t.completed_at, t.progress,
+               t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
@@ -180,6 +181,9 @@ router.get("/", protect, async (req, res) => {
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
         WHERE t.assignee_id = $1
+        GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
+                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
+                 u.name
       `;
       const { rows } = await db.query(query, [req.user.id]);
       console.log("Tasks fetched for Team Member:", rows);
@@ -206,18 +210,41 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
-    const { type, assigneeId, isComplex, items, projectName } = req.body;
+    const { type, assigneeId, isComplex, items, projectName, projectId } =
+      req.body;
     console.log("Creating task with data:", {
       type,
       assigneeId,
       isComplex,
       items,
       projectName,
+      projectId,
     });
 
-    if (!type || !assigneeId || !items || !projectName) {
-      return res.status(400).json({ message: "Type, assigneeId, items, and projectName are required" });
+    if (!type || !assigneeId || !items || !projectId) {
+      return res.status(400).json({
+        message: "Type, assigneeId, items, and projectId are required",
+      });
     }
+
+    const projectIdNum = parseInt(projectId, 10);
+    if (isNaN(projectIdNum)) {
+      return res
+        .status(400)
+        .json({ message: "projectId must be a valid number" });
+    }
+
+    // Validate project exists
+    const { rows: projectRows } = await db.query(
+      `SELECT id, name FROM projects WHERE id = $1`,
+      [projectIdNum]
+    );
+    if (projectRows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: `Project with ID ${projectIdNum} does not exist` });
+    }
+    const resolvedProjectName = projectRows[0].name;
 
     // Validate assigneeId
     const { rows: userRows } = await db.query(
@@ -225,7 +252,9 @@ router.post("/", protect, async (req, res) => {
       [assigneeId]
     );
     if (userRows.length === 0) {
-      return res.status(400).json({ message: `Assignee with ID ${assigneeId} does not exist` });
+      return res
+        .status(400)
+        .json({ message: `Assignee with ID ${assigneeId} does not exist` });
     }
 
     // Validate user id
@@ -234,28 +263,39 @@ router.post("/", protect, async (req, res) => {
       [req.user.id]
     );
     if (userIdRows.length === 0) {
-      return res.status(400).json({ message: `User with ID ${req.user.id} does not exist` });
+      return res
+        .status(400)
+        .json({ message: `User with ID ${req.user.id} does not exist` });
     }
 
-    // Validate items against pids, lines, or equipment tables
-    const itemTypes = [...new Set(items.map(item => item.itemType))];
-    if (!itemTypes.every(type => ["PID", "Line", "Equipment"].includes(type))) {
-      return res.status(400).json({ message: "Invalid itemType. Must be 'PID', 'Line', or 'Equipment'" });
+    // Validate items against pids, lines, or equipment tables using project_id
+    const itemTypes = [...new Set(items.map((item) => item.itemType))];
+    if (
+      !itemTypes.every((type) => ["PID", "Line", "Equipment"].includes(type))
+    ) {
+      return res.status(400).json({
+        message: "Invalid itemType. Must be 'PID', 'Line', or 'Equipment'",
+      });
     }
 
     for (const item of items) {
       let query;
       if (item.itemType === "PID") {
-        query = `SELECT id FROM pids WHERE id = $1 AND project_name = $2`;
+        query = `SELECT id FROM pids WHERE id = $1 AND project_id = $2`;
       } else if (item.itemType === "Line") {
-        query = `SELECT id FROM lines WHERE id = $1 AND project_name = $2`;
+        query = `SELECT id FROM lines WHERE id = $1 AND project_id = $2`;
       } else if (item.itemType === "Equipment") {
-        query = `SELECT id FROM equipment WHERE id = $1 AND project_name = $2`;
+        query = `SELECT id FROM equipment WHERE id = $1 AND project_id = $2`;
       }
 
-      const { rows: itemRows } = await db.query(query, [parseInt(item.itemId), projectName]);
+      const { rows: itemRows } = await db.query(query, [
+        parseInt(item.itemId),
+        projectIdNum,
+      ]);
       if (itemRows.length === 0) {
-        return res.status(400).json({ message: `Item with ID ${item.itemId} and type ${item.itemType} does not exist in project ${projectName}` });
+        return res.status(400).json({
+          message: `Item with ID ${item.itemId} and type ${item.itemType} does not exist in project ${resolvedProjectName}`,
+        });
       }
     }
 
@@ -265,29 +305,38 @@ router.post("/", protect, async (req, res) => {
 
     const { rows: existingItems } = await db.query(
       `
-      SELECT ti.item_id, ti.item_type, ti.item_name, t.type as task_type
-      FROM task_items ti
-      JOIN tasks t ON ti.task_id = t.id
-      WHERE (ti.item_id = ANY($1) AND ti.item_type = ANY($2)) AND t.type = $3 AND t.project_name = $4
-      `,
-      [itemIds, itemTypeList, type, projectName]
+  SELECT ti.item_id, ti.item_type, ti.item_name, t.type as task_type
+  FROM task_items ti
+  JOIN tasks t ON ti.task_id = t.id
+  WHERE (ti.item_id = ANY($1) AND ti.item_type = ANY($2)) AND t.type = $3 AND (t.project_id = $4 OR t.project_id IS NULL)
+  `,
+      [itemIds, itemTypeList, type, projectIdNum]
     );
-
     if (existingItems.length > 0) {
-      const alreadyAssignedNames = existingItems.map((item) => item.item_name).join(", ");
+      const alreadyAssignedNames = existingItems
+        .map((item) => item.item_name)
+        .join(", ");
       return res.status(400).json({
-        message: `Some items are already assigned to ${type} tasks in project ${projectName}: ${alreadyAssignedNames}`,
+        message: `Some items are already assigned to ${type} tasks in project ${resolvedProjectName}: ${alreadyAssignedNames}`,
       });
     }
 
     // Insert into tasks table
     const { rows: taskRows } = await db.query(
       `
-      INSERT INTO tasks (type, assignee_id, is_complex, project_name)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO tasks (type, assignee_id, is_complex, project_id, created_at, updated_at, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
       `,
-      [type, assigneeId, isComplex, projectName]
+      [
+        type,
+        assigneeId,
+        isComplex,
+        projectIdNum,
+        new Date(),
+        new Date(),
+        "Assigned",
+      ]
     );
 
     const task = taskRows[0];
@@ -325,10 +374,12 @@ router.post("/", protect, async (req, res) => {
         "Task Creation",
         type,
         req.user.id,
-        `Created task with type ${type} in project ${projectName}`,
+        `Created task with type ${type} in project ${resolvedProjectName}`,
         new Date(),
-        projectName,
-        (await db.query(`SELECT name FROM users WHERE id = $1`, [req.user.id])).rows[0].name,
+        resolvedProjectName,
+        (
+          await db.query(`SELECT name FROM users WHERE id = $1`, [req.user.id])
+        ).rows[0].name,
       ]
     );
 
@@ -383,7 +434,9 @@ router.post("/", protect, async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating task:", error.message, error.stack);
-    res.status(500).json({ message: "Failed to create task", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to create task", error: error.message });
   }
 });
 // PATCH /api/tasks/:id/status - Update task status

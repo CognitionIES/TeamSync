@@ -320,6 +320,7 @@ const TeamMemberDashboard = () => {
           updatedAt: task.updated_at || new Date().toISOString(),
           completedAt: task.completed_at || null,
           progress: task.progress || 0,
+          projectId: task.project_id?.toString() || "Unknown", // Ensure projectId is included
           items: mappedItems,
           comments: uniqueComments,
         };
@@ -331,7 +332,6 @@ const TeamMemberDashboard = () => {
       console.error("Raw error in fetchTasks:", error); // Line 284
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching tasks:", {
-        // Line 286
         message: axiosError.message,
         status: axiosError.response?.status,
         data: axiosError.response?.data,

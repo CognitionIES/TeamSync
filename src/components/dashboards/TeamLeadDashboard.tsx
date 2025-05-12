@@ -132,6 +132,7 @@ const TeamLeadDashboard = () => {
         id: project.id.toString(),
         name: project.name,
       }));
+      console.log("Fetched projects:", projectData);
       setProjects(projectData);
       if (projectData.length > 0) {
         setSelectedProject(projectData[0].id);
@@ -157,8 +158,7 @@ const TeamLeadDashboard = () => {
         );
       }
     }
-  };
-  // Fetch team members
+  }; // Fetch team members
   const fetchTeamMembers = async () => {
     try {
       const response = await axios.get<{ data: User[] }>(
@@ -188,24 +188,31 @@ const TeamLeadDashboard = () => {
     try {
       const response = await axios.get<{
         data: { id: number; pid_number: string; project_id: number }[];
-      }>(`${API_URL}/pids`, getAuthHeaders());
-      const pidsData = response.data.data
-        .filter((pid) => pid.project_id.toString() === selectedProject)
-        .map((pid) => ({
-          id: pid.id.toString(),
-          name: pid.pid_number,
-        }));
+      }>(`${API_URL}/pids?projectId=${selectedProject}`, getAuthHeaders());
+      const pidsData = response.data.data.map((pid) => ({
+        id: pid.id.toString(),
+        name: pid.pid_number,
+      }));
+      console.log(`Fetched PIDs for project ${selectedProject}:`, pidsData);
       setPIDs(pidsData);
+      // Reset selectedPIDs to only include PIDs that exist in pidsData
+      setSelectedPIDs((prev) =>
+        prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId))
+      );
+      if (pidsData.length === 0) {
+        toast.info("No P&IDs available for this project.");
+      }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching P&IDs:", axiosError);
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch P&IDs"
       );
+      setPIDs([]);
+      setSelectedPIDs([]);
     }
   };
 
-  // Fetch unassigned lines for the selected project
   // Fetch unassigned lines for the selected project
   // Fetch unassigned lines for the selected project
   const fetchLines = async () => {
@@ -218,31 +225,30 @@ const TeamLeadDashboard = () => {
           pid_id: number;
           pid_number: string;
         }[];
-      }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders()); // Line 213
+      }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders());
       const linesData = response.data.data.map((line) => ({
         id: line.id.toString(),
         name: line.line_number,
         pidId: line.pid_id.toString(),
       }));
+      console.log(`Fetched lines for project ${selectedProject}:`, linesData);
       setLines(linesData);
+      setSelectedLines((prev) =>
+        prev.filter((lineId) => linesData.some((line) => line.id === lineId))
+      );
       if (linesData.length === 0) {
         toast.info("No unassigned lines available for this project.");
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching unassigned lines:", axiosError); // Line 232
-      const errorMessage =
-        axiosError.response?.data?.message ||
-        "Failed to fetch unassigned lines";
-      toast.error(errorMessage);
-      if (axiosError.response?.status === 500) {
-        toast.error(
-          "A server error occurred while fetching unassigned lines. Please try again later or contact support."
-        );
-      }
+      console.error("Error fetching unassigned lines:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch unassigned lines"
+      );
+      setLines([]);
+      setSelectedLines([]);
     }
   };
-
   // Fetch equipment
   const fetchEquipment = async () => {
     if (!selectedProject) return;
@@ -279,68 +285,80 @@ const TeamLeadDashboard = () => {
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
-      const tasksData = response.data.data.map((task, taskIndex) => {
-        const commentMap = new Map<string, TaskComment>();
-        (task.comments || []).forEach((comment: any, commentIndex: number) => {
-          if (
-            !comment ||
-            !comment.id ||
-            !comment.user_id ||
-            !comment.created_at
-          ) {
-            console.warn(
-              `Invalid comment at task index ${taskIndex}, comment index ${commentIndex}:`,
-              comment
-            );
-            return;
-          }
-          const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
-          if (!commentMap.has(key)) {
-            commentMap.set(key, {
-              id: comment.id.toString(),
-              userId: comment.user_id.toString(),
-              userName: comment.user_name || "Unknown",
-              userRole: comment.user_role || "Unknown",
-              comment: comment.comment || "",
-              createdAt: comment.created_at,
-            });
-          }
-        });
-        const uniqueComments = Array.from(commentMap.values());
-
-        const mappedItems = (task.items || [])
-          .map((item: any, itemIndex: number) => {
-            if (!item || !item.id) {
-              console.warn(
-                `Invalid item at task index ${taskIndex}, item index ${itemIndex}:`,
-                item
-              );
-              return null;
+      const tasksData = response.data.data
+        .filter((task) => {
+          // Only include tasks that match the selected project (or where project_id is NULL for existing tasks)
+          return (
+            !selectedProject ||
+            task.project_id?.toString() === selectedProject ||
+            task.project_id === null
+          );
+        })
+        .map((task, taskIndex) => {
+          const commentMap = new Map<string, TaskComment>();
+          (task.comments || []).forEach(
+            (comment: any, commentIndex: number) => {
+              if (
+                !comment ||
+                !comment.id ||
+                !comment.user_id ||
+                !comment.created_at
+              ) {
+                console.warn(
+                  `Invalid comment at task index ${taskIndex}, comment index ${commentIndex}:`,
+                  comment
+                );
+                return;
+              }
+              const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
+              if (!commentMap.has(key)) {
+                commentMap.set(key, {
+                  id: comment.id.toString(),
+                  userId: comment.user_id.toString(),
+                  userName: comment.user_name || "Unknown",
+                  userRole: comment.user_role || "Unknown",
+                  comment: comment.comment || "",
+                  createdAt: comment.created_at,
+                });
+              }
             }
-            return {
-              id: item.id.toString(),
-              name: item.name || "Unnamed Item",
-              type: item.item_type || "Unknown",
-              completed: item.completed || false,
-            };
-          })
-          .filter((item): item is TaskItem => item !== null);
+          );
+          const uniqueComments = Array.from(commentMap.values());
 
-        return {
-          id: task.id.toString(),
-          type: task.type as TaskType,
-          assignee: task.assignee || "Unknown",
-          assigneeId: task.assignee_id.toString(),
-          status: task.status || "Assigned",
-          isComplex: task.is_complex || false,
-          createdAt: task.created_at || new Date().toISOString(),
-          updatedAt: task.updated_at || new Date().toISOString(),
-          completedAt: task.completed_at || null,
-          progress: task.progress || 0,
-          items: mappedItems,
-          comments: uniqueComments,
-        };
-      });
+          const mappedItems = (task.items || [])
+            .map((item: any, itemIndex: number) => {
+              if (!item || !item.id) {
+                console.warn(
+                  `Invalid item at task index ${taskIndex}, item index ${itemIndex}:`,
+                  item
+                );
+                return null;
+              }
+              return {
+                id: item.id.toString(),
+                name: item.name || "Unnamed Item",
+                type: item.item_type || "Unknown",
+                completed: item.completed || false,
+              };
+            })
+            .filter((item): item is TaskItem => item !== null);
+
+          return {
+            id: task.id.toString(),
+            type: task.type as TaskType,
+            assignee: task.assignee || "Unknown",
+            assigneeId: task.assignee_id.toString(),
+            status: task.status || "Assigned",
+            isComplex: task.is_complex || false,
+            createdAt: task.created_at || new Date().toISOString(),
+            updatedAt: task.updated_at || new Date().toISOString(),
+            completedAt: task.completed_at || null,
+            progress: task.progress || 0,
+            projectId: task.project_id?.toString() || null, // Add projectId
+            items: mappedItems,
+            comments: uniqueComments,
+          };
+        });
 
       setTasks(tasksData);
     } catch (error) {
@@ -516,6 +534,8 @@ const TeamLeadDashboard = () => {
       itemName: string;
     }[] = [];
 
+    console.log("selectedProject:", selectedProject);
+    console.log("project:", project);
     console.log("lines:", lines);
     console.log("pids:", pids);
     console.log("selectedLines:", selectedLines);
@@ -657,6 +677,7 @@ const TeamLeadDashboard = () => {
         assigneeId,
         isComplex,
         projectName: project.name,
+        projectId: parseInt(selectedProject),
         items: selectedItems,
       };
 
@@ -711,6 +732,7 @@ const TeamLeadDashboard = () => {
     }
   };
 
+  //
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
     return null;
   }
