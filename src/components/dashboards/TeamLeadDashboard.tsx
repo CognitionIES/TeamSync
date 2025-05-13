@@ -18,6 +18,10 @@ import TaskTable from "../shared/TaskTable";
 import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import Modal from "react-modal";
+
+// Bind modal to appElement for accessibility
+Modal.setAppElement("#root");
 
 const API_URL = "http://localhost:3000/api";
 
@@ -61,6 +65,32 @@ interface AssignedItems {
   redlinePIDs: string[];
 }
 
+interface FetchedAssignedItems {
+  pids: any;
+  lines: any;
+  equipment: any;
+  upvLines: {
+    count: number;
+    items: { id: string; line_number: string; project_id: string }[];
+  };
+  qcLines: {
+    count: number;
+    items: { id: string; line_number: string; project_id: string }[];
+  };
+  redlinePIDs: {
+    count: number;
+    items: { id: string; pid_number: string; project_id: string }[];
+  };
+  upvEquipment: {
+    count: number;
+    items: { id: string; equipment_name: string; project_id: string }[];
+  };
+  qcEquipment: {
+    count: number;
+    items: { id: string; equipment_name: string; project_id: string }[];
+  };
+}
+
 const TeamLeadDashboard = () => {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -84,19 +114,25 @@ const TeamLeadDashboard = () => {
   const [isComplex, setIsComplex] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Track assigned items to prevent duplicates
-  const [assignedItems, setAssignedItems] = useState<AssignedItems>({
-    upvLines: [],
-    upvEquipment: [],
-    qcLines: [],
-    qcEquipment: [],
-    redlinePIDs: [],
-  });
+  // Modal state
+  const [modalIsOpen, setModalIsOpen] = useState(false);
+  const [assignedItems, setAssignedItems] =
+    useState<FetchedAssignedItems | null>(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
-  // Check for token on mount
+  // Track assigned items to prevent duplicates
+  const [assignedItemsForDuplicates, setAssignedItemsForDuplicates] =
+    useState<AssignedItems>({
+      upvLines: [],
+      upvEquipment: [],
+      qcLines: [],
+      qcEquipment: [],
+      redlinePIDs: [],
+    });
+
   const token = localStorage.getItem("teamsync_token");
 
-  // Redirect to login if not authenticated, not a Team Lead, or no token
   useEffect(() => {
     if (!isAuthenticated || !token) {
       toast.error("Please log in to access the dashboard.");
@@ -107,7 +143,6 @@ const TeamLeadDashboard = () => {
     }
   }, [isAuthenticated, user, token, navigate]);
 
-  // Helper to get the headers with the token
   const getAuthHeaders = () => {
     const token = localStorage.getItem("teamsync_token");
     if (!token) {
@@ -121,8 +156,6 @@ const TeamLeadDashboard = () => {
     };
   };
 
-  // Fetch projects
-  // Fetch projects
   const fetchProjects = async () => {
     try {
       const response = await axios.get<{
@@ -158,7 +191,8 @@ const TeamLeadDashboard = () => {
         );
       }
     }
-  }; // Fetch team members
+  };
+
   const fetchTeamMembers = async () => {
     try {
       const response = await axios.get<{ data: User[] }>(
@@ -182,7 +216,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Fetch P&IDs
   const fetchPIDs = async () => {
     if (!selectedProject) return;
     try {
@@ -195,7 +228,6 @@ const TeamLeadDashboard = () => {
       }));
       console.log(`Fetched PIDs for project ${selectedProject}:`, pidsData);
       setPIDs(pidsData);
-      // Reset selectedPIDs to only include PIDs that exist in pidsData
       setSelectedPIDs((prev) =>
         prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId))
       );
@@ -213,8 +245,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Fetch unassigned lines for the selected project
-  // Fetch unassigned lines for the selected project
   const fetchLines = async () => {
     if (!selectedProject) return;
     try {
@@ -249,7 +279,7 @@ const TeamLeadDashboard = () => {
       setSelectedLines([]);
     }
   };
-  // Fetch equipment
+
   const fetchEquipment = async () => {
     if (!selectedProject) return;
     try {
@@ -287,7 +317,6 @@ const TeamLeadDashboard = () => {
       );
       const tasksData = response.data.data
         .filter((task) => {
-          // Only include tasks that match the selected project (or where project_id is NULL for existing tasks)
           return (
             !selectedProject ||
             task.project_id?.toString() === selectedProject ||
@@ -354,7 +383,7 @@ const TeamLeadDashboard = () => {
             updatedAt: task.updated_at || new Date().toISOString(),
             completedAt: task.completed_at || null,
             progress: task.progress || 0,
-            projectId: task.project_id?.toString() || null, // Add projectId
+            projectId: task.project_id?.toString() || null,
             items: mappedItems,
             comments: uniqueComments,
           };
@@ -372,14 +401,51 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Fetch all data on mount
+  const fetchAssignedItems = async (userId: string, taskId: string) => {
+    try {
+      const response = await axios.get<{ data: FetchedAssignedItems }>(
+        `${API_URL}/users/${userId}/assigned-items/${taskId}`,
+        getAuthHeaders()
+      );
+      return response.data.data;
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching assigned items:", axiosError);
+      throw axiosError;
+    }
+  };
+
+  const handleViewCurrentWork = async (taskId: string, userId: string) => {
+    setSelectedUserId(userId);
+    setLoadingItems(true);
+    try {
+      const items = await fetchAssignedItems(userId, taskId);
+      setAssignedItems(items);
+      setModalIsOpen(true);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching assigned items:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch assigned items"
+      );
+      setAssignedItems(null);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  const closeModal = () => {
+    setModalIsOpen(false);
+    setAssignedItems(null);
+    setSelectedUserId(null);
+  };
+
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
       fetchProjects();
     }
   }, [isAuthenticated, user, token]);
 
-  // Fetch project-specific data when selectedProject changes
   useEffect(() => {
     if (selectedProject) {
       Promise.all([
@@ -395,7 +461,6 @@ const TeamLeadDashboard = () => {
     }
   }, [selectedProject]);
 
-  // Update assigned items when tasks change
   useEffect(() => {
     const upvLines: string[] = [];
     const upvEquipment: string[] = [];
@@ -417,7 +482,7 @@ const TeamLeadDashboard = () => {
       });
     });
 
-    setAssignedItems({
+    setAssignedItemsForDuplicates({
       upvLines,
       upvEquipment,
       qcLines,
@@ -426,7 +491,6 @@ const TeamLeadDashboard = () => {
     });
   }, [tasks]);
 
-  // Reset form fields when task type changes
   const handleTaskTypeChange = (value: string) => {
     setTaskType(value as TaskType);
     setAssignmentType("");
@@ -435,7 +499,6 @@ const TeamLeadDashboard = () => {
     setSelectedEquipment([]);
   };
 
-  // Handle assignment type change
   const handleAssignmentTypeChange = (value: string) => {
     if (
       value === "PID" ||
@@ -450,7 +513,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Filter selectable items based on task type
   const getSelectableItems = () => {
     let availablePIDs: PID[] = [];
     let availableLines: Line[] = [];
@@ -458,20 +520,20 @@ const TeamLeadDashboard = () => {
 
     if (taskType === "Redline") {
       availablePIDs = pids.filter(
-        (pid) => !assignedItems.redlinePIDs.includes(pid.id)
+        (pid) => !assignedItemsForDuplicates.redlinePIDs.includes(pid.id)
       );
     } else if (taskType === "UPV") {
-      availableLines = lines; // Already filtered by the backend to be unassigned
+      availableLines = lines;
       availableEquipment = equipment.filter(
-        (equip) => !assignedItems.upvEquipment.includes(equip.id)
+        (equip) => !assignedItemsForDuplicates.upvEquipment.includes(equip.id)
       );
     } else if (taskType === "QC") {
       availablePIDs = pids.filter(
-        (pid) => !assignedItems.redlinePIDs.includes(pid.id)
+        (pid) => !assignedItemsForDuplicates.redlinePIDs.includes(pid.id)
       );
-      availableLines = lines; // Already filtered by the backend to be unassigned
+      availableLines = lines;
       availableEquipment = equipment.filter(
-        (equip) => !assignedItems.qcEquipment.includes(equip.id)
+        (equip) => !assignedItemsForDuplicates.qcEquipment.includes(equip.id)
       );
     }
 
@@ -689,7 +751,6 @@ const TeamLeadDashboard = () => {
         authHeaders
       );
 
-      // Update lines' assigned_to_id if assigning lines
       if (assignmentType === "Line") {
         for (const item of selectedItems) {
           await axios.put(
@@ -732,7 +793,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  //
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
     return null;
   }
@@ -921,12 +981,6 @@ const TeamLeadDashboard = () => {
                       </p>
                     )}
                   {assignmentType === "Line" &&
-                    selectableLines.length === 0 && (
-                      <p className="text-sm text-gray-500">
-                        No available lines
-                      </p>
-                    )}
-                  {assignmentType === "Line" &&
                     selectableLines.map((line) => (
                       <div
                         key={line.id}
@@ -991,6 +1045,7 @@ const TeamLeadDashboard = () => {
             )}
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Team Tasks</CardTitle>
@@ -1007,10 +1062,240 @@ const TeamLeadDashboard = () => {
                 showFilters={true}
                 showProgress={true}
                 showCurrentWork={true}
+                onViewCurrentWork={handleViewCurrentWork}
               />
             )}
           </CardContent>
         </Card>
+
+        <Modal
+          isOpen={modalIsOpen}
+          onRequestClose={closeModal}
+          style={{
+            content: {
+              top: "50%",
+              left: "50%",
+              right: "auto",
+              bottom: "auto",
+              marginRight: "-50%",
+              transform: "translate(-50%, -50%)",
+              width: "90%",
+              maxWidth: "600px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              padding: "24px",
+              borderRadius: "12px",
+              backgroundColor: "#fff",
+              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            },
+            overlay: {
+              backgroundColor: "rgba(0, 0, 0, 0.6)",
+              zIndex: 1000,
+            },
+          }}
+          contentLabel="Assigned Items Modal"
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">
+              Assigned Items{" "}
+              {selectedUserId ? `for User ${selectedUserId}` : ""}
+            </h2>
+            <button
+              onClick={closeModal}
+              className="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors duration-200"
+              aria-label="Close modal"
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          {loadingItems ? (
+            <div className="text-center py-8">
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
+              <p className="mt-2 text-gray-600">Loading assigned items...</p>
+            </div>
+          ) : assignedItems ? (
+            <div className="space-y-6">
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  UPV Lines ({assignedItems.upvLines.count})
+                </h3>
+                {assignedItems.upvLines.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.upvLines.items.map((line) => (
+                        <li
+                          key={line.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Line:</strong> {line.line_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {line.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No UPV lines assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  QC Lines ({assignedItems.qcLines.count})
+                </h3>
+                {assignedItems.qcLines.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.qcLines.items.map((line) => (
+                        <li
+                          key={line.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Line:</strong> {line.line_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {line.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No QC lines assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  Redline P&IDs ({assignedItems.redlinePIDs.count})
+                </h3>
+                {assignedItems.redlinePIDs.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.redlinePIDs.items.map((pid) => (
+                        <li
+                          key={pid.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>P&ID:</strong> {pid.pid_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {pid.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No Redline P&IDs assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  UPV Equipment ({assignedItems.upvEquipment.count})
+                </h3>
+                {assignedItems.upvEquipment.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.upvEquipment.items.map((equip) => (
+                        <li
+                          key={equip.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Equipment:</strong> {equip.equipment_name}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {equip.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No UPV equipment assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  QC Equipment ({assignedItems.qcEquipment.count})
+                </h3>
+                {assignedItems.qcEquipment.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.qcEquipment.items.map((equip) => (
+                        <li
+                          key={equip.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Equipment:</strong> {equip.equipment_name}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {equip.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No QC equipment assigned.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-red-600 font-medium">
+                Failed to load assigned items.
+              </p>
+              <p className="text-gray-500 mt-2">
+                Please try again or contact support if the issue persists.
+              </p>
+            </div>
+          )}
+
+          {!loadingItems && (
+            <div className="mt-6 flex justify-end">
+              <Button
+                onClick={closeModal}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition-colors duration-200"
+              >
+                Close
+              </Button>
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );

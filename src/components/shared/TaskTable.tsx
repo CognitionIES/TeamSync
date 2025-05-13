@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import {
   Table,
   TableBody,
@@ -15,7 +16,6 @@ import {
 } from "@/components/ui/select";
 import StatusBadge from "./StatusBadge";
 import { Task, TaskStatus, TaskType } from "@/types";
-import { useState } from "react";
 import {
   Tooltip,
   TooltipProvider,
@@ -34,6 +34,7 @@ interface TaskTableProps {
   showProgress?: boolean;
   showCurrentWork?: boolean;
   loading?: boolean;
+  onViewCurrentWork?: (taskId: string, userId: string) => void; // Updated to include taskId
 }
 
 // Helper function to truncate text
@@ -63,12 +64,11 @@ const formatDateTime = (dateStr: string | null, label: string): string => {
   if (!dateStr) return `Not ${label}`;
   try {
     const date = parseISO(dateStr);
-    // Adjust for GMT+5:30 (5 hours and 30 minutes ahead of UTC)
     const offsetMinutes = 5 * 60 + 30; // 5 hours 30 minutes in minutes
     const adjustedDate = new Date(date.getTime() + offsetMinutes * 60 * 1000);
     return (
       adjustedDate.toLocaleString("en-US", {
-        timeZone: "UTC", // We manually adjusted the time, so we use UTC as the base
+        timeZone: "UTC",
         month: "short",
         day: "2-digit",
         hour: "2-digit",
@@ -153,6 +153,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
   showProgress,
   showCurrentWork,
   loading = false,
+  onViewCurrentWork,
 }) => {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "All">("All");
   const [filterType, setFilterType] = useState<TaskType | "All">("All");
@@ -185,7 +186,6 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const updatedAt = parseSafeDate(task.updatedAt);
     const completedAt = parseSafeDate(task.completedAt);
 
-    // Update the "Updated" column to show "In Progress" for in-progress tasks
     let updated: string;
     if (task.status === "In Progress") {
       updated = "In Progress";
@@ -207,10 +207,11 @@ const TaskTable: React.FC<TaskTableProps> = ({
       progress: task.progress,
       currentWork: truncateText(getCurrentWork(task), 20),
       status: task.status,
-      assignedTime: assignedTime, // Renamed from 'time' to 'assignedTime'
-      completedTime: completedTime, // New field for completion time
+      assignedTime: assignedTime,
+      completedTime: completedTime,
       updated: updated,
       updatedAt: updatedAt || completedAt || new Date(0),
+      assigneeId: task.assigneeId,
     };
   });
 
@@ -232,7 +233,6 @@ const TaskTable: React.FC<TaskTableProps> = ({
       : (bValue as number) - (aValue as number);
   });
 
-  // Pagination logic
   const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
   const startIndex = (currentPage - 1) * tasksPerPage;
   const endIndex = startIndex + tasksPerPage;
@@ -245,14 +245,14 @@ const TaskTable: React.FC<TaskTableProps> = ({
       setSortColumn(column);
       setSortDirection("asc");
     }
-    setCurrentPage(1); // Reset to first page on sort
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
     setFilterStatus("All");
     setFilterType("All");
     setFilterAssignee("All");
-    setCurrentPage(1); // Reset to first page on filter clear
+    setCurrentPage(1);
   };
 
   const handlePreviousPage = () => {
@@ -371,7 +371,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
           <p>No tasks found.</p>
         </div>
       ) : (
-        <>
+        <TooltipProvider delayDuration={300}>
           <Table>
             <TableHeader>
               <TableRow className="bg-gray-50 border-b border-gray-200">
@@ -428,9 +428,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
                     </Button>
                   </TableHead>
                 )}
-                {showCurrentWork && (
-                  <TableHead className="text-gray-700">Current Work</TableHead>
-                )}
+                {showCurrentWork && <TableHead>Current Work</TableHead>}
                 <TableHead>
                   <Button
                     variant="ghost"
@@ -486,14 +484,14 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 <TableHead>
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort("updatedAt")}
+                    onClick={() => handleSort("updated")}
                     className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
                     aria-label="Sort by Updated"
                   >
                     <span>Updated</span>
                     <ArrowUpDown
                       className={`h-4 w-4 ${
-                        sortColumn === "updatedAt" && sortDirection === "asc"
+                        sortColumn === "updated" && sortDirection === "asc"
                           ? "rotate-180"
                           : ""
                       }`}
@@ -504,90 +502,94 @@ const TaskTable: React.FC<TaskTableProps> = ({
             </TableHeader>
             <TableBody>
               {paginatedRows.map((row, index) => (
-                <TooltipProvider key={row.id} delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <TableRow
-                        className={`border-b border-gray-100 transition-colors duration-200 ${
-                          index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                        } hover:bg-blue-50 cursor-pointer`}
-                      >
-                        <TableCell className="py-4">{row.type}</TableCell>
-                        <TableCell className="py-4">{row.assignee}</TableCell>
-                        {showProgress && (
-                          <TableCell className="py-4">
-                            <div className="flex items-center space-x-2">
-                              <Progress
-                                value={row.progress}
-                                className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
-                              />
-                              <span className="text-sm text-gray-600">
-                                {row.progress}%
-                              </span>
-                            </div>
-                          </TableCell>
-                        )}
-                        {showCurrentWork && (
-                          <TableCell className="py-4">
-                            {row.currentWork}
-                          </TableCell>
-                        )}
+                <Tooltip key={row.id}>
+                  <TooltipTrigger asChild>
+                    <TableRow
+                      className={`border-b border-gray-100 transition-colors duration-200 ${
+                        index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                      } hover:bg-blue-50 cursor-pointer`}
+                    >
+                      <TableCell className="py-4">{row.type}</TableCell>
+                      <TableCell className="py-4">{row.assignee}</TableCell>
+                      {showProgress && (
                         <TableCell className="py-4">
-                          <StatusBadge
-                            status={row.status}
-                            className={
-                              row.status === "Completed"
-                                ? "bg-green-100 text-green-800"
-                                : row.status === "In Progress"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
+                          <div className="flex items-center space-x-2">
+                            <Progress
+                              value={row.progress}
+                              className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
+                            />
+                            <span className="text-sm text-gray-600">
+                              {row.progress}%
+                            </span>
+                          </div>
+                        </TableCell>
+                      )}
+                      {showCurrentWork && (
+                        <TableCell className="py-4">
+                          <button
+                            onClick={() =>
+                              onViewCurrentWork?.(row.id, row.assigneeId)
                             }
-                          />
+                            className="text-blue-600 hover:underline focus:outline-none"
+                          >
+                            {row.currentWork}
+                          </button>
                         </TableCell>
-                        <TableCell className="py-4">
-                          <div className="flex items-center space-x-1 text-gray-600">
-                            <Clock className="h-4 w-4" />
-                            <span>{row.assignedTime}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <div className="flex items-center space-x-1 text-gray-600">
-                            <Clock className="h-4 w-4" />
-                            <span>{row.completedTime}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-4">{row.updated}</TableCell>
-                      </TableRow>
-                    </TooltipTrigger>
-                    <TooltipContent className="bg-gray-800 text-white rounded-md shadow-lg p-4 max-w-xs">
-                      <div>
-                        <h4 className="font-semibold text-sm mb-2">Comments</h4>
-                        {tasks.find((task) => task.id === row.id)?.comments
-                          ?.length ? (
-                          <ul className="space-y-1">
-                            {tasks
-                              .find((task) => task.id === row.id)
-                              ?.comments?.map((comment) => (
-                                <li key={comment.id} className="text-xs">
-                                  <strong>
-                                    {comment.userName} ({comment.userRole}):
-                                  </strong>{" "}
-                                  {comment.comment}
-                                </li>
-                              ))}
-                          </ul>
-                        ) : (
-                          <p className="text-xs">No comments</p>
-                        )}
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                      )}
+                      <TableCell className="py-4">
+                        <StatusBadge
+                          status={row.status as TaskStatus}
+                          className={
+                            row.status === "Completed"
+                              ? "bg-green-100 text-green-800"
+                              : row.status === "In Progress"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-gray-100 text-gray-800"
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center space-x-1 text-gray-600">
+                          <Clock className="h-4 w-4" />
+                          <span>{row.assignedTime}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center space-x-1 text-gray-600">
+                          <Clock className="h-4 w-4" />
+                          <span>{row.completedTime}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4">{row.updated}</TableCell>
+                    </TableRow>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-gray-800 text-white rounded-md shadow-lg p-4 max-w-xs">
+                    <div>
+                      <h4 className="font-semibold text-sm mb-2">Comments</h4>
+                      {tasks.find((task) => task.id === row.id)?.comments
+                        ?.length ? (
+                        <ul className="space-y-1">
+                          {tasks
+                            .find((task) => task.id === row.id)
+                            ?.comments?.map((comment) => (
+                              <li key={comment.id} className="text-xs">
+                                <strong>
+                                  {comment.userName} ({comment.userRole}):
+                                </strong>{" "}
+                                {comment.comment}
+                              </li>
+                            ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs">No comments</p>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
               ))}
             </TableBody>
           </Table>
 
-          {/* Pagination Controls */}
           {sortedRows.length > tasksPerPage && (
             <div className="flex justify-between items-center mt-4">
               <Button
@@ -611,7 +613,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
               </Button>
             </div>
           )}
-        </>
+        </TooltipProvider>
       )}
     </div>
   );
