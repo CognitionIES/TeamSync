@@ -105,91 +105,95 @@ const LoginForm = () => {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl text-center">TeamSync</CardTitle>
-        <CardDescription className="text-center">
-          Enter your credentials to access your dashboard
-        </CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit}>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="role" className="text-sm font-medium">
-              Position
-            </label>
-            <Select
-              value={role}
-              onValueChange={(value) => setRole(value as UserRole)}
-            >
-              <SelectTrigger id="role" aria-label="Select position">
-                <SelectValue placeholder="Select your position" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Data Entry">Data Entry</SelectItem>
-                <SelectItem value="Team Member">Team Member</SelectItem>
-                <SelectItem value="Team Lead">Team Lead</SelectItem>
-                <SelectItem value="Project Manager">Project Manager</SelectItem>
-                <SelectItem value="Admin">Admin</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="name" className="text-sm font-medium">
-              Name
-            </label>
-            <Select
-              value={name}
-              onValueChange={setName}
-              disabled={!role || isLoadingUsers}
-            >
-              <SelectTrigger id="name" aria-label="Select name">
-                <SelectValue
-                  placeholder={
-                    isLoadingUsers
-                      ? "Loading..."
-                      : role
-                      ? "Select your name"
-                      : "Select a position first"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {nameOptions.map((name) => (
-                  <SelectItem key={name} value={name}>
-                    {name}
+    <div className="flex justify-center  items-center min-h-screen ">
+      <Card className="w-full max-w-md mx-auto  ">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl text-center">TeamSync</CardTitle>
+          <CardDescription className="text-center">
+            Enter your credentials to access your dashboard
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="role" className="text-sm font-medium">
+                Position
+              </label>
+              <Select
+                value={role}
+                onValueChange={(value) => setRole(value as UserRole)}
+              >
+                <SelectTrigger id="role" aria-label="Select position">
+                  <SelectValue placeholder="Select your position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Data Entry">Data Entry</SelectItem>
+                  <SelectItem value="Team Member">Team Member</SelectItem>
+                  <SelectItem value="Team Lead">Team Lead</SelectItem>
+                  <SelectItem value="Project Manager">
+                    Project Manager
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+                  <SelectItem value="Admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <label htmlFor="password" className="text-sm font-medium">
-              Password
-            </label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              disabled={!name}
-            />
-          </div>
-        </CardContent>
-        <CardFooter>
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={!role || !name || !password || isLoading}
-          >
-            {isLoading ? "Logging in..." : "Login"}
-          </Button>
-        </CardFooter>
-      </form>
-    </Card>
+            <div className="space-y-2">
+              <label htmlFor="name" className="text-sm font-medium">
+                Name
+              </label>
+              <Select
+                value={name}
+                onValueChange={setName}
+                disabled={!role || isLoadingUsers}
+              >
+                <SelectTrigger id="name" aria-label="Select name">
+                  <SelectValue
+                    placeholder={
+                      isLoadingUsers
+                        ? "Loading..."
+                        : role
+                        ? "Select your name"
+                        : "Select a position first"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {nameOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="password" className="text-sm font-medium">
+                Password
+              </label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                disabled={!name}
+              />
+            </div>
+          </CardContent>
+          <CardFooter>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!role || !name || !password || isLoading}
+            >
+              {isLoading ? "Logging in..." : "Login"}
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
   );
 };
 
