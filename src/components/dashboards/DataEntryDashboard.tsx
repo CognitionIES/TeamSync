@@ -289,8 +289,7 @@ const DataEntryDashboard = () => {
         await axios.post(`${API_URL}/equipment`, {
           equipmentNumber,
           description: `Equipment ${equipmentNumber}`,
-          typeId: 1,
-          areaId: values.areaId || null, // Allow null if no areas available
+          areaId: values.areaId || null,
           projectId: selectedProject,
         });
       }

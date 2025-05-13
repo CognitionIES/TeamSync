@@ -42,17 +42,6 @@ router.post("/", protect, async (req, res) => {
       return res.status(400).json({ message: "Invalid project ID" });
     }
 
-    // Verify typeId if provided
-    if (typeId) {
-      const typeCheck = await db.query(
-        "SELECT id FROM equipment_types WHERE id = $1",
-        [typeId]
-      );
-      if (typeCheck.rows.length === 0) {
-        return res.status(400).json({ message: "Invalid type ID" });
-      }
-    }
-
     // Verify areaId if provided
     if (areaId) {
       const areaCheck = await db.query(
@@ -67,21 +56,23 @@ router.post("/", protect, async (req, res) => {
     }
 
     // Insert the equipment
+    console.log("Inserting equipment into database...");
     const { rows } = await db.query(
       "INSERT INTO equipment (equipment_number, description, type_id, area_id, project_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
       [
         equipmentNumber,
         description,
-        typeId || null,
+        typeId || null, // typeId is optional
         areaId || null,
         projectId,
         "Assigned",
         new Date(),
       ]
     );
+    console.log("Equipment inserted successfully:", rows[0]);
 
     // Log the action in audit logs
-    if (req.user) {
+    if (req.user && req.user.userId) {
       console.log("Logging audit for user:", req.user.userId);
       await db.query(
         "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
@@ -93,13 +84,28 @@ router.post("/", protect, async (req, res) => {
           new Date(),
         ]
       );
+      console.log("Audit log entry created successfully");
     } else {
-      console.warn("No user found for audit logging");
+      console.warn("Skipping audit log due to missing user information");
     }
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating equipment:", error.stack);
+    console.error("Error creating equipment:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      constraint: error.constraint,
+    });
+    if (
+      error.code === "23505" &&
+      error.constraint === "equipment_number_unique"
+    ) {
+      return res
+        .status(400)
+        .json({ message: "Equipment number already exists" });
+    }
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
