@@ -36,7 +36,7 @@ import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
-const API_URL = "https://team-sync-beige.vercel.apphttps://team-sync-beige.vercel.app/api"; // Updated to match port 3000
+const API_URL = import.meta.env.VITE_API_URL || "https://team-sync-beige.vercel.apphttps://team-sync-beige.vercel.app/api"; // Updated to match port 3000
 
 const DataEntryDashboard = () => {
   const { isAuthenticated } = useAuth();

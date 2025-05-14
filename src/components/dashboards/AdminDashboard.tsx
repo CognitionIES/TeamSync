@@ -39,7 +39,7 @@ import { useAuth } from "@/context/AuthContext";
 import axios from "axios";
 
 // API URL - consistent with AuthContext
-const API_URL = "https://team-sync-beige.vercel.app/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://team-sync-beige.vercel.app/api";
 
 // Helper function to truncate text
 const truncateText = (text: string | undefined | null, maxLength: number) => {

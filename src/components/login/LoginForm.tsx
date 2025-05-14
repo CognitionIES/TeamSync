@@ -22,7 +22,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 // API URL - will be taken from environment in production
-const API_URL = "https://team-sync-beige.vercel.app/api";
+const API_URL =  import.meta.env.VITE_API_URL ||"https://team-sync-beige.vercel.app/api";
 
 const LoginForm = () => {
   const [role, setRole] = useState<UserRole | "">("");
