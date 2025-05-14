@@ -1,24 +1,24 @@
-const bcrypt = require('bcryptjs');
-const { Pool } = require('pg');
+const bcrypt = require("bcryptjs");
+const { Pool } = require("pg");
+require("dotenv").config(); // Load .env file
 
 const pool = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'TeamSync',
-  user: 'postgres',
-  password: 'hello554',
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false, // Required for Neon
+  },
 });
 
 const users = [
-  { name: 'Admi', password: 'admin123' },
-  { name: 'Project manager', password: 'pm@234' },
-  { name: 'Utsav', password: 'utsav#456' },
-  { name: 'name1', password: 'password123' },
-  { name: 'name2', password: 'password123' },
-  { name: 'name3', password: 'password123' },
-  { name: 'name4', password: 'password123' },
-  { name: 'name5', password: 'password123' },
-  { name: 'DataEntryUser', password: 'dataentry789' },
+  { name: "Admi", password: "admin123" },
+  { name: "Project manager", password: "pm@234" },
+  { name: "Utsav", password: "utsav#456" },
+  { name: "name1", password: "password123" },
+  { name: "name2", password: "password123" },
+  { name: "name3", password: "password123" },
+  { name: "name4", password: "password123" },
+  { name: "name5", password: "password123" },
+  { name: "DataEntryUser", password: "dataentry789" },
 ];
 
 const hashPassword = async (password) => {
@@ -28,17 +28,25 @@ const hashPassword = async (password) => {
 
 const updatePasswords = async () => {
   try {
+    // Test database connection
+    await pool.connect();
+    console.log("Connected to Neon database");
+
     for (const user of users) {
       const hashedPassword = await hashPassword(user.password);
-      await pool.query(
-        'UPDATE users SET password = $1 WHERE name = $2',
+      const result = await pool.query(
+        "UPDATE users SET password = $1 WHERE name = $2 RETURNING *",
         [hashedPassword, user.name]
       );
-      console.log(`Updated password for ${user.name}`);
+      if (result.rows.length > 0) {
+        console.log(`Updated password for ${user.name}`);
+      } else {
+        console.log(`User ${user.name} not found in database`);
+      }
     }
-    console.log('All passwords updated successfully');
+    console.log("All passwords updated successfully");
   } catch (error) {
-    console.error('Error updating passwords:', error);
+    console.error("Error updating passwords:", error.stack);
   } finally {
     await pool.end();
   }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,8 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 // API URL - will be taken from environment in production
-const API_URL =  import.meta.env.VITE_API_URL ||"https://team-sync-beige.vercel.app/api";
+const API_URL =
+  import.meta.env.VITE_API_URL || "https://team-sync-beige.vercel.app/api";
 
 const LoginForm = () => {
   const [role, setRole] = useState<UserRole | "">("");
@@ -49,19 +51,24 @@ const LoginForm = () => {
   const fetchUsersByRole = async (selectedRole: UserRole) => {
     setIsLoadingUsers(true);
     try {
+      console.log(`Fetching users for role: ${selectedRole}`);
       const response = await axios.get(`${API_URL}/users/role/${selectedRole}`);
+      console.log("Users response:", response.data);
       if (response.data && response.data.data) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setNameOptions(response.data.data.map((user: any) => user.name));
+      } else {
+        setNameOptions([]);
       }
     } catch (error) {
-      console.error("Failed to fetch users:", error);
+      console.error(
+        "Failed to fetch users:",
+        error.response?.data || error.message
+      );
       setNameOptions([]);
     } finally {
       setIsLoadingUsers(false);
     }
   };
-
   // Redirect if already authenticated and token exists
   useEffect(() => {
     if (isAuthenticated && token && token !== "null") {
