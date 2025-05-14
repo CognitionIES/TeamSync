@@ -16,7 +16,7 @@ export interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | null>(null);
 
 // API URL - will be taken from environment in production
-const API_URL = "http://localhost:3000/api";
+const API_URL = "https://team-sync-beige.vercel.app/api";
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,

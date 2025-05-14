@@ -1,45 +1,41 @@
-require("dotenv").config();
+require("dotenv").config({ path: "./.env" }); // Load environment variables once
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const { connectDB } = require("./config/db");
-
-// Load environment variables
-require("dotenv").config({ path: "./.env" });
 
 // Initialize express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL // Allow requests from your frontend
+}));
 app.use(express.json());
 app.use(morgan("dev"));
-
-let equipmentRoutes;
-try {
-  equipmentRoutes = require("./routes/equipment.routes");
-} catch (error) {
-  console.error("Failed to load equipment.routes.js:", error.message);
-}
 
 // Routes
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/projects", require("./routes/projects.routes"));
 app.use("/api/tasks", require("./routes/tasks.routes"));
 app.use("/api/users", require("./routes/users.routes"));
-app.use("/api/teams", require("./routes/teams.routes")); // Add this
+app.use("/api/teams", require("./routes/teams.routes"));
 app.use("/api/audit-logs", require("./routes/auditLogs.routes"));
 app.use("/api/areas", require("./routes/areas.routes"));
 app.use("/api/pids", require("./routes/pids.routes"));
 app.use("/api/lines", require("./routes/lines.routes"));
-app.use("/api/project-stats", require("./routes/projectStats.routes")); // Add this
-app.use("/api/task-status", require("./routes/taskStatus.routes")); // Add this
-if (equipmentRoutes) {
+app.use("/api/project-stats", require("./routes/projectStats.routes"));
+app.use("/api/task-status", require("./routes/taskStatus.routes"));
+
+// Load equipment routes with error handling
+let equipmentRoutes;
+try {
+  equipmentRoutes = require("./routes/equipment.routes");
   app.use("/api/equipment", equipmentRoutes);
   console.log("Mounted /api/equipment route");
-} else {
-  console.error("Equipment routes not mounted due to loading error");
+} catch (error) {
+  console.error("Failed to load equipment.routes.js:", error.message);
 }
 
 console.log("Routes loaded:", {

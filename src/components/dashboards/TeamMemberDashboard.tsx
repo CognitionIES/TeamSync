@@ -21,7 +21,7 @@ import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
-const API_URL = "http://localhost:3000/api";
+const API_URL = "https://team-sync-beige.vercel.app/api";
 
 interface Line {
   id: string;
