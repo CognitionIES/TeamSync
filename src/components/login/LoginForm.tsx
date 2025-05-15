@@ -83,7 +83,6 @@ const LoginForm = () => {
       );
     }
   }, [isAuthenticated, token, navigate]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
