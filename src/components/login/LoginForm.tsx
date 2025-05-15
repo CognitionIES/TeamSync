@@ -51,8 +51,9 @@ const LoginForm = () => {
   const fetchUsersByRole = async (selectedRole: UserRole) => {
     setIsLoadingUsers(true);
     try {
-      console.log(`Fetching users for role: ${selectedRole}`);
-      const response = await axios.get(`${API_URL}/users/role/${selectedRole}`);
+      const encodedRole = encodeURIComponent(selectedRole); // Encode the role to handle spaces
+      console.log(`Fetching users for role: ${encodedRole}`);
+      const response = await axios.get(`${API_URL}/users/role/${encodedRole}`);
       console.log("Users response:", response.data);
       if (response.data && response.data.data) {
         setNameOptions(response.data.data.map((user: any) => user.name));

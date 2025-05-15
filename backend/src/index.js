@@ -1,17 +1,17 @@
-require("dotenv").config({ path: "./.env" }); // Load environment variables once
+require("dotenv").config({ path: "./.env" });
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const { connectDB } = require("./config/db");
 
-// Initialize express app
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL // Allow requests from your frontend
-}));
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL,
+  })
+);
 app.use(express.json());
 app.use(morgan("dev"));
 
@@ -28,7 +28,6 @@ app.use("/api/lines", require("./routes/lines.routes"));
 app.use("/api/project-stats", require("./routes/projectStats.routes"));
 app.use("/api/task-status", require("./routes/taskStatus.routes"));
 
-// Load equipment routes with error handling
 let equipmentRoutes;
 try {
   equipmentRoutes = require("./routes/equipment.routes");
@@ -42,12 +41,10 @@ console.log("Routes loaded:", {
   equipment: !!equipmentRoutes,
 });
 
-// Health check route
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Server is running" });
 });
 
-// Error handling middleware (for uncaught errors)
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res
@@ -55,18 +52,32 @@ app.use((err, req, res, next) => {
     .json({ message: "Something went wrong!", error: err.message });
 });
 
-// Start server only after database connection is established
-const startServer = async () => {
+// For local development
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 3000;
+  const startServer = async () => {
+    try {
+      await connectDB();
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+    } catch (error) {
+      console.error("Database connection failed:", error.message);
+      process.exit(1);
+    }
+  };
+  startServer();
+}
+
+// Export for Vercel serverless function
+module.exports = async (req, res) => {
   try {
-    await connectDB(); // Ensure DB connection is successful before starting the server
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
+    await connectDB();
+    return app(req, res);
   } catch (error) {
     console.error("Database connection failed:", error.message);
-    process.exit(1); // Exit the process if DB connection fails
+    res
+      .status(500)
+      .json({ message: "Database connection failed", error: error.message });
   }
 };
-
-// Start the server
-startServer();

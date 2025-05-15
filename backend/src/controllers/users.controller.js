@@ -33,10 +33,12 @@ const getUserById = async (req, res) => {
 const getUsersByRole = async (req, res) => {
   try {
     const { role } = req.params;
+    console.log(`Fetching users for role: ${role}`);
     const { rows } = await db.query(
-      "SELECT id, name FROM users WHERE role = $1",
+      "SELECT id, name, role FROM users WHERE role = $1",
       [role]
     );
+    console.log(`Users found: ${JSON.stringify(rows)}`);
     res.status(200).json({ data: rows });
   } catch (error) {
     console.error("Error fetching users by role:", error.stack);
