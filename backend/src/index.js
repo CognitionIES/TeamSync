@@ -1,5 +1,5 @@
-require("dotenv").config({ path: "./.env" }); // Load environment variables once
-const express = require("express");
+require("dotenv").config({ path: "../../.env" }); // Adjusted path since .env is in root
+// const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const { connectDB } = require("./config/db");
