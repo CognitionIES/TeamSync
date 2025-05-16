@@ -23,7 +23,7 @@ import Modal from "react-modal";
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 
-const API_URL = import.meta.env.VITE_API_URL || "https://team-sync-beige.vercel.app/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 interface User {
   id: string;

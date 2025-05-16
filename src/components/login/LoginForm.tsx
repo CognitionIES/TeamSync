@@ -24,7 +24,7 @@ import axios from "axios";
 
 // API URL - will be taken from environment in production
 const API_URL =
-  import.meta.env.VITE_API_URL || "https://team-sync-beige.vercel.app/api";
+  import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 const LoginForm = () => {
   const [role, setRole] = useState<UserRole | "">("");
