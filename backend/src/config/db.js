@@ -6,7 +6,7 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false, // Required for Neon
   },
-  max: 20, // Limit connections for Vercel's serverless environment
+  max: 5, // Limit connections for Vercel's serverless environment
   idleTimeoutMillis: 30000, // Close idle connections after 30 seconds
   connectionTimeoutMillis: 2000, // Timeout for acquiring connections
 });
