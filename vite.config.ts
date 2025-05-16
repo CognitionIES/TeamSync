@@ -10,15 +10,15 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
     proxy: {
       "/api": {
-        target: process.env.VITE_API_URL || "http://localhost:3000",        changeOrigin: true,
+        target: process.env.VITE_API_URL || "http://localhost:3000",
+        changeOrigin: true,
         secure: false,
       },
     },
   },
-  plugins: [
-    react(),
-    mode === "development" && componentTagger(),
-  ].filter(Boolean),
+  plugins: [react(), mode === "development" && componentTagger()].filter(
+    Boolean
+  ),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
