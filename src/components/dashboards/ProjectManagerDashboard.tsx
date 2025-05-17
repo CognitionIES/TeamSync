@@ -23,7 +23,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TaskTable from "../shared/TaskTable";
 import TeamPerformanceView from "../shared/TeamPerformanceView";
 import { Task, TaskStatus, TaskType, UserRole } from "@/types";
-
+// Define API_URL using environment variable, with a fallback for local development
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
@@ -154,7 +155,7 @@ const ProjectManagerDashboard = () => {
       }
 
       // Fetch tasks
-      const tasksResponse = await fetch("/api/tasks", {
+      const tasksResponse = await fetch(`${API_URL}/tasks`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Cache-Control": "no-cache",
@@ -203,7 +204,7 @@ const ProjectManagerDashboard = () => {
       // Fetch team leads
       let teamLeadsData = [];
       try {
-        const teamsResponse = await fetch("/api/teams", {
+        const teamsResponse = await fetch(`${API_URL}/teams`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
@@ -280,7 +281,7 @@ const ProjectManagerDashboard = () => {
       // Fetch users
       let usersData = [];
       try {
-        const usersResponse = await fetch("/api/users", {
+        const usersResponse = await fetch(`${API_URL}/users`, {
           headers: {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
