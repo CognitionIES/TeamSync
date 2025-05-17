@@ -49,6 +49,7 @@ const truncateText = (text: string | undefined | null, maxLength: number) => {
   }
   return text;
 };
+
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
@@ -78,11 +79,12 @@ const AdminDashboard = () => {
     { name: "Completed", value: 0, color: "#16A34A" },
   ]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1); // Pagination: Current page
+  const [logsPerPage, setLogsPerPage] = useState(10); // Pagination: Logs per page
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, token } = useAuth();
 
-  // Fetch all necessary data
   // Fetch all necessary data
   const fetchData = async () => {
     setIsLoading(true);
@@ -108,7 +110,6 @@ const AdminDashboard = () => {
       const queryString = queryParams.toString();
       const urlSuffix = queryString ? `?${queryString}` : "";
 
-      // Fetch data individually with error handling
       const projectsPromise = axios
         .get(`${API_URL}/projects${urlSuffix}`, config)
         .catch((error) => {
@@ -162,7 +163,6 @@ const AdminDashboard = () => {
         logsPromise,
       ]);
 
-      // Set state with fetched data
       setProjects(
         projectsResponse.data.data.map(
           (project: { id: string; name: string }) => ({
@@ -244,6 +244,7 @@ const AdminDashboard = () => {
 
     console.log("User is authenticated, fetching data...");
     setIsRedirecting(false);
+    setCurrentPage(1); // Reset page on filter change
     fetchData();
   }, [
     isAuthenticated,
@@ -253,32 +254,6 @@ const AdminDashboard = () => {
     selectedProject,
     selectedTeam,
   ]);
-
-  // Fetch data on component mount if authenticated
-  useEffect(() => {
-    if (location.pathname === "/login") {
-      console.log("Already on login page, skipping redirect...");
-      return;
-    }
-
-    if (isRedirecting) {
-      console.log(
-        "Redirect already in progress, skipping authentication check..."
-      );
-      return;
-    }
-
-    if (!isAuthenticated || !token) {
-      console.log("Not authenticated or no token, redirecting to login...");
-      setIsRedirecting(true);
-      navigate("/login", { replace: true });
-      return;
-    }
-
-    console.log("User is authenticated, fetching data...");
-    setIsRedirecting(false);
-    fetchData();
-  }, [isAuthenticated, token, navigate, location.pathname]);
 
   const handleRefresh = () => {
     fetchData()
@@ -347,6 +322,12 @@ const AdminDashboard = () => {
       setIsExporting(false);
     }
   };
+
+  // Calculate paginated logs
+  const indexOfLastLog = currentPage * logsPerPage;
+  const indexOfFirstLog = indexOfLastLog - logsPerPage;
+  const currentLogs = auditLogs.slice(indexOfFirstLog, indexOfLastLog);
+  const totalPages = Math.ceil(auditLogs.length / logsPerPage);
 
   if (!isAuthenticated && location.pathname !== "/login") {
     return <div>Redirecting to login...</div>;
@@ -440,7 +421,6 @@ const AdminDashboard = () => {
 
         {/* Project Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          {/* Metrics */}
           <Card>
             <CardHeader>
               <CardTitle>Project Metrics</CardTitle>
@@ -467,7 +447,6 @@ const AdminDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Status Chart */}
           <Card className="col-span-1 md:col-span-2">
             <CardHeader>
               <CardTitle>Task Status Breakdown</CardTitle>
@@ -522,8 +501,8 @@ const AdminDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {auditLogs.length > 0 ? (
-                    auditLogs.map(
+                  {currentLogs.length > 0 ? (
+                    currentLogs.map(
                       (log: {
                         id: string;
                         type: string;
@@ -569,6 +548,58 @@ const AdminDashboard = () => {
                   )}
                 </TableBody>
               </Table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
+              {/* Logs per page dropdown */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">Logs per page:</span>
+                <Select
+                  value={logsPerPage.toString()}
+                  onValueChange={(value) => {
+                    setLogsPerPage(Number(value));
+                    setCurrentPage(1); // Reset to page 1
+                  }}
+                >
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5</SelectItem>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Page navigation */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(prev - 1, 1))
+                  }
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages || 1}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages || totalPages === 0}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

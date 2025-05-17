@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import {
   Card,
@@ -23,8 +24,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TaskTable from "../shared/TaskTable";
 import TeamPerformanceView from "../shared/TeamPerformanceView";
 import { Task, TaskStatus, TaskType, UserRole } from "@/types";
+import Modal from "react-modal";
+
+// Bind modal to appElement for accessibility
+Modal.setAppElement("#root");
+
 // Define API_URL using environment variable, with a fallback for local development
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
@@ -64,7 +71,6 @@ interface ApiTask {
 }
 
 // Interface for raw API team lead data
-// Interface for raw API team lead data
 interface ApiTeamLead {
   id: string;
   team_lead: string;
@@ -90,9 +96,10 @@ interface ApiTeamLead {
 
 // Transform API team lead data to match TeamLead type
 const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
-  name: apiTeamLead.team_lead, // Map team_lead to name
-  team: apiTeamLead.team_members.map((member) => member.member_name), // Map team_members to team, extracting member_name
+  name: apiTeamLead.team_lead,
+  team: apiTeamLead.team_members.map((member) => member.member_name),
 });
+
 // Interface for raw API user data
 interface ApiUser {
   id: string;
@@ -128,11 +135,11 @@ const transformTask = (apiTask: ApiTask): Task => ({
     id: comment.id,
     userId: comment.user_id,
     userName: comment.user_name,
-    userRole: comment.user_role as UserRole, // Ensure userRole is cast to UserRole
+    userRole: comment.user_role as UserRole,
     comment: comment.comment,
     createdAt: comment.created_at,
   })),
-  projectId: ""
+  projectId: "",
 });
 
 const ProjectManagerDashboard = () => {
@@ -143,8 +150,62 @@ const ProjectManagerDashboard = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [modalIsOpen, setModalIsOpen] = useState(false);
+  const [assignedItems, setAssignedItems] = useState(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState(null);
 
-  // Fetch data from API
+  const fetchAssignedItems = async (userId: string, taskId: string) => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+
+      const response = await fetch(
+        `${API_URL}/users/${userId}/assigned-items/${taskId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch assigned items: ${errorText}`);
+      }
+
+      const data = await response.json();
+      return data.data;
+    } catch (error) {
+      console.error("Error fetching assigned items:", error.message);
+      throw error;
+    }
+  };
+
+  const handleViewCurrentWork = async (taskId: string, userId: string) => {
+    setSelectedUserId(userId);
+    setLoadingItems(true);
+    try {
+      const items = await fetchAssignedItems(userId, taskId);
+      setAssignedItems(items);
+      setModalIsOpen(true);
+    } catch (error) {
+      toast.error("Failed to fetch assigned items");
+      setAssignedItems(null);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  const closeModal = () => {
+    setModalIsOpen(false);
+    setAssignedItems(null);
+    setSelectedUserId(null);
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setError(null);
@@ -154,7 +215,6 @@ const ProjectManagerDashboard = () => {
         throw new Error("No authentication token found");
       }
 
-      // Fetch tasks
       const tasksResponse = await fetch(`${API_URL}/tasks`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -200,8 +260,7 @@ const ProjectManagerDashboard = () => {
       const transformedTasks = tasksData.data.map(transformTask);
       setTasks(transformedTasks);
       console.log("Transformed Tasks:", transformedTasks);
-      // Fetch team leads
-      // Fetch team leads
+
       let teamLeadsData = [];
       try {
         const teamsResponse = await fetch(`${API_URL}/teams`, {
@@ -233,7 +292,7 @@ const ProjectManagerDashboard = () => {
             errorMessage += ` - ${teamsText.substring(0, 100)}`;
           }
           console.warn(errorMessage);
-          throw new Error(errorMessage); // Throw to trigger the catch block
+          throw new Error(errorMessage);
         }
 
         const teamsContentType = teamsResponse.headers.get("content-type");
@@ -278,7 +337,7 @@ const ProjectManagerDashboard = () => {
         toast.error("Failed to fetch teams data");
       }
       setTeamLeads(teamLeadsData);
-      // Fetch users
+
       let usersData = [];
       try {
         const usersResponse = await fetch(`${API_URL}/users`, {
@@ -339,34 +398,28 @@ const ProjectManagerDashboard = () => {
     }
   };
 
-  // Fetch data on component mount
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Derive team members from users (instead of teamLeads)
   const teamMembers = Array.from(new Set(users.map((user) => user.name)));
 
-  // Find users not in any team
   const teamLeadMembers = new Set(teamLeads.flatMap((lead) => lead.team));
   const usersNotInTeams = users.filter(
     (user) => !teamLeadMembers.has(user.name)
   );
 
-  // Get tasks assigned today
   const today = new Date().setHours(0, 0, 0, 0);
   const assignedToday = tasks.filter(
     (task) => new Date(task.createdAt).setHours(0, 0, 0, 0) === today
   ).length;
 
-  // Get tasks marked in progress today
   const startedToday = tasks.filter(
     (task) =>
       task.status === "In Progress" &&
       new Date(task.updatedAt).setHours(0, 0, 0, 0) === today
   ).length;
 
-  // Get tasks completed today
   const completedToday = tasks.filter(
     (task) =>
       task.status === "Completed" &&
@@ -374,7 +427,6 @@ const ProjectManagerDashboard = () => {
       new Date(task.completedAt).setHours(0, 0, 0, 0) === today
   ).length;
 
-  // Calculate task progress metrics
   const totalTasks = tasks.length;
   const completedCount = tasks.filter(
     (task) => task.status === "Completed"
@@ -397,7 +449,6 @@ const ProjectManagerDashboard = () => {
     setIsExporting(true);
 
     try {
-      // Convert tasks to CSV
       const headers = [
         "Type",
         "Assignee",
@@ -409,7 +460,6 @@ const ProjectManagerDashboard = () => {
         "Current Work",
       ];
       const rows = tasks.map((task) => {
-        // Get current work
         let currentWork = "";
         if (task.status === "Completed") {
           currentWork = "Completed";
@@ -443,7 +493,6 @@ const ProjectManagerDashboard = () => {
         ...rows.map((row) => row.join(",")),
       ].join("\n");
 
-      // Create download link
       const encodedUri =
         "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
       const link = document.createElement("a");
@@ -454,7 +503,6 @@ const ProjectManagerDashboard = () => {
       );
       document.body.appendChild(link);
 
-      // Trigger download
       link.click();
       document.body.removeChild(link);
 
@@ -467,7 +515,6 @@ const ProjectManagerDashboard = () => {
     }
   };
 
-  // Loading skeleton for metrics cards
   const MetricsSkeleton = () => (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
       {[...Array(4)].map((_, index) => (
@@ -486,6 +533,7 @@ const ProjectManagerDashboard = () => {
       ))}
     </div>
   );
+
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -674,7 +722,6 @@ const ProjectManagerDashboard = () => {
               </div>
             )}
 
-            {/* Tasks Overview */}
             <Card className="shadow-md">
               <CardHeader>
                 <CardTitle>Tasks Overview</CardTitle>
@@ -688,13 +735,13 @@ const ProjectManagerDashboard = () => {
                   showProgress={true}
                   showCurrentWork={true}
                   loading={isLoading}
+                  onViewCurrentWork={handleViewCurrentWork}
                 />
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="teams" className="space-y-6 animate-fade-in">
-            {/* Team Composition */}
             <Card className="shadow-md">
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -740,7 +787,6 @@ const ProjectManagerDashboard = () => {
                   </div>
                 ) : (
                   <>
-                    {/* Team Leads and Their Members */}
                     {teamLeads.length > 0 && (
                       <div className="mb-6">
                         <h3 className="text-lg font-semibold mb-4">
@@ -788,7 +834,6 @@ const ProjectManagerDashboard = () => {
                       </div>
                     )}
 
-                    {/* Users Not in Teams */}
                     {usersNotInTeams.length > 0 && (
                       <div>
                         <h3 className="text-lg font-semibold mb-4">
@@ -814,7 +859,6 @@ const ProjectManagerDashboard = () => {
                       </div>
                     )}
 
-                    {/* Empty State */}
                     {teamLeads.length === 0 && usersNotInTeams.length === 0 && (
                       <p className="text-gray-500 text-center py-4">
                         No users or team leads available.
@@ -827,7 +871,6 @@ const ProjectManagerDashboard = () => {
           </TabsContent>
 
           <TabsContent value="tasks" className="space-y-6 animate-fade-in">
-            {/* Consolidated Task Table */}
             <Card className="shadow-md">
               <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-transparent">
                 <CardTitle>All Tasks</CardTitle>
@@ -843,6 +886,7 @@ const ProjectManagerDashboard = () => {
                   showProgress={true}
                   showCurrentWork={true}
                   loading={isLoading}
+                  onViewCurrentWork={handleViewCurrentWork}
                 />
               </CardContent>
             </Card>
@@ -875,6 +919,240 @@ const ProjectManagerDashboard = () => {
             )}
           </TabsContent>
         </Tabs>
+
+        <Modal
+          isOpen={modalIsOpen}
+          onRequestClose={closeModal}
+          style={{
+            content: {
+              top: "50%",
+              left: "50%",
+              right: "auto",
+              bottom: "auto",
+              marginRight: "-50%",
+              transform: "translate(-50%, -50%)",
+              width: "90%",
+              maxWidth: "600px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              padding: "24px",
+              borderRadius: "12px",
+              backgroundColor: "#fff",
+              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            },
+            overlay: {
+              backgroundColor: "rgba(0, 0, 0, 0.6)",
+              zIndex: 1000,
+            },
+          }}
+          contentLabel="Assigned Items Modal"
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">
+              Assigned Items{" "}
+              {selectedUserId
+                ? `for ${
+                    users.find((user) => user.id === selectedUserId)?.name ||
+                    "Unknown User"
+                  }`
+                : ""}
+            </h2>
+            <button
+              onClick={closeModal}
+              className="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors duration-200"
+              aria-label="Close modal"
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          {loadingItems ? (
+            <div className="text-center py-8">
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
+              <p className="mt-2 text-gray-600">Loading assigned items...</p>
+            </div>
+          ) : assignedItems ? (
+            <div className="space-y-6">
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  UPV Lines ({assignedItems.upvLines.count})
+                </h3>
+                {assignedItems.upvLines.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.upvLines.items.map((line) => (
+                        <li
+                          key={line.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Line:</strong> {line.line_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {line.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No UPV lines assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  QC Lines ({assignedItems.qcLines.count})
+                </h3>
+                {assignedItems.qcLines.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.qcLines.items.map((line) => (
+                        <li
+                          key={line.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Line:</strong> {line.line_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {line.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No QC lines assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  Redline P&IDs ({assignedItems.redlinePIDs.count})
+                </h3>
+                {assignedItems.redlinePIDs.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.redlinePIDs.items.map((pid) => (
+                        <li
+                          key={pid.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>P&ID:</strong> {pid.pid_number}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {pid.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No Redline P&IDs assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-b border-gray-200 pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  UPV Equipment ({assignedItems.upvEquipment.count})
+                </h3>
+                {assignedItems.upvEquipment.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.upvEquipment.items.map((equip) => (
+                        <li
+                          key={equip.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Equipment:</strong> {equip.equipment_name}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {equip.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No UPV equipment assigned.
+                  </p>
+                )}
+              </div>
+
+              <div className="pb-4">
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  QC Equipment ({assignedItems.qcEquipment.count})
+                </h3>
+                {assignedItems.qcEquipment.count > 0 ? (
+                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                    <ul className="space-y-2">
+                      {assignedItems.qcEquipment.items.map((equip) => (
+                        <li
+                          key={equip.id}
+                          className="text-sm text-gray-600 flex justify-between items-center"
+                        >
+                          <span>
+                            <strong>Equipment:</strong> {equip.equipment_name}
+                          </span>
+                          <span className="text-gray-500">
+                            Project ID: {equip.project_id}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No QC equipment assigned.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-red-600 font-medium">
+                Failed to load assigned items.
+              </p>
+              <p className="text-gray-500 mt-2">
+                Please try again or contact support if the issue persists.
+              </p>
+            </div>
+          )}
+
+          {!loadingItems && (
+            <div className="mt-6 flex justify-end">
+              <Button
+                onClick={closeModal}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition-colors duration-200"
+              >
+                Close
+              </Button>
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );
