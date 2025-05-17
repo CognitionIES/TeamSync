@@ -131,6 +131,7 @@ const transformTask = (apiTask: ApiTask): Task => ({
     comment: comment.comment,
     createdAt: comment.created_at,
   })),
+  projectId: ""
 });
 
 const ProjectManagerDashboard = () => {

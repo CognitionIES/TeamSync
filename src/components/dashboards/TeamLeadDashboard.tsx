@@ -797,6 +797,12 @@ const TeamLeadDashboard = () => {
     return null;
   }
 
+  // Find the user's name based on selectedUserId
+  const selectedUser = teamMembers.find(
+    (member) => member.id === selectedUserId
+  );
+  const userName = selectedUser ? selectedUser.name : "Unknown User";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar onRefresh={handleRefresh} />
@@ -907,7 +913,7 @@ const TeamLeadDashboard = () => {
                 </Select>
               </div>
 
-              <div className="flex items-end">
+              {/* <div className="flex items-end">
                 <div className="flex items-center space-x-2 h-10">
                   <Checkbox
                     id="complex"
@@ -922,7 +928,7 @@ const TeamLeadDashboard = () => {
                     Mark as Complex
                   </label>
                 </div>
-              </div>
+              </div> */}
 
               <div className="flex items-end">
                 <Button
@@ -1097,8 +1103,7 @@ const TeamLeadDashboard = () => {
         >
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">
-              Assigned Items{" "}
-              {selectedUserId ? `for User ${selectedUserId}` : ""}
+              Assigned Items {userName ? `for ${userName}` : ""}
             </h2>
             <button
               onClick={closeModal}
