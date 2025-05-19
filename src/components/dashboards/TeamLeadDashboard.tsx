@@ -19,6 +19,7 @@ import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
+import { getRandomMessage } from "@/components/shared/messages"; // Import the new utility
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -102,6 +103,7 @@ const TeamLeadDashboard = () => {
   const [lines, setLines] = useState<Line[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [generalMessage, setGeneralMessage] = useState<string>("");
   // Form state
   const [taskType, setTaskType] = useState<TaskType | "">("");
   const [assignmentType, setAssignmentType] = useState<
@@ -135,7 +137,7 @@ const TeamLeadDashboard = () => {
 
   useEffect(() => {
     if (!isAuthenticated || !token) {
-      toast.error("Please log in to access the dashboard.");
+      toast.info(getRandomMessage("login"));
       navigate("/login", { replace: true });
     } else if (user?.role !== "Team Lead") {
       toast.error("You are not authorized to access this dashboard.");
@@ -222,17 +224,22 @@ const TeamLeadDashboard = () => {
       const response = await axios.get<{
         data: { id: number; pid_number: string; project_id: number }[];
       }>(`${API_URL}/pids?projectId=${selectedProject}`, getAuthHeaders());
-      const pidsData = response.data.data.map((pid) => ({
-        id: pid.id.toString(),
-        name: pid.pid_number,
-      }));
+      const pidsData = response.data.data
+        .filter(
+          (pid) =>
+            !assignedItemsForDuplicates.redlinePIDs.includes(pid.id.toString())
+        )
+        .map((pid) => ({
+          id: pid.id.toString(),
+          name: pid.pid_number,
+        }));
       console.log(`Fetched PIDs for project ${selectedProject}:`, pidsData);
       setPIDs(pidsData);
       setSelectedPIDs((prev) =>
         prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId))
       );
       if (pidsData.length === 0) {
-        toast.info("No P&IDs available for this project.");
+        toast.info("No unassigned P&IDs available for this project.");
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -256,11 +263,17 @@ const TeamLeadDashboard = () => {
           pid_number: string;
         }[];
       }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders());
-      const linesData = response.data.data.map((line) => ({
-        id: line.id.toString(),
-        name: line.line_number,
-        pidId: line.pid_id.toString(),
-      }));
+      const linesData = response.data.data
+        .filter(
+          (line) =>
+            !assignedItemsForDuplicates.upvLines.includes(line.id.toString()) &&
+            !assignedItemsForDuplicates.qcLines.includes(line.id.toString())
+        )
+        .map((line) => ({
+          id: line.id.toString(),
+          name: line.line_number,
+          pidId: line.pid_id.toString(),
+        }));
       console.log(`Fetched lines for project ${selectedProject}:`, linesData);
       setLines(linesData);
       setSelectedLines((prev) =>
@@ -293,18 +306,37 @@ const TeamLeadDashboard = () => {
       }>(`${API_URL}/equipment`, getAuthHeaders());
       const equipmentData = response.data.data
         .filter((equip) => equip.project_id.toString() === selectedProject)
+        .filter(
+          (equip) =>
+            !assignedItemsForDuplicates.upvEquipment.includes(
+              equip.id.toString()
+            ) &&
+            !assignedItemsForDuplicates.qcEquipment.includes(
+              equip.id.toString()
+            )
+        )
         .map((equip) => ({
           id: equip.id.toString(),
           name: equip.equipment_number,
           areaId: equip.area_id?.toString() || "",
         }));
       setEquipment(equipmentData);
+      setSelectedEquipment((prev) =>
+        prev.filter((equipId) =>
+          equipmentData.some((equip) => equip.id === equipId)
+        )
+      );
+      if (equipmentData.length === 0) {
+        toast.info("No unassigned equipment available for this project.");
+      }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching equipment:", axiosError);
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch equipment"
       );
+      setEquipment([]);
+      setSelectedEquipment([]);
     }
   };
 
@@ -344,8 +376,8 @@ const TeamLeadDashboard = () => {
                 commentMap.set(key, {
                   id: comment.id.toString(),
                   userId: comment.user_id.toString(),
-                  userName: comment.user_name || "Unknown",
-                  userRole: comment.user_role || "Unknown",
+                  userName: comment.user_name || "",
+                  userRole: comment.user_role || "",
                   comment: comment.comment || "",
                   createdAt: comment.created_at,
                 });
@@ -365,8 +397,8 @@ const TeamLeadDashboard = () => {
               }
               return {
                 id: item.id.toString(),
-                name: item.name || "Unnamed Item",
-                type: item.item_type || "Unknown",
+                name: item.name || "",
+                type: item.item_type || "",
                 completed: item.completed || false,
               };
             })
@@ -375,7 +407,7 @@ const TeamLeadDashboard = () => {
           return {
             id: task.id.toString(),
             type: task.type as TaskType,
-            assignee: task.assignee || "Unknown",
+            assignee: task.assignee || "",
             assigneeId: task.assignee_id.toString(),
             status: task.status || "Assigned",
             isComplex: task.is_complex || false,
@@ -443,6 +475,7 @@ const TeamLeadDashboard = () => {
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
       fetchProjects();
+      setGeneralMessage(getRandomMessage("general"));
     }
   }, [isAuthenticated, user, token]);
 
@@ -513,43 +546,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  const getSelectableItems = () => {
-    let availablePIDs: PID[] = [];
-    let availableLines: Line[] = [];
-    let availableEquipment: Equipment[] = [];
-
-    if (taskType === "Redline") {
-      availablePIDs = pids.filter(
-        (pid) => !assignedItemsForDuplicates.redlinePIDs.includes(pid.id)
-      );
-    } else if (taskType === "UPV") {
-      availableLines = lines;
-      availableEquipment = equipment.filter(
-        (equip) => !assignedItemsForDuplicates.upvEquipment.includes(equip.id)
-      );
-    } else if (taskType === "QC") {
-      availablePIDs = pids.filter(
-        (pid) => !assignedItemsForDuplicates.redlinePIDs.includes(pid.id)
-      );
-      availableLines = lines;
-      availableEquipment = equipment.filter(
-        (equip) => !assignedItemsForDuplicates.qcEquipment.includes(equip.id)
-      );
-    }
-
-    return {
-      pids: availablePIDs,
-      lines: availableLines,
-      equipment: availableEquipment,
-    };
-  };
-
-  const {
-    pids: selectablePIDs,
-    lines: selectableLines,
-    equipment: selectableEquipment,
-  } = getSelectableItems();
-
   const handleRefresh = () => {
     if (!selectedProject) {
       toast.error("Please select a project first.");
@@ -564,6 +560,7 @@ const TeamLeadDashboard = () => {
     ])
       .then(() => {
         toast.success("Data refreshed");
+        setGeneralMessage(getRandomMessage("general"));
       })
       .catch((error) => {
         console.error("Error refreshing data:", error);
@@ -761,8 +758,12 @@ const TeamLeadDashboard = () => {
         }
       }
 
-      await fetchTasks();
-      await fetchLines();
+      await Promise.all([
+        fetchTasks(),
+        fetchPIDs(),
+        fetchLines(),
+        fetchEquipment(),
+      ]);
 
       setTaskType("");
       setAssignmentType("");
@@ -772,7 +773,11 @@ const TeamLeadDashboard = () => {
       setAssignee("");
       setIsComplex(false);
 
-      toast.success(`Task assigned to ${assigneeMember.name}`);
+      toast.success(
+        `Task assigned to ${assigneeMember.name}. ${getRandomMessage(
+          "completion"
+        )}`
+      );
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error assigning task:", axiosError);
@@ -797,11 +802,10 @@ const TeamLeadDashboard = () => {
     return null;
   }
 
-  // Find the user's name based on selectedUserId
   const selectedUser = teamMembers.find(
     (member) => member.id === selectedUserId
   );
-  const userName = selectedUser ? selectedUser.name : "Unknown User";
+  const userName = selectedUser ? selectedUser.name : "";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -811,6 +815,11 @@ const TeamLeadDashboard = () => {
         <header className="mb-6">
           <h1 className="text-2xl font-bold">Team Lead Dashboard</h1>
           <p className="text-gray-500">Assign and manage tasks for your team</p>
+          {generalMessage && (
+            <p className="text-sm text-gray-600 italic mt-2">
+              "{generalMessage}"
+            </p>
+          )}
         </header>
 
         <Card className="mb-6">
@@ -913,23 +922,6 @@ const TeamLeadDashboard = () => {
                 </Select>
               </div>
 
-              {/* <div className="flex items-end">
-                <div className="flex items-center space-x-2 h-10">
-                  <Checkbox
-                    id="complex"
-                    checked={isComplex}
-                    onCheckedChange={(checked) => setIsComplex(!!checked)}
-                    disabled={!taskType}
-                  />
-                  <label
-                    htmlFor="complex"
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    Mark as Complex
-                  </label>
-                </div>
-              </div> */}
-
               <div className="flex items-end">
                 <Button
                   onClick={handleAssign}
@@ -955,11 +947,11 @@ const TeamLeadDashboard = () => {
                 </h3>
 
                 <div className="max-h-60 overflow-y-auto space-y-2">
-                  {assignmentType === "PID" && selectablePIDs.length === 0 && (
+                  {assignmentType === "PID" && pids.length === 0 && (
                     <p className="text-sm text-gray-500">No available P&IDs</p>
                   )}
                   {assignmentType === "PID" &&
-                    selectablePIDs.map((pid) => (
+                    pids.map((pid) => (
                       <div key={pid.id} className="flex items-center space-x-2">
                         <Checkbox
                           id={pid.id}
@@ -980,14 +972,11 @@ const TeamLeadDashboard = () => {
                       </div>
                     ))}
 
+                  {assignmentType === "Line" && lines.length === 0 && (
+                    <p className="text-sm text-gray-500">No available lines</p>
+                  )}
                   {assignmentType === "Line" &&
-                    selectableLines.length === 0 && (
-                      <p className="text-sm text-gray-500">
-                        No available lines
-                      </p>
-                    )}
-                  {assignmentType === "Line" &&
-                    selectableLines.map((line) => (
+                    lines.map((line) => (
                       <div
                         key={line.id}
                         className="flex items-center space-x-2"
@@ -1011,14 +1000,13 @@ const TeamLeadDashboard = () => {
                       </div>
                     ))}
 
+                  {assignmentType === "Equipment" && equipment.length === 0 && (
+                    <p className="text-sm text-gray-500">
+                      No available equipment
+                    </p>
+                  )}
                   {assignmentType === "Equipment" &&
-                    selectableEquipment.length === 0 && (
-                      <p className="text-sm text-gray-500">
-                        No available equipment
-                      </p>
-                    )}
-                  {assignmentType === "Equipment" &&
-                    selectableEquipment.map((equip) => (
+                    equipment.map((equip) => (
                       <div
                         key={equip.id}
                         className="flex items-center space-x-2"
@@ -1058,7 +1046,12 @@ const TeamLeadDashboard = () => {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <p className="text-gray-500">Loading tasks...</p>
+              <div className="text-center py-8">
+                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
+                <p className="mt-2 text-gray-600">
+                  {getRandomMessage("loading")}
+                </p>
+              </div>
             ) : tasks.length === 0 ? (
               <p className="text-gray-500">No tasks available.</p>
             ) : (
@@ -1130,7 +1123,9 @@ const TeamLeadDashboard = () => {
           {loadingItems ? (
             <div className="text-center py-8">
               <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
-              <p className="mt-2 text-gray-600">Loading assigned items...</p>
+              <p className="mt-2 text-gray-600">
+                {getRandomMessage("loading")}
+              </p>
             </div>
           ) : assignedItems ? (
             <div className="space-y-6">
@@ -1282,7 +1277,7 @@ const TeamLeadDashboard = () => {
           ) : (
             <div className="text-center py-8">
               <p className="text-red-600 font-medium">
-                Failed to load assigned items.
+                {getRandomMessage("error")}
               </p>
               <p className="text-gray-500 mt-2">
                 Please try again or contact support if the issue persists.

@@ -21,6 +21,7 @@ import { UserRole } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { getRandomMessage } from "@/components/shared/messages";
 
 // API URL - will be taken from environment in production
 const API_URL =
@@ -117,7 +118,7 @@ const LoginForm = () => {
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl text-center">TeamSync</CardTitle>
           <CardDescription className="text-center">
-            Enter your credentials to access your dashboard
+            {getRandomMessage("login")}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
