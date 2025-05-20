@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -18,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download } from "lucide-react";
+import { Download, Eye, EyeOff, Plus } from "lucide-react";
 import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import {
@@ -35,12 +36,25 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/AuthContext";
 import axios from "axios";
-import { getRandomMessage } from "@/components/shared/messages"; // Import getRandomMessage
+import { getRandomMessage } from "@/components/shared/messages";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import LoginAnimation from "../landing/LoginAnimation";
 
-// API URL - consistent with AuthContext
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+// API URL - Keeping port 8080 based on logs, but adding debugging
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+
+// Log the API_URL to debug environment variable issues
+console.log("VITE_API_URL from env:", import.meta.env.VITE_API_URL);
+console.log("Using API_URL:", API_URL);
 
 // Helper function to truncate text
 const truncateText = (text: string | undefined | null, maxLength: number) => {
@@ -62,13 +76,25 @@ const formatTime = (dateString: string) => {
   });
 };
 
+interface Project {
+  id: string;
+  name: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  role: "Team Member" | "Team Lead";
+  projectId?: string;
+}
+
 const AdminDashboard = () => {
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [selectedTeam, setSelectedTeam] = useState<string>("all");
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
   const [projectStats, setProjectStats] = useState({
     pidCount: 0,
@@ -83,11 +109,26 @@ const AdminDashboard = () => {
   const [auditLogs, setAuditLogs] = useState([]);
   const [currentPage, setCurrentPage] = useState(1); // Pagination: Current page
   const [logsPerPage, setLogsPerPage] = useState(10); // Pagination: Logs per page
+
+  // User management state
+  const [users, setUsers] = useState<User[]>([]);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserRole, setNewUserRole] = useState<
+    "Team Member" | "Team Lead" | ""
+  >("");
+  const [newUserProject, setNewUserProject] = useState<string>("none");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, token } = useAuth();
 
-  // Fetch all necessary data
+  // Fetch all necessary data (projects, teams, stats, status, logs, users)
   const fetchData = async () => {
     setIsLoading(true);
     try {
@@ -104,23 +145,23 @@ const AdminDashboard = () => {
 
       const queryParams = new URLSearchParams();
       if (selectedProject !== "all") {
-        queryParams.append("projectId", selectedProject); // Use projectId instead of project name
+        queryParams.append("projectId", selectedProject);
       }
       if (selectedTeam !== "all") {
-        queryParams.append("teamLead", selectedTeam); // Use teamLead instead of transformed name
+        queryParams.append("teamLead", selectedTeam);
       }
       const queryString = queryParams.toString();
       const urlSuffix = queryString ? `?${queryString}` : "";
 
       const projectsPromise = axios
-        .get(`${API_URL}/projects`, config) // Fetch all projects regardless of filter
+        .get(`${API_URL}/projects`, config)
         .catch((error) => {
           console.error("Error fetching projects:", error);
           return { data: { data: [] } };
         });
 
       const teamsPromise = axios
-        .get(`${API_URL}/teams`, config) // Fetch all teams regardless of filter
+        .get(`${API_URL}/teams`, config)
         .catch((error) => {
           console.error("Error fetching teams:", error);
           return { data: { data: [] } };
@@ -151,18 +192,27 @@ const AdminDashboard = () => {
           return { data: { data: [] } };
         });
 
+      const usersPromise = axios
+        .get(`${API_URL}/users`, config)
+        .catch((error) => {
+          console.error("Error fetching users:", error);
+          return { data: { data: [] } };
+        });
+
       const [
         projectsResponse,
         teamsResponse,
         statsResponse,
         statusResponse,
         logsResponse,
+        usersResponse,
       ] = await Promise.all([
         projectsPromise,
         teamsPromise,
         statsPromise,
         statusPromise,
         logsPromise,
+        usersPromise,
       ]);
 
       console.log("Projects Response:", projectsResponse.data);
@@ -170,6 +220,7 @@ const AdminDashboard = () => {
       console.log("Stats Response:", statsResponse.data);
       console.log("Status Response:", statusResponse.data);
       console.log("Logs Response:", logsResponse.data);
+      console.log("Users Response:", usersResponse.data);
 
       setProjects(
         projectsResponse.data.data.map(
@@ -209,6 +260,14 @@ const AdminDashboard = () => {
         },
       ]);
       setAuditLogs(logsResponse.data.data || []);
+      setUsers(
+        usersResponse.data.data.map((user: any) => ({
+          id: user.id.toString(),
+          name: user.name,
+          role: user.role,
+          projectId: user.projectId?.toString(),
+        })) || []
+      );
 
       toast.success("Data refreshed");
     } catch (error) {
@@ -331,6 +390,84 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleAddUser = async () => {
+    // Validate required fields
+    if (!newUserName || !newUserRole) {
+      toast.error("Please provide a name and role for the new user");
+      return;
+    }
+
+    // Validate passwords
+    if (!newUserPassword || !confirmPassword) {
+      toast.error("Please provide a password and confirm it");
+      return;
+    }
+
+    if (newUserPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+
+    setIsAddingUser(true);
+    try {
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+
+      const userData: any = {
+        name: newUserName,
+        role: newUserRole,
+        password: newUserPassword,
+      };
+
+      if (newUserProject !== "none") {
+        userData.projectId = newUserProject;
+      }
+
+      // Log the request details for debugging
+      console.log("Posting to URL:", `${API_URL}/users`);
+      console.log("Request payload:", userData);
+      console.log("Request headers:", config.headers);
+
+      const response = await axios.post(`${API_URL}/users`, userData, config);
+
+      // Log the response for debugging
+      console.log("Add user response:", response.data);
+
+      // Refresh user list after adding
+      await fetchData();
+
+      // Reset form and close modal
+      setNewUserName("");
+      setNewUserRole("");
+      setNewUserProject("none");
+      setNewUserPassword("");
+      setConfirmPassword("");
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setIsModalOpen(false);
+
+      toast.success(`User ${newUserName} added successfully`);
+    } catch (error) {
+      console.error("Error adding user:", {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      const errorMessage =
+        error.response?.status === 404
+          ? "User creation endpoint not found. Please check the backend API route (expected POST /api/users)."
+          : error.response?.data?.message || "Failed to add user";
+      toast.error(errorMessage);
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
   // Calculate paginated logs
   const indexOfLastLog = currentPage * logsPerPage;
   const indexOfFirstLog = indexOfLastLog - logsPerPage;
@@ -350,7 +487,8 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen ">
+      <LoginAnimation />
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">
@@ -359,7 +497,7 @@ const AdminDashboard = () => {
             <h1 className="text-2xl font-bold">Admin Dashboard</h1>
             <p className="text-gray-500">Project statistics and audit trails</p>
           </div>
-
+          
           <div className="mt-4 sm:mt-0">
             <Button
               variant="outline"
@@ -494,6 +632,142 @@ const AdminDashboard = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Add User Modal */}
+        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Add New User</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Name</label>
+                  <Input
+                    value={newUserName}
+                    onChange={(e) => setNewUserName(e.target.value)}
+                    placeholder="Enter user name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Role</label>
+                  <Select
+                    value={newUserRole}
+                    onValueChange={(value) =>
+                      setNewUserRole(value as "Team Member" | "Team Lead")
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Team Member">Team Member</SelectItem>
+                      <SelectItem value="Team Lead">Team Lead</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Project (Optional)
+                  </label>
+                  <Select
+                    value={newUserProject}
+                    onValueChange={setNewUserProject}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      placeholder="Enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      aria-label={
+                        showConfirmPassword ? "Hide password" : "Show password"
+                      }
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff size={20} />
+                      ) : (
+                        <Eye size={20} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // Reset form and close modal
+                  setNewUserName("");
+                  setNewUserRole("");
+                  setNewUserProject("none");
+                  setNewUserPassword("");
+                  setConfirmPassword("");
+                  setShowPassword(false);
+                  setShowConfirmPassword(false);
+                  setIsModalOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddUser}
+                disabled={isAddingUser}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isAddingUser ? "Adding..." : "Add User"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Audit Trails */}
         <Card>

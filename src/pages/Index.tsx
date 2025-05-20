@@ -99,7 +99,7 @@ const Index = () => {
       <BackgroundEffect />
 
       {/* Header Navigation */}
-      <header className="relative z-10 w-full py-6 px-8 flex justify-between items-center">
+      <header className="px-24 relative z-10 w-full py-6 px-8 flex justify-between items-center">
         <div className="flex items-center space-x-3">
           <PipingLogo className="h-10 w-10" />
           <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-cyan-500">
@@ -115,7 +115,7 @@ const Index = () => {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col md:flex-row items-center justify-center px-8 py-12 relative z-10">
+      <main className="px-24 flex-1 flex flex-col md:flex-row items-center justify-center px-8 py-12 relative z-10">
         {/* Left Side - Hero Content */}
         <div className="w-full md:w-1/2 space-y-6 pr-0 md:pr-10 text-center md:text-left">
           <div
