@@ -20,6 +20,7 @@ import { InfoIcon } from "lucide-react";
 import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import LoginAnimation from "../landing/LoginAnimation";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -468,7 +469,8 @@ const TeamMemberDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen ">
+      <LoginAnimation />
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">
