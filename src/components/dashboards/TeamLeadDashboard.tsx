@@ -19,7 +19,7 @@ import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
-import { getRandomMessage } from "@/components/shared/messages"; // Import the new utility
+import { getRandomMessage } from "@/components/shared/messages";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -122,6 +122,8 @@ const TeamLeadDashboard = () => {
     useState<FetchedAssignedItems | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(null);
+  const [selectedItemType, setSelectedItemType] = useState<"PID" | "Line" | "Equipment" | null>(null);
 
   // Track assigned items to prevent duplicates
   const [assignedItemsForDuplicates, setAssignedItemsForDuplicates] =
@@ -376,7 +378,9 @@ const TeamLeadDashboard = () => {
                 commentMap.set(key, {
                   id: comment.id.toString(),
                   userId: comment.user_id.toString(),
-                  userName: comment.user_name || "",
+                  userName: comment
+
+.user_name || "",
                   userRole: comment.user_role || "",
                   comment: comment.comment || "",
                   createdAt: comment.created_at,
@@ -451,6 +455,17 @@ const TeamLeadDashboard = () => {
     setSelectedUserId(userId);
     setLoadingItems(true);
     try {
+      // Find the task to determine its type and item type
+      const task = tasks.find((t) => t.id === taskId);
+      if (task) {
+        setSelectedTaskType(task.type);
+        const itemType = task.items.length > 0 ? task.items[0].type : null;
+        setSelectedItemType(itemType as "PID" | "Line" | "Equipment" | null);
+      } else {
+        setSelectedTaskType(null);
+        setSelectedItemType(null);
+      }
+
       const items = await fetchAssignedItems(userId, taskId);
       setAssignedItems(items);
       setModalIsOpen(true);
@@ -461,6 +476,8 @@ const TeamLeadDashboard = () => {
         axiosError.response?.data?.message || "Failed to fetch assigned items"
       );
       setAssignedItems(null);
+      setSelectedTaskType(null);
+      setSelectedItemType(null);
     } finally {
       setLoadingItems(false);
     }
@@ -470,6 +487,8 @@ const TeamLeadDashboard = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
     setSelectedUserId(null);
+    setSelectedTaskType(null);
+    setSelectedItemType(null);
   };
 
   useEffect(() => {
@@ -1127,152 +1146,167 @@ const TeamLeadDashboard = () => {
                 {getRandomMessage("loading")}
               </p>
             </div>
-          ) : assignedItems ? (
+          ) : assignedItems && selectedTaskType && selectedItemType ? (
             <div className="space-y-6">
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  UPV Lines ({assignedItems.upvLines.count})
-                </h3>
-                {assignedItems.upvLines.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.upvLines.items.map((line) => (
-                        <li
-                          key={line.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Line:</strong> {line.line_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {line.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No UPV lines assigned.
-                  </p>
-                )}
-              </div>
+              {/* UPV Lines */}
+              {selectedTaskType === "UPV" && selectedItemType === "Line" && (
+                <div className="border-b border-gray-200 pb-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    UPV Lines ({assignedItems.upvLines.count})
+                  </h3>
+                  {assignedItems.upvLines.count > 0 ? (
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                      <ul className="space-y-2">
+                        {assignedItems.upvLines.items.map((line) => (
+                          <li
+                            key={line.id}
+                            className="text-sm text-gray-600 flex justify-between items-center"
+                          >
+                            <span>
+                              <strong>Line:</strong> {line.line_number}
+                            </span>
+                            <span className="text-gray-500">
+                              Project ID: {line.project_id}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No UPV lines assigned.
+                    </p>
+                  )}
+                </div>
+              )}
 
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  QC Lines ({assignedItems.qcLines.count})
-                </h3>
-                {assignedItems.qcLines.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.qcLines.items.map((line) => (
-                        <li
-                          key={line.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Line:</strong> {line.line_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {line.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No QC lines assigned.
-                  </p>
-                )}
-              </div>
+              {/* QC Lines */}
+              {selectedTaskType === "QC" && selectedItemType === "Line" && (
+                <div className="border-b border-gray-200 pb-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    QC Lines ({assignedItems.qcLines.count})
+                  </h3>
+                  {assignedItems.qcLines.count > 0 ? (
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                      <ul className="space-y-2">
+                        {assignedItems.qcLines.items.map((line) => (
+                          <li
+                            key={line.id}
+                            className="text-sm text-gray-600 flex justify-between items-center"
+                          >
+                            <span>
+                              <strong>Line:</strong> {line.line_number}
+                            </span>
+                            <span className="text-gray-500">
+                              Project ID: {line.project_id}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No QC lines assigned.
+                    </p>
+                  )}
+                </div>
+              )}
 
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  Redline P&IDs ({assignedItems.redlinePIDs.count})
-                </h3>
-                {assignedItems.redlinePIDs.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.redlinePIDs.items.map((pid) => (
-                        <li
-                          key={pid.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>P&ID:</strong> {pid.pid_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {pid.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No Redline P&IDs assigned.
-                  </p>
-                )}
-              </div>
+              {/* Redline P&IDs */}
+              {selectedTaskType === "Redline" && selectedItemType === "PID" && (
+                <div className="border-b border-gray-200 pb-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    Redline P&IDs ({assignedItems.redlinePIDs.count})
+                  </h3>
+                  {assignedItems.redlinePIDs.count > 0 ? (
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                      <ul className="space-y-2">
+                        {assignedItems.redlinePIDs.items.map((pid) => (
+                          <li
+                            key={pid.id}
+                            className="text-sm text-gray-600 flex justify-between items-center"
+                          >
+                            <span>
+                              <strong>P&ID:</strong> {pid.pid_number}
+                            </span>
+                            <span className="text-gray-500">
+                              Project ID: {pid.project_id}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No Redline P&IDs assigned.
+                    </p>
+                  )}
+                </div>
+              )}
 
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  UPV Equipment ({assignedItems.upvEquipment.count})
-                </h3>
-                {assignedItems.upvEquipment.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.upvEquipment.items.map((equip) => (
-                        <li
-                          key={equip.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Equipment:</strong> {equip.equipment_name}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {equip.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No UPV equipment assigned.
-                  </p>
-                )}
-              </div>
+              {/* UPV Equipment */}
+              {selectedTaskType === "UPV" && selectedItemType === "Equipment" && (
+                <div className="border-b border-gray-200 pb-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    UPV Equipment ({assignedItems.upvEquipment.count})
+                  </h3>
+                  {assignedItems.upvEquipment.count > 0 ? (
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                      <ul className="space-y-2">
+                        {assignedItems.upvEquipment.items.map((equip) => (
+                          <li
+                            key={equip.id}
+                            className="text-sm text-gray-600 flex justify-between items-center"
+                          >
+                            <span>
+                              <strong>Equipment:</strong> {equip.equipment_name}
+                            </span>
+                            <span className="text-gray-500">
+                              Project ID: {equip.project_id}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No UPV equipment assigned.
+                    </p>
+                  )}
+                </div>
+              )}
 
-              <div className="pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  QC Equipment ({assignedItems.qcEquipment.count})
-                </h3>
-                {assignedItems.qcEquipment.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.qcEquipment.items.map((equip) => (
-                        <li
-                          key={equip.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Equipment:</strong> {equip.equipment_name}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {equip.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No QC equipment assigned.
-                  </p>
-                )}
-              </div>
+              {/* QC Equipment */}
+              {selectedTaskType === "QC" && selectedItemType === "Equipment" && (
+                <div className="pb-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                    QC Equipment ({assignedItems.qcEquipment.count})
+                  </h3>
+                  {assignedItems.qcEquipment.count > 0 ? (
+                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                      <ul className="space-y-2">
+                        {assignedItems.qcEquipment.items.map((equip) => (
+                          <li
+                            key={equip.id}
+                            className="text-sm text-gray-600 flex justify-between items-center"
+                          >
+                            <span>
+                              <strong>Equipment:</strong> {equip.equipment_name}
+                            </span>
+                            <span className="text-gray-500">
+                              Project ID: {equip.project_id}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No QC equipment assigned.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8">

@@ -35,10 +35,11 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
-  return date.toLocaleTimeString("en-US", {
+  return date.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Asia/Kolkata",
   });
 };
 

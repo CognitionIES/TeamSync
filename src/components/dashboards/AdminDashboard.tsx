@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/context/AuthContext";
 import axios from "axios";
+import { getRandomMessage } from "@/components/shared/messages"; // Import getRandomMessage
 
 // API URL - consistent with AuthContext
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
@@ -53,10 +54,11 @@ const truncateText = (text: string | undefined | null, maxLength: number) => {
 // Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
-  return date.toLocaleTimeString("en-US", {
+  return date.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Asia/Kolkata",
   });
 };
 
@@ -102,23 +104,23 @@ const AdminDashboard = () => {
 
       const queryParams = new URLSearchParams();
       if (selectedProject !== "all") {
-        queryParams.append("project", selectedProject);
+        queryParams.append("projectId", selectedProject); // Use projectId instead of project name
       }
       if (selectedTeam !== "all") {
-        queryParams.append("team", selectedTeam);
+        queryParams.append("teamLead", selectedTeam); // Use teamLead instead of transformed name
       }
       const queryString = queryParams.toString();
       const urlSuffix = queryString ? `?${queryString}` : "";
 
       const projectsPromise = axios
-        .get(`${API_URL}/projects${urlSuffix}`, config)
+        .get(`${API_URL}/projects`, config) // Fetch all projects regardless of filter
         .catch((error) => {
           console.error("Error fetching projects:", error);
           return { data: { data: [] } };
         });
 
       const teamsPromise = axios
-        .get(`${API_URL}/teams${urlSuffix}`, config)
+        .get(`${API_URL}/teams`, config) // Fetch all teams regardless of filter
         .catch((error) => {
           console.error("Error fetching teams:", error);
           return { data: { data: [] } };
@@ -163,10 +165,16 @@ const AdminDashboard = () => {
         logsPromise,
       ]);
 
+      console.log("Projects Response:", projectsResponse.data);
+      console.log("Teams Response:", teamsResponse.data);
+      console.log("Stats Response:", statsResponse.data);
+      console.log("Status Response:", statusResponse.data);
+      console.log("Logs Response:", logsResponse.data);
+
       setProjects(
         projectsResponse.data.data.map(
           (project: { id: string; name: string }) => ({
-            id: project.id,
+            id: project.id.toString(),
             name: project.name,
           })
         ) || []
@@ -336,7 +344,7 @@ const AdminDashboard = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-600">Loading...</div>
+        <div className="text-gray-600">{getRandomMessage("loading")}</div>
       </div>
     );
   }
@@ -378,15 +386,12 @@ const AdminDashboard = () => {
                   onValueChange={setSelectedProject}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="All Projects" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Projects</SelectItem>
                     {projects.map((project) => (
-                      <SelectItem
-                        key={project.id}
-                        value={project.name.toLowerCase().replace(/\s+/g, "-")}
-                      >
+                      <SelectItem key={project.id} value={project.id}>
                         {project.name}
                       </SelectItem>
                     ))}
@@ -400,15 +405,12 @@ const AdminDashboard = () => {
                 </label>
                 <Select value={selectedTeam} onValueChange={setSelectedTeam}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="All Teams" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Teams</SelectItem>
                     {teams.map((team: string) => (
-                      <SelectItem
-                        key={team}
-                        value={team.toLowerCase().replace(/\s+/g, "-")}
-                      >
+                      <SelectItem key={team} value={team}>
                         {team}
                       </SelectItem>
                     ))}
@@ -423,7 +425,13 @@ const AdminDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <Card>
             <CardHeader>
-              <CardTitle>Project Metrics</CardTitle>
+              <CardTitle>
+                {selectedProject === "all"
+                  ? "Overall Project Metrics"
+                  : `Project Metrics for ${
+                      projects.find((p) => p.id === selectedProject)?.name
+                    }`}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
@@ -449,7 +457,11 @@ const AdminDashboard = () => {
 
           <Card className="col-span-1 md:col-span-2">
             <CardHeader>
-              <CardTitle>Task Status Breakdown</CardTitle>
+              <CardTitle>
+                {selectedTeam === "all"
+                  ? "Overall Task Status Breakdown"
+                  : `Task Status Breakdown for ${selectedTeam}`}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="h-64 w-full">
