@@ -20,6 +20,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
+import LoginAnimation from "../landing/LoginAnimation";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -827,7 +828,8 @@ const TeamLeadDashboard = () => {
   const userName = selectedUser ? selectedUser.name : "";
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen ">
+      <LoginAnimation />
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">

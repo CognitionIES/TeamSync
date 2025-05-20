@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import {
@@ -35,6 +36,8 @@ import axios, { AxiosError } from "axios";
 import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import BackgroundEffect from "../landing/BackgroundEffect";
+import LoginAnimation from "../landing/LoginAnimation";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api"; // Updated to match port 3000
 
@@ -309,7 +312,8 @@ const DataEntryDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen ">
+      <LoginAnimation />
       <Navbar onRefresh={handleRefresh} />
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
