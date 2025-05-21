@@ -25,6 +25,7 @@ import TaskTable from "../shared/TaskTable";
 import TeamPerformanceView from "../shared/TeamPerformanceView";
 import { Task, TaskStatus, TaskType, UserRole } from "@/types";
 import Modal from "react-modal";
+import DashboardBackground from "../shared/DashboardBackground";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -587,7 +588,8 @@ const ProjectManagerDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen">
+      <DashboardBackground role="Project Manager" />
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-8">

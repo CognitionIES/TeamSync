@@ -279,7 +279,7 @@ const ConsolidatedTaskTable = ({
                   </TableCell>
                   <TableCell>{task.assignee}</TableCell>
                   <TableCell>
-                    <StatusBadge status={task.status} isComplex={task.isComplex} />
+                    <StatusBadge status={task.status as TaskStatus} isComplex={task.isComplex} />
                   </TableCell>
                   <TableCell>
                     <div className="w-full bg-gray-200 rounded-full h-2">

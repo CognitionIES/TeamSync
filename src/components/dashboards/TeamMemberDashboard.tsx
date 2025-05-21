@@ -20,7 +20,7 @@ import { InfoIcon } from "lucide-react";
 import axios, { AxiosError } from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import LoginAnimation from "../landing/LoginAnimation";
+import { getRandomMessage } from "@/components/shared/messages";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -212,6 +212,7 @@ const formatTime = (dateString: string) => {
     timeZone: "Asia/Kolkata",
   });
 };
+
 const TeamMemberDashboard = () => {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -252,7 +253,7 @@ const TeamMemberDashboard = () => {
     try {
       console.log("Starting fetchTasks...");
       console.log("Setting isLoading to true...");
-      setIsLoading(true); // Line 214
+      setIsLoading(true);
       console.log("isLoading set to true");
 
       console.log("Making API request to /api/tasks...");
@@ -321,7 +322,7 @@ const TeamMemberDashboard = () => {
           updatedAt: task.updated_at || new Date().toISOString(),
           completedAt: task.completed_at || null,
           progress: task.progress || 0,
-          projectId: task.project_id?.toString() || "Unknown", // Ensure projectId is included
+          projectId: task.project_id?.toString() || "Unknown",
           items: mappedItems,
           comments: uniqueComments,
         };
@@ -330,7 +331,7 @@ const TeamMemberDashboard = () => {
       console.log("Mapped tasks:", tasksData);
       setTasks(tasksData);
     } catch (error) {
-      console.error("Raw error in fetchTasks:", error); // Line 284
+      console.error("Raw error in fetchTasks:", error);
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching tasks:", {
         message: axiosError.message,
@@ -341,7 +342,7 @@ const TeamMemberDashboard = () => {
         axiosError.response?.data?.message || "Failed to fetch tasks"
       );
     } finally {
-      console.log("Setting isLoading to false..."); // Line 295
+      console.log("Setting isLoading to false...");
       setIsLoading(false);
       console.log("isLoading set to false");
     }
@@ -469,8 +470,7 @@ const TeamMemberDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen ">
-      <LoginAnimation />
+    <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">
@@ -487,6 +487,11 @@ const TeamMemberDashboard = () => {
               {taskCounts.completed} Completed
             </div>
           </div>
+          {/* General Messages */}
+            <AlertDescription className="text-gray-700 mt-4">
+              {getRandomMessage("general") ||
+                "Stay on top of your tasks to keep the project moving!"}
+            </AlertDescription>
         </header>
 
         {assignedTasks.length > 0 && (
@@ -512,7 +517,7 @@ const TeamMemberDashboard = () => {
 
             <TabsContent value="assigned" className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
                 assignedTasks.map((task) => (
                   <RedlineTaskCard
@@ -525,14 +530,14 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No assigned tasks
+                  {getRandomMessage("noTasks") || "No assigned tasks"}
                 </div>
               )}
             </TabsContent>
 
             <TabsContent value="inProgress" className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
                 inProgressTasks.map((task) => (
                   <RedlineTaskCard
@@ -545,14 +550,14 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No in-progress tasks
+                  {getRandomMessage("noTasks") || "No in-progress tasks"}
                 </div>
               )}
             </TabsContent>
 
             <TabsContent value="completed" className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
                 completedTasks.map((task) => (
                   <RedlineTaskCard
@@ -563,7 +568,7 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No completed tasks
+                  {getRandomMessage("noTasks") || "No completed tasks"}
                 </div>
               )}
             </TabsContent>
@@ -578,7 +583,7 @@ const TeamMemberDashboard = () => {
             </h2>
             <div className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
                 assignedTasks.map((task) => (
                   <RedlineTaskCard
@@ -591,7 +596,7 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No assigned tasks
+                  {getRandomMessage("noTasks") || "No assigned tasks"}
                 </div>
               )}
             </div>
@@ -604,7 +609,7 @@ const TeamMemberDashboard = () => {
             </h2>
             <div className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
                 inProgressTasks.map((task) => (
                   <RedlineTaskCard
@@ -617,7 +622,7 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No in-progress tasks
+                  {getRandomMessage("noTasks") || "No in-progress tasks"}
                 </div>
               )}
             </div>
@@ -630,7 +635,7 @@ const TeamMemberDashboard = () => {
             </h2>
             <div className="space-y-4">
               {isLoading ? (
-                <div className="text-center py-8">Loading tasks...</div>
+                <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
                 completedTasks.map((task) => (
                   <RedlineTaskCard
@@ -641,7 +646,7 @@ const TeamMemberDashboard = () => {
                 ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  No completed tasks
+                  {getRandomMessage("noTasks") || "No completed tasks"}
                 </div>
               )}
             </div>

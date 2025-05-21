@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
 import LoginAnimation from "../landing/LoginAnimation";
+import DashboardBackground from "../shared/DashboardBackground";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -829,7 +830,7 @@ const TeamLeadDashboard = () => {
 
   return (
     <div className="min-h-screen ">
-      <LoginAnimation />
+      <DashboardBackground role="Team Lead" />
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">
