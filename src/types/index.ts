@@ -72,6 +72,9 @@ export interface TaskComment {
 }
 
 export interface Task {
+  pidNumber: string;
+  areaNumber: string;
+  projectName: string;
   id: string;
   type: TaskType;
   assignee: string;

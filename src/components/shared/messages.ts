@@ -12,7 +12,7 @@ const messages: Messages = {
     "Remember, the only thing worse than a bug is a bug that’s not reported. It’s like a bad haircut—everyone sees it, but nobody wants to talk about it",
     "The deadline is approaching faster than a cat on a laser pointer. Stay focused!",
     "Deadline is a negative inspiration, still better than no inspiration at all",
-    "I’m not lazy, I’m just conserving energy for… nothing"
+    "I’m not lazy, I’m just conserving energy for… nothing",
   ],
   error: [
     "You’ve wandered too far from the path, my friend.",
@@ -24,7 +24,6 @@ const messages: Messages = {
     "Houston, we have a problem",
     "An error occurred, but don’t worry, it’s not your fault… this time",
     "The server is taking a coffee break, please try again later",
-
   ],
   loading: [
     "Patience is the key to victory, not speed.",

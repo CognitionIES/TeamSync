@@ -128,13 +128,27 @@ const RedlineTaskCard = ({
             {task.status}
           </div>
         </div>
-        <div className="text-center mt-2 py-1 px-3 bg-blue-100 rounded-md inline-block">
-          <p className="text-base font-medium text-blue-800">
-            P&ID: {pidCount}, Lines: {lineCount}
-          </p>
-          {pidItem && (
-            <p className="text-sm text-blue-700 mt-1">{pidItem.name}</p>
-          )}
+        <div className="mt-2 space-y-2">
+          {/* Display Project Name and Area Number */}
+          <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
+            <p className="text-base font-medium text-blue-800">
+              Project: {task.projectName || "Unknown"}
+            </p>
+            <p className="text-sm text-blue-700 mt-1">
+              Area No: {task.areaNumber || "N/A"}
+            </p>
+          </div>
+          {/* Display P&ID Details */}
+          <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
+            <p className="text-base font-medium text-blue-800">
+              P&ID: {pidCount}, Lines: {lineCount}
+            </p>
+            {pidItem && (
+              <p className="text-sm text-blue-700 mt-1">
+                P&ID Name: {pidItem.name || "Unknown"}
+              </p>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-4">
@@ -323,6 +337,9 @@ const TeamMemberDashboard = () => {
           completedAt: task.completed_at || null,
           progress: task.progress || 0,
           projectId: task.project_id?.toString() || "Unknown",
+          projectName: task.project_name || "Unknown", 
+          areaNumber: task.area_number || "N/A",
+          pidNumber: task.pid_number || "N/A", 
           items: mappedItems,
           comments: uniqueComments,
         };
@@ -488,10 +505,10 @@ const TeamMemberDashboard = () => {
             </div>
           </div>
           {/* General Messages */}
-            <AlertDescription className="text-gray-700 mt-4">
-              {getRandomMessage("general") ||
-                "Stay on top of your tasks to keep the project moving!"}
-            </AlertDescription>
+          <AlertDescription className="text-gray-700 mt-4">
+            {getRandomMessage("general") ||
+              "Stay on top of your tasks to keep the project moving!"}
+          </AlertDescription>
         </header>
 
         {assignedTasks.length > 0 && (

@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect } from "react";
+ import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,

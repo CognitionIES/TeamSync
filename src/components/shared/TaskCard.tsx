@@ -101,6 +101,10 @@ const TaskCard = ({
     }
   };
 
+  // Check if the task involves lines (e.g., Redline tasks) and has a P&ID
+  const isLineTask = task.type === "Redline"; // Adjust this condition if other task types involve lines
+  const pidItem = task.items.find((item) => item.type === "PID");
+
   return (
     <Card
       className={cn(
@@ -114,9 +118,19 @@ const TaskCard = ({
             <TaskTypeIndicator type={task.type} />
             <CardTitle className="text-lg font-semibold">{task.type}</CardTitle>
           </div>
-          <StatusBadge status={task.status as TaskStatus} isComplex={task.isComplex} />
+          <StatusBadge
+            status={task.status as TaskStatus}
+            isComplex={task.isComplex}
+          />
         </div>
-        <p className="text-sm text-gray-500">Assigned to: {task.assignee}</p>
+        <div className="text-sm text-gray-500 space-y-1 mt-1">
+          <p>Assigned to: {task.assignee}</p>
+          <p>Project: {task.projectName || "Unknown"}</p>
+          <p>Area No: {task.areaNumber || "N/A"}</p>
+          {isLineTask && pidItem && (
+            <p>P&ID No: {task.pidNumber || pidItem.id || "N/A"}</p>
+          )}
+        </div>
         <div className="text-xs text-gray-400 space-y-1 mt-1">
           <p>Assigned at: {formatTime(task.createdAt)}</p>
           {task.completedAt && (

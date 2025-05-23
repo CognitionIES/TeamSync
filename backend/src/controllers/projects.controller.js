@@ -5,7 +5,7 @@ const db = require("../config/db");
 const getProjects = async (req, res) => {
   try {
     const projects = await db.query("SELECT * FROM projects");
-    res.status(200).json({ data: projects.rows }); // Ensure the response is wrapped in "data"
+    res.status(200).json({ data: projects.rows }); // the response is wrapped in "data"
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }

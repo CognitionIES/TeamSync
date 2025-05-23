@@ -62,7 +62,7 @@ app.use((err, req, res, next) => {
 // Start server only after database connection is established
 const startServer = async () => {
   try {
-    await connectDB(); // Ensure DB connection is successful before starting the server
+    await connectDB(); // DB connection is successful before starting the server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });

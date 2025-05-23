@@ -9,7 +9,7 @@ const getTasks = async (req, res) => {
     const { role, id: userId } = req.user;
 
     if (req.params.userId) {
-      // Ensure Team Members can only see their own tasks
+      // Team Members can only see their own tasks
       if (role === "Team Member" && req.params.userId != userId) {
         return res
           .status(403)
