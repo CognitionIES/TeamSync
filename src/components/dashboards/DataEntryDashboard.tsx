@@ -36,11 +36,9 @@ import axios, { AxiosError } from "axios";
 import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import BackgroundEffect from "../landing/BackgroundEffect";
-import LoginAnimation from "../landing/LoginAnimation";
-import DashboardBackground from "../shared/DashboardBackground";
+import { Progress } from "@/components/ui/progress";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api"; // Updated to match port 3000
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 const DataEntryDashboard = () => {
   const { isAuthenticated } = useAuth();
@@ -51,8 +49,10 @@ const DataEntryDashboard = () => {
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
-  const [showNewAreaForm, setShowNewAreaForm] = useState(false); // State for new area form
+  const [showNewAreaForm, setShowNewAreaForm] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [isSubmittingPID, setIsSubmittingPID] = useState(false);
+  const [submissionProgress, setSubmissionProgress] = useState(0);
 
   const pidForm = useForm({
     defaultValues: {
@@ -88,8 +88,10 @@ const DataEntryDashboard = () => {
       navigate("/login", { replace: true });
     }
   }, [isAuthenticated, navigate]);
+
   const fetchProjects = async () => {
     try {
+      setIsLoadingProjects(true);
       const response = await axios.get<{
         data: { id: number; name: string }[];
       }>(`${API_URL}/projects`, getAuthHeaders());
@@ -121,12 +123,16 @@ const DataEntryDashboard = () => {
           "A server error occurred while fetching projects. Please try again later or contact support."
         );
       }
+    } finally {
+      setIsLoadingProjects(false);
     }
   };
+
   const fetchAreas = async () => {
     try {
       const response = await axios.get(
-        `${API_URL}/areas/project/${selectedProject}`
+        `${API_URL}/areas/project/${selectedProject}`,
+        getAuthHeaders()
       );
       let areaData = [];
       if (Array.isArray(response.data)) {
@@ -153,8 +159,8 @@ const DataEntryDashboard = () => {
       let errorMessage = "Failed to fetch areas for the selected project.";
       if (error.response?.status === 404) {
         errorMessage = "No areas found for this project.";
-        setAreas([]); // Allow dashboard to continue without areas
-        setIsProjectSelected(true); // Enable forms, but area selection will be empty
+        setAreas([]);
+        setIsProjectSelected(true);
       } else if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
       }
@@ -194,7 +200,11 @@ const DataEntryDashboard = () => {
 
   const onNewProjectSubmit = async (values: any) => {
     try {
-      await axios.post(`${API_URL}/projects`, { name: values.projectName });
+      await axios.post(
+        `${API_URL}/projects`,
+        { name: values.projectName },
+        getAuthHeaders()
+      );
       toast.success(`Project ${values.projectName} created successfully`);
       newProjectForm.reset();
       setShowNewProjectForm(false);
@@ -209,14 +219,18 @@ const DataEntryDashboard = () => {
 
   const onNewAreaSubmit = async (values: any) => {
     try {
-      await axios.post(`${API_URL}/areas`, {
-        name: values.areaName,
-        project_id: selectedProject, // Change `projectId` to `project_id`
-      });
+      await axios.post(
+        `${API_URL}/areas`,
+        {
+          name: values.areaName,
+          project_id: selectedProject,
+        },
+        getAuthHeaders()
+      );
       toast.success(`Area ${values.areaName} created successfully`);
       newAreaForm.reset();
       setShowNewAreaForm(false);
-      fetchAreas(); // Refresh areas list
+      fetchAreas();
     } catch (error: any) {
       console.error("Error creating area:", error);
       const errorMessage =
@@ -232,30 +246,52 @@ const DataEntryDashboard = () => {
     }
 
     try {
-      const pidResponse = await axios.post(`${API_URL}/pids`, {
-        pid_number: values.pidNumber,
-        description: `P&ID for ${values.pidNumber}`,
-        area_id: values.areaId || null,
-        project_id: selectedProject,
-      });
+      setIsSubmittingPID(true);
+      setSubmissionProgress(0);
+
+      // Step 1: Create the P&ID
+      const pidResponse = await axios.post(
+        `${API_URL}/pids`,
+        {
+          pid_number: values.pidNumber,
+          description: `P&ID for ${values.pidNumber}`,
+          area_id: values.areaId || null,
+          project_id: selectedProject,
+        },
+        getAuthHeaders()
+      );
 
       const pidId = pidResponse.data.data.id;
+      setSubmissionProgress(20);
 
+      // Step 2: Batch create lines if they exist
       if (values.lines) {
         const lines = values.lines
           .split("\n")
           .map((line: string) => line.trim())
           .filter((line: string) => line);
 
-        for (const lineNumber of lines) {
-          await axios.post(`${API_URL}/lines`, {
+        if (lines.length > 0) {
+          const lineData = lines.map((lineNumber: string) => ({
             line_number: lineNumber,
             description: `Line ${lineNumber}`,
             type_id: 1,
             pid_id: pidId,
             project_id: selectedProject,
-          });
+          }));
+
+          // Batch API call to create all lines at once
+          await axios.post(
+            `${API_URL}/lines/batch`,
+            { lines: lineData },
+            getAuthHeaders()
+          );
+          setSubmissionProgress(100);
+        } else {
+          setSubmissionProgress(100);
         }
+      } else {
+        setSubmissionProgress(100);
       }
 
       toast.success(
@@ -274,6 +310,9 @@ const DataEntryDashboard = () => {
         );
         navigate("/login", { replace: true });
       }
+    } finally {
+      setIsSubmittingPID(false);
+      setSubmissionProgress(0);
     }
   };
 
@@ -284,18 +323,30 @@ const DataEntryDashboard = () => {
     }
 
     try {
+      setIsSubmittingPID(true);
+      setSubmissionProgress(0);
+
       const equipmentList = values.equipmentList
         .split("\n")
         .map((equip: string) => equip.trim())
         .filter((equip: string) => equip);
 
-      for (const equipmentNumber of equipmentList) {
-        await axios.post(`${API_URL}/equipment`, {
+      if (equipmentList.length > 0) {
+        const equipmentData = equipmentList.map((equipmentNumber: string) => ({
           equipmentNumber,
           description: `Equipment ${equipmentNumber}`,
           areaId: values.areaId || null,
           projectId: selectedProject,
-        });
+        }));
+
+        await axios.post(
+          `${API_URL}/equipment/batch`,
+          { equipment: equipmentData },
+          getAuthHeaders()
+        );
+        setSubmissionProgress(100);
+      } else {
+        setSubmissionProgress(100);
       }
 
       toast.success(`Equipment added successfully`);
@@ -305,16 +356,18 @@ const DataEntryDashboard = () => {
       const errorMessage =
         error.response?.data?.message || "Failed to add equipment";
       toast.error(errorMessage);
+    } finally {
+      setIsSubmittingPID(false);
+      setSubmissionProgress(0);
     }
   };
 
   if (!isAuthenticated) {
-    return null; // Render nothing while redirecting
+    return null;
   }
 
   return (
-    <div className="min-h-screen ">
-      <DashboardBackground role="Data Entry" />
+    <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
@@ -568,12 +621,31 @@ const DataEntryDashboard = () => {
                         </FormItem>
                       )}
                     />
+                    {isSubmittingPID && (
+                      <div className="mt-4">
+                        <Progress value={submissionProgress} className="h-2" />
+                        <p className="text-sm text-gray-500 mt-2">
+                          {submissionProgress < 20
+                            ? "Creating P&ID..."
+                            : submissionProgress < 100
+                            ? "Creating lines..."
+                            : "Finalizing..."}
+                        </p>
+                      </div>
+                    )}
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={!isProjectSelected}
+                      disabled={!isProjectSelected || isSubmittingPID}
                     >
-                      Save P&ID and Lines
+                      {isSubmittingPID ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save P&ID and Lines"
+                      )}
                     </Button>
                   </form>
                 </Form>
@@ -646,12 +718,29 @@ const DataEntryDashboard = () => {
                         </FormItem>
                       )}
                     />
+                    {isSubmittingPID && (
+                      <div className="mt-4">
+                        <Progress value={submissionProgress} className="h-2" />
+                        <p className="text-sm text-gray-500 mt-2">
+                          {submissionProgress < 100
+                            ? "Creating equipment..."
+                            : "Finalizing..."}
+                        </p>
+                      </div>
+                    )}
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={!isProjectSelected}
+                      disabled={!isProjectSelected || isSubmittingPID}
                     >
-                      Save Equipment
+                      {isSubmittingPID ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save Equipment"
+                      )}
                     </Button>
                   </form>
                 </Form>
@@ -666,7 +755,6 @@ const DataEntryDashboard = () => {
 
 export default DataEntryDashboard;
 
-// Replace the placeholder function at the bottom of the file
 function getAuthHeaders() {
   const token = localStorage.getItem("teamsync_token");
   if (!token) {
@@ -677,4 +765,4 @@ function getAuthHeaders() {
       Authorization: `Bearer ${token}`,
     },
   };
-} // This code is a React component for a data entry dashboard that allows users to add P&IDs and equipment to selected projects and areas. It includes form handling, API calls, and user feedback using toast notifications.
+}

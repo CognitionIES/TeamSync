@@ -20,8 +20,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
-import LoginAnimation from "../landing/LoginAnimation";
-import DashboardBackground from "../shared/DashboardBackground";
+import { Progress } from "@/components/ui/progress";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -117,15 +116,25 @@ const TeamLeadDashboard = () => {
   const [assignee, setAssignee] = useState("");
   const [isComplex, setIsComplex] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionProgress, setSubmissionProgress] = useState(0);
 
-  // Modal state
+  // Modal state for assigned items
   const [modalIsOpen, setModalIsOpen] = useState(false);
   const [assignedItems, setAssignedItems] =
     useState<FetchedAssignedItems | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(null);
-  const [selectedItemType, setSelectedItemType] = useState<"PID" | "Line" | "Equipment" | null>(null);
+  const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(
+    null
+  );
+  const [selectedItemType, setSelectedItemType] = useState<
+    "PID" | "Line" | "Equipment" | null
+  >(null);
+
+  // Modal state for comments
+  const [commentsModalIsOpen, setCommentsModalIsOpen] = useState(false);
+  const [selectedTaskForComments, setSelectedTaskForComments] =
+    useState<Task | null>(null);
 
   // Track assigned items to prevent duplicates
   const [assignedItemsForDuplicates, setAssignedItemsForDuplicates] =
@@ -380,9 +389,7 @@ const TeamLeadDashboard = () => {
                 commentMap.set(key, {
                   id: comment.id.toString(),
                   userId: comment.user_id.toString(),
-                  userName: comment
-
-.user_name || "",
+                  userName: comment.user_name || "",
                   userRole: comment.user_role || "",
                   comment: comment.comment || "",
                   createdAt: comment.created_at,
@@ -414,7 +421,7 @@ const TeamLeadDashboard = () => {
             id: task.id.toString(),
             type: task.type as TaskType,
             assignee: task.assignee || "",
-            assigneeId: task.assignee_id.toString(),
+            assigneeId: task.assignee_id?.toString() || "",
             status: task.status || "Assigned",
             isComplex: task.is_complex || false,
             createdAt: task.created_at || new Date().toISOString(),
@@ -424,6 +431,9 @@ const TeamLeadDashboard = () => {
             projectId: task.project_id?.toString() || null,
             items: mappedItems,
             comments: uniqueComments,
+            pidNumber: task.pid_number ?? null,
+            projectName: task.project_name ?? "",
+            areaNumber: task.area_number ?? null,
           };
         });
 
@@ -457,7 +467,6 @@ const TeamLeadDashboard = () => {
     setSelectedUserId(userId);
     setLoadingItems(true);
     try {
-      // Find the task to determine its type and item type
       const task = tasks.find((t) => t.id === taskId);
       if (task) {
         setSelectedTaskType(task.type);
@@ -491,6 +500,22 @@ const TeamLeadDashboard = () => {
     setSelectedUserId(null);
     setSelectedTaskType(null);
     setSelectedItemType(null);
+  };
+
+  // Handle opening the comments modal
+  const handleViewComments = (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) {
+      setSelectedTaskForComments(task);
+      setCommentsModalIsOpen(true);
+    } else {
+      toast.error("Task not found");
+    }
+  };
+
+  const closeCommentsModal = () => {
+    setCommentsModalIsOpen(false);
+    setSelectedTaskForComments(null);
   };
 
   useEffect(() => {
@@ -614,13 +639,6 @@ const TeamLeadDashboard = () => {
       itemName: string;
     }[] = [];
 
-    console.log("selectedProject:", selectedProject);
-    console.log("project:", project);
-    console.log("lines:", lines);
-    console.log("pids:", pids);
-    console.log("selectedLines:", selectedLines);
-    console.log("selectedPIDs:", selectedPIDs);
-
     if (taskType === "Redline" && assignmentType === "PID") {
       if (selectedPIDs.length > 0) {
         validSelection = true;
@@ -741,6 +759,7 @@ const TeamLeadDashboard = () => {
     }
 
     setIsSubmitting(true);
+    setSubmissionProgress(0);
 
     try {
       const authHeaders = getAuthHeaders();
@@ -761,23 +780,22 @@ const TeamLeadDashboard = () => {
         items: selectedItems,
       };
 
-      console.log("newTask:", newTask);
-
       const response = await axios.post(
         `${API_URL}/tasks`,
         newTask,
         authHeaders
       );
+      setSubmissionProgress(50);
 
       if (assignmentType === "Line") {
-        for (const item of selectedItems) {
-          await axios.put(
-            `${API_URL}/lines/${item.itemId}/assign`,
-            { userId: assigneeId },
-            authHeaders
-          );
-        }
+        const lineIds = selectedItems.map((item) => parseInt(item.itemId));
+        await axios.put(
+          `${API_URL}/lines/assign/batch`,
+          { lineIds, userId: assigneeId },
+          authHeaders
+        );
       }
+      setSubmissionProgress(100);
 
       await Promise.all([
         fetchTasks(),
@@ -816,6 +834,7 @@ const TeamLeadDashboard = () => {
       }
     } finally {
       setIsSubmitting(false);
+      setSubmissionProgress(0);
     }
   };
 
@@ -829,8 +848,7 @@ const TeamLeadDashboard = () => {
   const userName = selectedUser ? selectedUser.name : "";
 
   return (
-    <div className="min-h-screen ">
-      <DashboardBackground role="Team Lead" />
+    <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
 
       <div className="container mx-auto p-4 sm:p-6">
@@ -1059,6 +1077,19 @@ const TeamLeadDashboard = () => {
                 </div>
               </div>
             )}
+
+            {isSubmitting && (
+              <div className="mt-4">
+                <Progress value={submissionProgress} className="h-2" />
+                <p className="text-sm text-gray-500 mt-2">
+                  {submissionProgress < 50
+                    ? "Creating task..."
+                    : submissionProgress < 100
+                    ? "Assigning lines..."
+                    : "Finalizing..."}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1084,11 +1115,14 @@ const TeamLeadDashboard = () => {
                 showProgress={true}
                 showCurrentWork={true}
                 onViewCurrentWork={handleViewCurrentWork}
+                showComments={true}
+                onViewComments={handleViewComments}
               />
             )}
           </CardContent>
         </Card>
 
+        {/* Modal for Assigned Items */}
         <Modal
           isOpen={modalIsOpen}
           onRequestClose={closeModal}
@@ -1107,7 +1141,7 @@ const TeamLeadDashboard = () => {
               padding: "24px",
               borderRadius: "12px",
               backgroundColor: "#fff",
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+              boxShadow: "0 4px 20px rgba(0, 0,0, 0.15)",
             },
             overlay: {
               backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -1151,7 +1185,6 @@ const TeamLeadDashboard = () => {
             </div>
           ) : assignedItems && selectedTaskType && selectedItemType ? (
             <div className="space-y-6">
-              {/* UPV Lines */}
               {selectedTaskType === "UPV" && selectedItemType === "Line" && (
                 <div className="border-b border-gray-200 pb-4">
                   <h3 className="text-lg font-semibold text-gray-700 mb-2">
@@ -1183,7 +1216,6 @@ const TeamLeadDashboard = () => {
                 </div>
               )}
 
-              {/* QC Lines */}
               {selectedTaskType === "QC" && selectedItemType === "Line" && (
                 <div className="border-b border-gray-200 pb-4">
                   <h3 className="text-lg font-semibold text-gray-700 mb-2">
@@ -1215,7 +1247,6 @@ const TeamLeadDashboard = () => {
                 </div>
               )}
 
-              {/* Redline P&IDs */}
               {selectedTaskType === "Redline" && selectedItemType === "PID" && (
                 <div className="border-b border-gray-200 pb-4">
                   <h3 className="text-lg font-semibold text-gray-700 mb-2">
@@ -1247,69 +1278,71 @@ const TeamLeadDashboard = () => {
                 </div>
               )}
 
-              {/* UPV Equipment */}
-              {selectedTaskType === "UPV" && selectedItemType === "Equipment" && (
-                <div className="border-b border-gray-200 pb-4">
-                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                    UPV Equipment ({assignedItems.upvEquipment.count})
-                  </h3>
-                  {assignedItems.upvEquipment.count > 0 ? (
-                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                      <ul className="space-y-2">
-                        {assignedItems.upvEquipment.items.map((equip) => (
-                          <li
-                            key={equip.id}
-                            className="text-sm text-gray-600 flex justify-between items-center"
-                          >
-                            <span>
-                              <strong>Equipment:</strong> {equip.equipment_name}
-                            </span>
-                            <span className="text-gray-500">
-                              Project ID: {equip.project_id}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500 italic">
-                      No UPV equipment assigned.
-                    </p>
-                  )}
-                </div>
-              )}
+              {selectedTaskType === "UPV" &&
+                selectedItemType === "Equipment" && (
+                  <div className="border-b border-gray-200 pb-4">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                      UPV Equipment ({assignedItems.upvEquipment.count})
+                    </h3>
+                    {assignedItems.upvEquipment.count > 0 ? (
+                      <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                        <ul className="space-y-2">
+                          {assignedItems.upvEquipment.items.map((equip) => (
+                            <li
+                              key={equip.id}
+                              className="text-sm text-gray-600 flex justify-between items-center"
+                            >
+                              <span>
+                                <strong>Equipment:</strong>{" "}
+                                {equip.equipment_name}
+                              </span>
+                              <span className="text-gray-500">
+                                Project ID: {equip.project_id}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">
+                        No UPV equipment assigned.
+                      </p>
+                    )}
+                  </div>
+                )}
 
-              {/* QC Equipment */}
-              {selectedTaskType === "QC" && selectedItemType === "Equipment" && (
-                <div className="pb-4">
-                  <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                    QC Equipment ({assignedItems.qcEquipment.count})
-                  </h3>
-                  {assignedItems.qcEquipment.count > 0 ? (
-                    <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                      <ul className="space-y-2">
-                        {assignedItems.qcEquipment.items.map((equip) => (
-                          <li
-                            key={equip.id}
-                            className="text-sm text-gray-600 flex justify-between items-center"
-                          >
-                            <span>
-                              <strong>Equipment:</strong> {equip.equipment_name}
-                            </span>
-                            <span className="text-gray-500">
-                              Project ID: {equip.project_id}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500 italic">
-                      No QC equipment assigned.
-                    </p>
-                  )}
-                </div>
-              )}
+              {selectedTaskType === "QC" &&
+                selectedItemType === "Equipment" && (
+                  <div className="pb-4">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                      QC Equipment ({assignedItems.qcEquipment.count})
+                    </h3>
+                    {assignedItems.qcEquipment.count > 0 ? (
+                      <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                        <ul className="space-y-2">
+                          {assignedItems.qcEquipment.items.map((equip) => (
+                            <li
+                              key={equip.id}
+                              className="text-sm text-gray-600 flex justify-between items-center"
+                            >
+                              <span>
+                                <strong>Equipment:</strong>{" "}
+                                {equip.equipment_name}
+                              </span>
+                              <span className="text-gray-500">
+                                Project ID: {equip.project_id}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">
+                        No QC equipment assigned.
+                      </p>
+                    )}
+                  </div>
+                )}
             </div>
           ) : (
             <div className="text-center py-8">
@@ -1332,6 +1365,121 @@ const TeamLeadDashboard = () => {
               </Button>
             </div>
           )}
+        </Modal>
+
+        {/* Modal for Comments */}
+        <Modal
+          isOpen={commentsModalIsOpen}
+          onRequestClose={closeCommentsModal}
+          style={{
+            content: {
+              top: "50%",
+              left: "50%",
+              right: "auto",
+              bottom: "auto",
+              marginRight: "-50%",
+              transform: "translate(-50%, -50%)",
+              width: "90%",
+              maxWidth: "500px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              padding: "24px",
+              borderRadius: "12px",
+              backgroundColor: "#fff",
+              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            },
+            overlay: {
+              backgroundColor: "rgba(0, 0, 0, 0.6)",
+              zIndex: 1000,
+            },
+          }}
+          contentLabel="Task Comments Modal"
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">
+              Task Comments
+              {selectedTaskForComments?.assignee
+                ? ` for ${selectedTaskForComments.assignee}`
+                : ""}
+            </h2>
+            <button
+              onClick={closeCommentsModal}
+              className="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors duration-200"
+              aria-label="Close modal"
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          {selectedTaskForComments ? (
+            <div className="space-y-4">
+              {selectedTaskForComments.comments &&
+              selectedTaskForComments.comments.length > 0 ? (
+                <div className="max-h-60 overflow-y-auto space-y-4">
+                  {selectedTaskForComments.comments.map((comment) => (
+                    <div
+                      key={comment.id}
+                      className="border-b border-gray-200 pb-2"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">
+                            {comment.userName} ({comment.userRole})
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {new Date(comment.createdAt).toLocaleString(
+                              "en-IN",
+                              {
+                                timeZone: "Asia/Kolkata",
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              }
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-gray-700 mt-1">{comment.comment}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 italic">
+                  No comments available for this task.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-red-600 font-medium">
+                {getRandomMessage("error")}
+              </p>
+              <p className="text-gray-500 mt-2">
+                Please try again or contact support if the issue persists.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={closeCommentsModal}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition-colors duration-200"
+            >
+              Close
+            </Button>
+          </div>
         </Modal>
       </div>
     </div>

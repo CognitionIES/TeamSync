@@ -16,12 +16,6 @@ import {
 } from "@/components/ui/select";
 import StatusBadge from "./StatusBadge";
 import { Task, TaskStatus, TaskType } from "@/types";
-import {
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { ArrowUpDown, Clock, RefreshCw } from "lucide-react";
@@ -33,8 +27,10 @@ interface TaskTableProps {
   showFilters?: boolean;
   showProgress?: boolean;
   showCurrentWork?: boolean;
+  showComments?: boolean; // Added to toggle Comments column
   loading?: boolean;
-  onViewCurrentWork?: (taskId: string, userId: string) => void; // Updated to include taskId
+  onViewCurrentWork?: (taskId: string, userId: string) => void;
+  onViewComments?: (taskId: string) => void; // Added to handle comments modal
 }
 
 // Helper function to truncate text
@@ -152,8 +148,10 @@ const TaskTable: React.FC<TaskTableProps> = ({
   showFilters,
   showProgress,
   showCurrentWork,
+  showComments = false, // Default to false
   loading = false,
   onViewCurrentWork,
+  onViewComments,
 }) => {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "All">("All");
   const [filterType, setFilterType] = useState<TaskType | "All">("All");
@@ -212,6 +210,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
       updated: updated,
       updatedAt: updatedAt || completedAt || new Date(0),
       assigneeId: task.assigneeId,
+      comments: task.comments || [], // Include comments for the button
     };
   });
 
@@ -371,249 +370,235 @@ const TaskTable: React.FC<TaskTableProps> = ({
           <p>No tasks found.</p>
         </div>
       ) : (
-        <TooltipProvider delayDuration={300}>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50 border-b border-gray-200">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50 border-b border-gray-200">
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("type")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Type"
+                >
+                  <span>Type</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "type" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("assignee")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Assignee"
+                >
+                  <span>Assignee</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "assignee" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              {showProgress && (
                 <TableHead>
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort("type")}
+                    onClick={() => handleSort("progress")}
                     className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Type"
+                    aria-label="Sort by Progress"
                   >
-                    <span>Type</span>
+                    <span>Progress</span>
                     <ArrowUpDown
                       className={`h-4 w-4 ${
-                        sortColumn === "type" && sortDirection === "asc"
+                        sortColumn === "progress" && sortDirection === "asc"
                           ? "rotate-180"
                           : ""
                       }`}
                     />
                   </Button>
                 </TableHead>
-                <TableHead>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("assignee")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Assignee"
-                  >
-                    <span>Assignee</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "assignee" && sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </Button>
-                </TableHead>
+              )}
+              {showCurrentWork && <TableHead>Current Work</TableHead>}
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("status")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Status"
+                >
+                  <span>Status</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "status" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("assignedTime")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Assigned Time"
+                >
+                  <span>Assigned</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "assignedTime" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("completedTime")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Completed Time"
+                >
+                  <span>Completed</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "completedTime" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  onClick={() => handleSort("updated")}
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
+                  aria-label="Sort by Updated"
+                >
+                  <span>Updated</span>
+                  <ArrowUpDown
+                    className={`h-4 w-4 ${
+                      sortColumn === "updated" && sortDirection === "asc"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </Button>
+              </TableHead>
+              {showComments && <TableHead>Comments</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paginatedRows.map((row, index) => (
+              <TableRow
+                key={row.id}
+                className={`border-b border-gray-100 transition-colors duration-200 ${
+                  index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                } hover:bg-blue-50 cursor-pointer`}
+              >
+                <TableCell className="py-4">{row.type}</TableCell>
+                <TableCell className="py-4">{row.assignee}</TableCell>
                 {showProgress && (
-                  <TableHead>
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleSort("progress")}
-                      className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                      aria-label="Sort by Progress"
-                    >
-                      <span>Progress</span>
-                      <ArrowUpDown
-                        className={`h-4 w-4 ${
-                          sortColumn === "progress" && sortDirection === "asc"
-                            ? "rotate-180"
-                            : ""
-                        }`}
+                  <TableCell className="py-4">
+                    <div className="flex items-center space-x-2">
+                      <Progress
+                        value={row.progress}
+                        className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
                       />
-                    </Button>
-                  </TableHead>
-                )}
-                {showCurrentWork && <TableHead>Current Work</TableHead>}
-                <TableHead>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("status")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Status"
-                  >
-                    <span>Status</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "status" && sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("assignedTime")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Assigned Time"
-                  >
-                    <span>Assigned</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "assignedTime" && sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("completedTime")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Completed Time"
-                  >
-                    <span>Completed</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "completedTime" &&
-                        sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </Button>
-                </TableHead>
-                <TableHead>
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("updated")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Updated"
-                  >
-                    <span>Updated</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "updated" && sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </Button>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedRows.map((row, index) => (
-                <Tooltip key={row.id}>
-                  <TooltipTrigger asChild>
-                    <TableRow
-                      className={`border-b border-gray-100 transition-colors duration-200 ${
-                        index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                      } hover:bg-blue-50 cursor-pointer`}
-                    >
-                      <TableCell className="py-4">{row.type}</TableCell>
-                      <TableCell className="py-4">{row.assignee}</TableCell>
-                      {showProgress && (
-                        <TableCell className="py-4">
-                          <div className="flex items-center space-x-2">
-                            <Progress
-                              value={row.progress}
-                              className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
-                            />
-                            <span className="text-sm text-gray-600">
-                              {row.progress}%
-                            </span>
-                          </div>
-                        </TableCell>
-                      )}
-                      {showCurrentWork && (
-                        <TableCell className="py-4">
-                          <button
-                            onClick={() =>
-                              onViewCurrentWork?.(row.id, row.assigneeId)
-                            }
-                            className="text-blue-600 hover:underline focus:outline-none"
-                          >
-                            {row.currentWork}
-                          </button>
-                        </TableCell>
-                      )}
-                      <TableCell className="py-4">
-                        <StatusBadge
-                          status={row.status as TaskStatus}
-                          className={
-                            row.status === "Completed"
-                              ? "bg-green-100 text-green-800"
-                              : row.status === "In Progress"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-100 text-gray-800"
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="flex items-center space-x-1 text-gray-600">
-                          <Clock className="h-4 w-4" />
-                          <span>{row.assignedTime}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="flex items-center space-x-1 text-gray-600">
-                          <Clock className="h-4 w-4" />
-                          <span>{row.completedTime}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4">{row.updated}</TableCell>
-                    </TableRow>
-                  </TooltipTrigger>
-                  <TooltipContent className="bg-gray-800 text-white rounded-md shadow-lg p-4 max-w-xs">
-                    <div>
-                      <h4 className="font-semibold text-sm mb-2">Comments</h4>
-                      {tasks.find((task) => task.id === row.id)?.comments
-                        ?.length ? (
-                        <ul className="space-y-1">
-                          {tasks
-                            .find((task) => task.id === row.id)
-                            ?.comments?.map((comment) => (
-                              <li key={comment.id} className="text-xs">
-                                <strong>
-                                  {comment.userName} ({comment.userRole}):
-                                </strong>{" "}
-                                {comment.comment}
-                              </li>
-                            ))}
-                        </ul>
-                      ) : (
-                        <p className="text-xs">No comments</p>
-                      )}
+                      <span className="text-sm text-gray-600">
+                        {row.progress}%
+                      </span>
                     </div>
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </TableBody>
-          </Table>
+                  </TableCell>
+                )}
+                {showCurrentWork && (
+                  <TableCell className="py-4">
+                    <button
+                      onClick={() =>
+                        onViewCurrentWork?.(row.id, row.assigneeId)
+                      }
+                      className="text-blue-600 hover:underline focus:outline-none"
+                    >
+                      {row.currentWork}
+                    </button>
+                  </TableCell>
+                )}
+                <TableCell className="py-4">
+                  <StatusBadge
+                    status={row.status as TaskStatus}
+                    className={
+                      row.status === "Completed"
+                        ? "bg-green-100 text-green-800"
+                        : row.status === "In Progress"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-gray-100 text-gray-800"
+                    }
+                  />
+                </TableCell>
+                <TableCell className="py-4">
+                  <div className="flex items-center space-x-1 text-gray-600">
+                    <Clock className="h-4 w-4" />
+                    <span>{row.assignedTime}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="py-4">
+                  <div className="flex items-center space-x-1 text-gray-600">
+                    <Clock className="h-4 w-4" />
+                    <span>{row.completedTime}</span>
+                  </div>
+                </TableCell>
+                <TableCell className="py-4">{row.updated}</TableCell>
+                {showComments && (
+                  <TableCell className="py-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => onViewComments?.(row.id)}
+                      className="text-blue-600 hover:text-blue-800 border-blue-300 hover:border-blue-400 transition-all duration-200"
+                      disabled={!onViewComments}
+                    >
+                      Comments{" "}
+                      {row.comments.length ? `(${row.comments.length})` : ""}
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
-          {sortedRows.length > tasksPerPage && (
-            <div className="flex justify-between items-center mt-4">
-              <Button
-                variant="outline"
-                onClick={handlePreviousPage}
-                disabled={currentPage === 1}
-                className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
-              >
-                Previous
-              </Button>
-              <span className="text-sm text-gray-600">
-                Page {currentPage} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                onClick={handleNextPage}
-                disabled={currentPage === totalPages}
-                className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
-              >
-                Next
-              </Button>
-            </div>
-          )}
-        </TooltipProvider>
+      {sortedRows.length > tasksPerPage && (
+        <div className="flex justify-between items-center mt-4">
+          <Button
+            variant="outline"
+            onClick={handlePreviousPage}
+            disabled={currentPage === 1}
+            className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-gray-600">
+            Page {currentPage} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            onClick={handleNextPage}
+            disabled={currentPage === totalPages}
+            className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+          >
+            Next
+          </Button>
+        </div>
       )}
     </div>
   );

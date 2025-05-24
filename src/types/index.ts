@@ -73,21 +73,22 @@ export interface TaskComment {
 
 export interface Task {
   pidNumber: string;
-  areaNumber: string;
-  projectName: string;
   id: string;
   type: TaskType;
   assignee: string;
   assigneeId: string;
-  status: string;
+  status: TaskStatus;
   isComplex: boolean;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
   progress: number;
-  projectId: string | null; // Add projectId
+  projectId: string;
+  projectName: string;
+  areaNumber: string;
   items: TaskItem[];
   comments: TaskComment[];
+  lines?: { id: string; name: string; pidId: string; completed: boolean }[];
 }
 
 export interface TaskItem {

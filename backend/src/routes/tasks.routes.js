@@ -234,12 +234,15 @@ router.post("/", protect, async (req, res) => {
         .json({ message: "projectId must be a valid number" });
     }
 
+    await db.query("BEGIN");
+
     // Validate project exists
     const { rows: projectRows } = await db.query(
       `SELECT id, name FROM projects WHERE id = $1`,
       [projectIdNum]
     );
     if (projectRows.length === 0) {
+      await db.query("ROLLBACK");
       return res
         .status(404)
         .json({ message: `Project with ID ${projectIdNum} does not exist` });
@@ -252,6 +255,7 @@ router.post("/", protect, async (req, res) => {
       [assigneeId]
     );
     if (userRows.length === 0) {
+      await db.query("ROLLBACK");
       return res
         .status(400)
         .json({ message: `Assignee with ID ${assigneeId} does not exist` });
@@ -263,6 +267,7 @@ router.post("/", protect, async (req, res) => {
       [req.user.id]
     );
     if (userIdRows.length === 0) {
+      await db.query("ROLLBACK");
       return res
         .status(400)
         .json({ message: `User with ID ${req.user.id} does not exist` });
@@ -273,6 +278,7 @@ router.post("/", protect, async (req, res) => {
     if (
       !itemTypes.every((type) => ["PID", "Line", "Equipment"].includes(type))
     ) {
+      await db.query("ROLLBACK");
       return res.status(400).json({
         message: "Invalid itemType. Must be 'PID', 'Line', or 'Equipment'",
       });
@@ -293,6 +299,7 @@ router.post("/", protect, async (req, res) => {
         projectIdNum,
       ]);
       if (itemRows.length === 0) {
+        await db.query("ROLLBACK");
         return res.status(400).json({
           message: `Item with ID ${item.itemId} and type ${item.itemType} does not exist in project ${resolvedProjectName}`,
         });
@@ -305,14 +312,15 @@ router.post("/", protect, async (req, res) => {
 
     const { rows: existingItems } = await db.query(
       `
-  SELECT ti.item_id, ti.item_type, ti.item_name, t.type as task_type
-  FROM task_items ti
-  JOIN tasks t ON ti.task_id = t.id
-  WHERE (ti.item_id = ANY($1) AND ti.item_type = ANY($2)) AND t.type = $3 AND (t.project_id = $4 OR t.project_id IS NULL)
-  `,
+      SELECT ti.item_id, ti.item_type, ti.item_name, t.type as task_type
+      FROM task_items ti
+      JOIN tasks t ON ti.task_id = t.id
+      WHERE (ti.item_id = ANY($1) AND ti.item_type = ANY($2)) AND t.type = $3 AND (t.project_id = $4 OR t.project_id IS NULL)
+      `,
       [itemIds, itemTypeList, type, projectIdNum]
     );
     if (existingItems.length > 0) {
+      await db.query("ROLLBACK");
       const alreadyAssignedNames = existingItems
         .map((item) => item.item_name)
         .join(", ");
@@ -341,7 +349,7 @@ router.post("/", protect, async (req, res) => {
 
     const task = taskRows[0];
 
-    // Insert into task_items table
+    // Batch insert into task_items table
     const uniqueItems = [];
     const seen = new Set();
     for (const item of items) {
@@ -353,18 +361,31 @@ router.post("/", protect, async (req, res) => {
     }
 
     if (uniqueItems.length > 0) {
-      for (const item of uniqueItems) {
-        await db.query(
-          `
-          INSERT INTO task_items (task_id, item_id, item_type, item_name)
-          VALUES ($1, $2, $3, $4)
-          `,
-          [task.id, parseInt(item.itemId), item.itemType, item.itemName]
-        );
-      }
+      const itemValues = uniqueItems
+        .map(
+          (_, i) =>
+            `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`
+        )
+        .join(", ");
+      const itemFlatValues = uniqueItems.flatMap((item) => [
+        task.id,
+        parseInt(item.itemId),
+        item.itemType,
+        item.itemName,
+      ]);
+      await db.query(
+        `INSERT INTO task_items (task_id, item_id, item_type, item_name) VALUES ${itemValues}`,
+        itemFlatValues
+      );
     }
 
     // Log the action in audit logs
+    const teamNameQuery = await db.query(
+      `SELECT name FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    const teamName = teamNameQuery.rows[0]?.name || "Unknown";
+
     await db.query(
       `
       INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp, project_name, team_name)
@@ -377,11 +398,11 @@ router.post("/", protect, async (req, res) => {
         `Created task with type ${type} in project ${resolvedProjectName}`,
         new Date(),
         resolvedProjectName,
-        (
-          await db.query(`SELECT name FROM users WHERE id = $1`, [req.user.id])
-        ).rows[0].name,
+        teamName,
       ]
     );
+
+    await db.query("COMMIT");
 
     // Fetch full task for response
     const { rows: fullTaskRows } = await db.query(
@@ -433,12 +454,14 @@ router.post("/", protect, async (req, res) => {
       },
     });
   } catch (error) {
+    await db.query("ROLLBACK");
     console.error("Error creating task:", error.message, error.stack);
     res
       .status(500)
       .json({ message: "Failed to create task", error: error.message });
   }
 });
+
 // PATCH /api/tasks/:id/status - Update task status
 router.patch("/:id/status", protect, async (req, res) => {
   try {
@@ -585,23 +608,30 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
         .json({ message: "Completed status must be a boolean" });
     }
 
+    await db.query("BEGIN");
+
     const { rows: taskRows } = await db.query(
       `
-      SELECT * FROM tasks
-      WHERE id = $1 AND assignee_id = $2
+      SELECT t.*, p.name as project_name
+      FROM tasks t
+      LEFT JOIN projects p ON t.project_id = p.id
+      WHERE t.id = $1 AND t.assignee_id = $2
       `,
       [taskId, req.user.id]
     );
 
     if (taskRows.length === 0) {
+      await db.query("ROLLBACK");
       return res
         .status(404)
         .json({ message: "Task not found or not assigned to you" });
     }
 
     const task = taskRows[0];
+    const projectName = task.project_name;
 
     if (task.status !== "In Progress") {
+      await db.query("ROLLBACK");
       return res
         .status(400)
         .json({ message: "Task must be in progress to update items" });
@@ -616,12 +646,14 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     );
 
     if (itemRows.length === 0) {
+      await db.query("ROLLBACK");
       return res.status(404).json({ message: "Task item not found" });
     }
 
     const item = itemRows[0];
 
     if (item.completed && !completed) {
+      await db.query("ROLLBACK");
       return res
         .status(400)
         .json({ message: "Cannot uncheck a completed item" });
@@ -664,6 +696,31 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       `,
       [progress, taskId]
     );
+
+    // Log the action in audit logs
+    const teamNameQuery = await db.query(
+      `SELECT name FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    const teamName = teamNameQuery.rows[0]?.name || "Unknown";
+
+    await db.query(
+      `
+      INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp, project_name, team_name)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        "Task Item Update",
+        task.type,
+        req.user.id,
+        `Updated task item ${updatedItem.item_name} (ID: ${itemId}) to completed=${completed} in project ${projectName}`,
+        new Date(),
+        projectName,
+        teamName,
+      ]
+    );
+
+    await db.query("COMMIT");
 
     const { rows: fullTaskRows } = await db.query(
       `
@@ -709,125 +766,17 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
         updated_at: returnedTask.updated_at,
         completed_at: returnedTask.completed_at,
         progress: returnedTask.progress,
+        project_id: returnedTask.project_id,
         items: returnedTask.items || [],
         comments: returnedTask.comments || [],
       },
     });
   } catch (error) {
+    await db.query("ROLLBACK");
     console.error("Error updating task item:", error.message, error.stack);
     res
       .status(500)
       .json({ message: "Failed to update task item", error: error.message });
-  }
-});
-
-// POST /api/tasks/:id/comments - Add a comment to a task
-router.post("/:id/comments", protect, async (req, res) => {
-  try {
-    const taskId = parseInt(req.params.id);
-    const { comment } = req.body;
-
-    // Validate comment input
-    if (
-      !comment ||
-      typeof comment !== "string" ||
-      comment.trim().length === 0
-    ) {
-      return res.status(400).json({
-        message: "Comment is required and must be a non-empty string",
-      });
-    }
-
-    // Check if the task exists
-    const { rows: taskRows } = await db.query(
-      `
-      SELECT * FROM tasks
-      WHERE id = $1
-      `,
-      [taskId]
-    );
-
-    if (taskRows.length === 0) {
-      return res.status(404).json({ message: "Task not found" });
-    }
-
-    // Insert the comment into task_comments
-    const { rows: commentRows } = await db.query(
-      `
-      INSERT INTO task_comments (task_id, user_id, user_name, user_role, comment)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-      `,
-      [taskId, req.user.id, req.user.name, req.user.role, comment.trim()]
-    );
-
-    const newComment = commentRows[0];
-    console.log("Added comment:", newComment);
-
-    // Update the task's updated_at timestamp
-    await db.query(
-      `
-      UPDATE tasks
-      SET updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      `,
-      [taskId]
-    );
-
-    // Fetch the updated task with all details
-    const { rows: fullTaskRows } = await db.query(
-      `
-      SELECT t.*, u.name as assignee,
-             json_agg(
-               json_build_object(
-                 'id', ti.id,
-                 'item_name', ti.item_name,
-                 'item_type', ti.item_type,
-                 'completed', ti.completed
-               )
-             ) FILTER (WHERE ti.id IS NOT NULL) as items,
-             json_agg(
-               json_build_object(
-                 'id', tc.id,
-                 'user_id', tc.user_id,
-                 'user_name', tc.user_name,
-                 'user_role', tc.user_role,
-                 'comment', tc.comment,
-                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-               )
-             ) FILTER (WHERE tc.id IS NOT NULL) as comments
-      FROM tasks t
-      LEFT JOIN users u ON t.assignee_id = u.id
-      LEFT JOIN task_items ti ON t.id = ti.task_id
-      LEFT JOIN task_comments tc ON t.id = tc.task_id
-      WHERE t.id = $1
-      GROUP BY t.id, u.name
-      `,
-      [taskId]
-    );
-
-    const returnedTask = fullTaskRows[0];
-    res.status(201).json({
-      data: {
-        id: returnedTask.id,
-        type: returnedTask.type,
-        assignee: returnedTask.assignee,
-        assignee_id: returnedTask.assignee_id,
-        status: returnedTask.status,
-        is_complex: returnedTask.is_complex,
-        created_at: returnedTask.created_at,
-        updated_at: returnedTask.updated_at,
-        completed_at: returnedTask.completed_at,
-        progress: returnedTask.progress,
-        items: returnedTask.items || [],
-        comments: returnedTask.comments || [],
-      },
-    });
-  } catch (error) {
-    console.error("Error adding comment to task:", error.message, error.stack);
-    res
-      .status(500)
-      .json({ message: "Failed to add comment", error: error.message });
   }
 });
 
