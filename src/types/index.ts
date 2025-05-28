@@ -59,7 +59,7 @@ export interface Equipment {
 }
 
 // Task types
-export type TaskType = "Redline" | "UPV" | "QC";
+export type TaskType = "Redline" | "UPV" | "QC" | "Misc";
 export type TaskStatus = "Assigned" | "In Progress" | "Completed";
 
 export interface TaskComment {
@@ -71,8 +71,8 @@ export interface TaskComment {
   createdAt: string;
 }
 
+// @/types.ts
 export interface Task {
-  pidNumber: string;
   id: string;
   type: TaskType;
   assignee: string;
@@ -88,9 +88,10 @@ export interface Task {
   areaNumber: string;
   items: TaskItem[];
   comments: TaskComment[];
+  description: string; 
+  pidNumber: string;
   lines?: { id: string; name: string; pidId: string; completed: boolean }[];
 }
-
 export interface TaskItem {
   id: string;
   name: string;

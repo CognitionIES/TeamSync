@@ -20,6 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import MiscTaskCard from "./MiscTaskCard"; // Import the new component
 
 interface TaskCardProps {
   task: Task;

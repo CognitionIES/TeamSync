@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, memo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -35,6 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import MiscTaskCard from "../shared/MiscTaskCard";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -80,7 +82,9 @@ const RedlineTaskCard = memo(
 
     const handleCheckItem = (itemId: string, checked: boolean) => {
       if (task.status !== "In Progress" && checked) {
-        toast.error("You must start the task before marking items as completed");
+        toast.error(
+          "You must start the task before marking items as completed"
+        );
         return;
       }
 
@@ -103,7 +107,9 @@ const RedlineTaskCard = memo(
       const totalItems = lineItems.length;
       const newCompletedCount = updatedCompleted.length;
       if (newCompletedCount === totalItems) {
-        toast.success("All lines checked! Task is ready to be marked as complete.");
+        toast.success(
+          "All lines checked! Task is ready to be marked as complete."
+        );
       }
     };
 
@@ -126,19 +132,14 @@ const RedlineTaskCard = memo(
         />
       );
     }
-
     return (
       <Card className="shadow-md hover:shadow-lg transition-all duration-300 border-l-4 border-l-blue-500 animate-fade-in">
         <CardHeader
           className={`
-          pb-2 
-          ${
-            isCompleted
-              ? "bg-green-50"
-              : isInProgress
-              ? "bg-orange-50"
-              : "bg-blue-50"
-          }`}
+    pb-2 
+    ${
+      isCompleted ? "bg-green-50" : isInProgress ? "bg-orange-50" : "bg-blue-50"
+    }`}
         >
           <div className="flex justify-between items-start">
             <div className="space-y-1">
@@ -171,12 +172,20 @@ const RedlineTaskCard = memo(
                 </p>
               )}
             </div>
+            {/* Add Description Section */}
+            <div className="text-center py-1 px-3 bg-gray-100 rounded-md inline-block">
+              <p className="text-base font-medium text-gray-800">
+                Description: {task.description || "No description provided"}
+              </p>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-4 pb-2">
           <div className="space-y-3">
             <div className="flex justify-between items-center">
-              <span className="text-sm font-medium text-gray-700">Progress:</span>
+              <span className="text-sm font-medium text-gray-700">
+                Progress:
+              </span>
               <span className="text-sm font-medium">{task.progress}%</span>
             </div>
             <Progress value={task.progress} className="h-2" />
@@ -189,7 +198,11 @@ const RedlineTaskCard = memo(
               </div>
             </div>
 
-            <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mt-4">
+            <Collapsible
+              open={isOpen}
+              onOpenChange={setIsOpen}
+              className="mt-4"
+            >
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
@@ -337,10 +350,8 @@ const TeamMemberDashboard = () => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
 
-  // Check for token on mount
   const token = localStorage.getItem("teamsync_token");
 
-  // Redirect to login if not authenticated, not a Team Member, or no token
   useEffect(() => {
     if (!isAuthenticated || !token) {
       toast.error("Please log in to access the dashboard.");
@@ -351,7 +362,6 @@ const TeamMemberDashboard = () => {
     }
   }, [isAuthenticated, user, token, navigate]);
 
-  // Helper to get the headers with the token
   const getAuthHeaders = () => {
     const token = localStorage.getItem("teamsync_token");
     if (!token) {
@@ -364,23 +374,21 @@ const TeamMemberDashboard = () => {
     };
   };
 
-  // Fetch tasks assigned to the team member
   const fetchTasks = async () => {
     try {
-      console.log("Starting fetchTasks...");
-      console.log("Setting isLoading to true...");
       setIsLoading(true);
-      console.log("isLoading set to true");
-
-      console.log("Making API request to /api/tasks...");
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
-      console.log("Fetch tasks response:", response.data);
+
+      // Log the raw API response for Misc tasks
+      const miscTasks = response.data.data.filter(
+        (task) => task.type === "Misc"
+      );
+      console.log("Raw API response for Misc tasks:", miscTasks);
 
       const tasksData = response.data.data.map((task, taskIndex) => {
-        console.log("Mapping task:", task);
         const commentMap = new Map<string, TaskComment>();
         (task.comments || []).forEach((comment: any, commentIndex: number) => {
           if (
@@ -427,6 +435,13 @@ const TeamMemberDashboard = () => {
           })
           .filter((item): item is TaskItem => item !== null);
 
+        if (task.type === "Misc") {
+          console.log(
+            `Misc Task ID ${task.id}: description =`,
+            task.description
+          );
+        }
+
         return {
           id: task.id.toString(),
           type: task.type as TaskType,
@@ -443,17 +458,22 @@ const TeamMemberDashboard = () => {
           areaNumber: task.area_number || "N/A",
           items: mappedItems,
           comments: uniqueComments,
+          description: task.task_desc || task.desc || task.description || "",
+          pidNumber: task.pid_number ?? "",
         };
       });
 
-      // Extract all PID IDs from tasks
       const pidIds = tasksData
         .filter((task) => task.type === "Redline")
         .map((task) => task.items.find((item) => item.type === "PID")?.id)
         .filter((id): id is string => !!id);
 
-      // Fetch all lines for these PIDs in one API call
-      let allLines: { id: string; name: string; pidId: string; completed: boolean }[] = [];
+      let allLines: {
+        id: string;
+        name: string;
+        pidId: string;
+        completed: boolean;
+      }[] = [];
       if (pidIds.length > 0) {
         const linesResponse = await axios.get<{
           data: { id: number; line_number: string; pid_id: number }[];
@@ -466,13 +486,11 @@ const TeamMemberDashboard = () => {
         }));
       }
 
-      // Attach lines to each task and ensure pidNumber is present
       const tasksWithLines = tasksData.map((task) => {
         const pidItem = task.items.find((item) => item.type === "PID");
         const taskLines = pidItem
           ? allLines.filter((line) => line.pidId === pidItem.id)
           : [];
-        // Add pidNumber property (fallback to pidItem?.name or "")
         return { ...task, lines: taskLines, pidNumber: pidItem?.name ?? "" };
       });
 
@@ -496,12 +514,10 @@ const TeamMemberDashboard = () => {
     }
   };
 
-  // Load tasks on initial render
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
       fetchTasks();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user, token]);
 
   const handleRefresh = () => {
@@ -633,14 +649,12 @@ const TeamMemberDashboard = () => {
               {taskCounts.completed} Completed
             </div>
           </div>
-          <Alert className="mt-4 bg-yellow-50 border-yellow-200">
-            <InfoIcon className="h-4 w-4 text-yellow-600" />
-            <AlertTitle className="text-yellow-800">Team Update</AlertTitle>
+          <div className="mt-4">
             <AlertDescription className="text-yellow-700">
               {getRandomMessage("general") ||
                 "Stay on top of your tasks to keep the project moving!"}
             </AlertDescription>
-          </Alert>
+          </div>
         </header>
 
         {assignedTasks.length > 0 && (
@@ -668,15 +682,24 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onStatusChange={handleStatusChange}
-                    onItemToggle={handleItemToggle}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                assignedTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onItemToggle={handleItemToggle}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No assigned tasks"}
@@ -688,15 +711,24 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onStatusChange={handleStatusChange}
-                    onItemToggle={handleItemToggle}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                inProgressTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onItemToggle={handleItemToggle}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No in-progress tasks"}
@@ -708,13 +740,21 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                completedTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No completed tasks"}
@@ -734,15 +774,24 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onStatusChange={handleStatusChange}
-                    onItemToggle={handleItemToggle}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                assignedTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onItemToggle={handleItemToggle}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No assigned tasks"}
@@ -760,15 +809,24 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onStatusChange={handleStatusChange}
-                    onItemToggle={handleItemToggle}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                inProgressTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                      onItemToggle={handleItemToggle}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No in-progress tasks"}
@@ -786,13 +844,21 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map((task) => (
-                  <RedlineTaskCard
-                    key={task.id}
-                    task={task}
-                    onOpenComments={handleOpenComments}
-                  />
-                ))
+                completedTasks.map((task) =>
+                  task.type === "Misc" ? (
+                    <MiscTaskCard
+                      key={task.id}
+                      task={task}
+                      onOpenComments={handleOpenComments}
+                    />
+                  ) : (
+                    <RedlineTaskCard
+                      key={task.id}
+                      task={task}
+                      onOpenComments={handleOpenComments}
+                    />
+                  )
+                )
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No completed tasks"}
@@ -820,5 +886,4 @@ const TeamMemberDashboard = () => {
     </div>
   );
 };
-
 export default TeamMemberDashboard;

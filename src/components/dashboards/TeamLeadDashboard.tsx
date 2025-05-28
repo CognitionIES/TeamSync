@@ -127,6 +127,7 @@ const TeamLeadDashboard = () => {
   const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(
     null
   );
+  const [description, setDescription] = useState(""); // Add state for description
   const [selectedItemType, setSelectedItemType] = useState<
     "PID" | "Line" | "Equipment" | null
   >(null);
@@ -352,7 +353,6 @@ const TeamLeadDashboard = () => {
       setSelectedEquipment([]);
     }
   };
-
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
@@ -434,6 +434,7 @@ const TeamLeadDashboard = () => {
             pidNumber: task.pid_number ?? null,
             projectName: task.project_name ?? "",
             areaNumber: task.area_number ?? null,
+            description: task.description || "",
           };
         });
 
@@ -632,130 +633,142 @@ const TeamLeadDashboard = () => {
       return;
     }
 
-    let validSelection = false;
     let selectedItems: {
       itemId: string;
       itemType: string;
       itemName: string;
     }[] = [];
 
-    if (taskType === "Redline" && assignmentType === "PID") {
-      if (selectedPIDs.length > 0) {
-        validSelection = true;
-        selectedItems = selectedPIDs
-          .map((pid) => {
-            const pidObj = pids.find((p) => p.id === pid);
-            if (!pidObj) {
-              console.warn(`PID with ID ${pid} not found in pids array`);
-              return null;
-            }
-            return {
-              itemId: pid,
-              itemType: "PID",
-              itemName: pidObj.name || pid,
-            };
-          })
-          .filter((item) => item !== null);
-      }
-    } else if (taskType === "UPV") {
-      if (assignmentType === "Line" && selectedLines.length > 0) {
-        validSelection = true;
-        selectedItems = selectedLines
-          .map((line) => {
-            const lineObj = lines.find((l) => l.id === line);
-            if (!lineObj) {
-              console.warn(`Line with ID ${line} not found in lines array`);
-              return null;
-            }
-            return {
-              itemId: line,
-              itemType: "Line",
-              itemName: lineObj.name || line,
-            };
-          })
-          .filter((item) => item !== null);
-      } else if (
-        assignmentType === "Equipment" &&
-        selectedEquipment.length > 0
+    if (taskType === "Misc") {
+      if (
+        !description ||
+        typeof description !== "string" ||
+        description.trim().length === 0
       ) {
-        validSelection = true;
-        selectedItems = selectedEquipment
-          .map((equip) => {
-            const equipObj = equipment.find((e) => e.id === equip);
-            if (!equipObj) {
-              console.warn(
-                `Equipment with ID ${equip} not found in equipment array`
-              );
-              return null;
-            }
-            return {
-              itemId: equip,
-              itemType: "Equipment",
-              itemName: equipObj.name || equip,
-            };
-          })
-          .filter((item) => item !== null);
+        toast.error("Please provide a description for the miscellaneous task");
+        return;
       }
-    } else if (taskType === "QC") {
-      if (assignmentType === "PID" && selectedPIDs.length > 0) {
-        validSelection = true;
-        selectedItems = selectedPIDs
-          .map((pid) => {
-            const pidObj = pids.find((p) => p.id === pid);
-            if (!pidObj) {
-              console.warn(`PID with ID ${pid} not found in pids array`);
-              return null;
-            }
-            return {
-              itemId: pid,
-              itemType: "PID",
-              itemName: pidObj.name || pid,
-            };
-          })
-          .filter((item) => item !== null);
-      } else if (assignmentType === "Line" && selectedLines.length > 0) {
-        validSelection = true;
-        selectedItems = selectedLines
-          .map((line) => {
-            const lineObj = lines.find((l) => l.id === line);
-            if (!lineObj) {
-              console.warn(`Line with ID ${line} not found in lines array`);
-              return null;
-            }
-            return {
-              itemId: line,
-              itemType: "Line",
-              itemName: lineObj.name || line,
-            };
-          })
-          .filter((item) => item !== null);
-      } else if (
-        assignmentType === "Equipment" &&
-        selectedEquipment.length > 0
-      ) {
-        validSelection = true;
-        selectedItems = selectedEquipment
-          .map((equip) => {
-            const equipObj = equipment.find((e) => e.id === equip);
-            if (!equipObj) {
-              console.warn(
-                `Equipment with ID ${equip} not found in equipment array`
-              );
-              return null;
-            }
-            return {
-              itemId: equip,
-              itemType: "Equipment",
-              itemName: equipObj.name || equip,
-            };
-          })
-          .filter((item) => item !== null);
-      }
-    }
+    } else {
+      let validSelection = false;
 
-    if (!validSelection || selectedItems.length === 0) {
-      toast.error("Please select at least one valid item to assign");
-      return;
+      if (taskType === "Redline" && assignmentType === "PID") {
+        if (selectedPIDs.length > 0) {
+          validSelection = true;
+          selectedItems = selectedPIDs
+            .map((pid) => {
+              const pidObj = pids.find((p) => p.id === pid);
+              if (!pidObj) {
+                console.warn(`PID with ID ${pid} not found in pids array`);
+                return null;
+              }
+              return {
+                itemId: pid,
+                itemType: "PID",
+                itemName: pidObj.name || pid,
+              };
+            })
+            .filter((item) => item !== null);
+        }
+      } else if (taskType === "UPV") {
+        if (assignmentType === "Line" && selectedLines.length > 0) {
+          validSelection = true;
+          selectedItems = selectedLines
+            .map((line) => {
+              const lineObj = lines.find((l) => l.id === line);
+              if (!lineObj) {
+                console.warn(`Line with ID ${line} not found in lines array`);
+                return null;
+              }
+              return {
+                itemId: line,
+                itemType: "Line",
+                itemName: lineObj.name || line,
+              };
+            })
+            .filter((item) => item !== null);
+        } else if (
+          assignmentType === "Equipment" &&
+          selectedEquipment.length > 0
+        ) {
+          validSelection = true;
+          selectedItems = selectedEquipment
+            .map((equip) => {
+              const equipObj = equipment.find((e) => e.id === equip);
+              if (!equipObj) {
+                console.warn(
+                  `Equipment with ID ${equip} not found in equipment array`
+                );
+                return null;
+              }
+              return {
+                itemId: equip,
+                itemType: "Equipment",
+                itemName: equipObj.name || equip,
+              };
+            })
+            .filter((item) => item !== null);
+        }
+      } else if (taskType === "QC") {
+        if (assignmentType === "PID" && selectedPIDs.length > 0) {
+          validSelection = true;
+          selectedItems = selectedPIDs
+            .map((pid) => {
+              const pidObj = pids.find((p) => p.id === pid);
+              if (!pidObj) {
+                console.warn(`PID with ID ${pid} not found in pids array`);
+                return null;
+              }
+              return {
+                itemId: pid,
+                itemType: "PID",
+                itemName: pidObj.name || pid,
+              };
+            })
+            .filter((item) => item !== null);
+        } else if (assignmentType === "Line" && selectedLines.length > 0) {
+          validSelection = true;
+          selectedItems = selectedLines
+            .map((line) => {
+              const lineObj = lines.find((l) => l.id === line);
+              if (!lineObj) {
+                console.warn(`Line with ID ${line} not found in lines array`);
+                return null;
+              }
+              return {
+                itemId: line,
+                itemType: "Line",
+                itemName: lineObj.name || line,
+              };
+            })
+            .filter((item) => item !== null);
+        } else if (
+          assignmentType === "Equipment" &&
+          selectedEquipment.length > 0
+        ) {
+          validSelection = true;
+          selectedItems = selectedEquipment
+            .map((equip) => {
+              const equipObj = equipment.find((e) => e.id === equip);
+              if (!equipObj) {
+                console.warn(
+                  `Equipment with ID ${equip} not found in equipment array`
+                );
+                return null;
+              }
+              return {
+                itemId: equip,
+                itemType: "Equipment",
+                itemName: equipObj.name || equip,
+              };
+            })
+            .filter((item) => item !== null);
+        }
+      }
+
+      if (!validSelection || selectedItems.length === 0) {
+        toast.error("Please select at least one valid item to assign");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -763,7 +776,6 @@ const TeamLeadDashboard = () => {
 
     try {
       const authHeaders = getAuthHeaders();
-
       const assigneeMember = teamMembers.find(
         (member) => member.id === assignee
       );
@@ -777,9 +789,14 @@ const TeamLeadDashboard = () => {
         isComplex,
         projectName: project.name,
         projectId: parseInt(selectedProject),
-        items: selectedItems,
+        items: taskType === "Misc" ? [] : selectedItems,
+        description: taskType === "Misc" ? description : undefined,
       };
-
+      console.log(
+        "Sending task payload with description:",
+        newTask.description
+      ); // Add debug log
+      console.log("Sending task payload:", newTask);
       const response = await axios.post(
         `${API_URL}/tasks`,
         newTask,
@@ -787,7 +804,7 @@ const TeamLeadDashboard = () => {
       );
       setSubmissionProgress(50);
 
-      if (assignmentType === "Line") {
+      if (assignmentType === "Line" && taskType !== "Misc") {
         const lineIds = selectedItems.map((item) => parseInt(item.itemId));
         await axios.put(
           `${API_URL}/lines/assign/batch`,
@@ -811,6 +828,7 @@ const TeamLeadDashboard = () => {
       setSelectedEquipment([]);
       setAssignee("");
       setIsComplex(false);
+      setDescription("");
 
       toast.success(
         `Task assigned to ${assigneeMember.name}. ${getRandomMessage(
@@ -820,18 +838,12 @@ const TeamLeadDashboard = () => {
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error assigning task:", axiosError);
-      if (axiosError.message === "No authentication token found") {
-        toast.error("Session expired. Please log in again.");
-        navigate("/login", { replace: true });
-      } else if (axiosError.response?.status === 403) {
-        toast.error("You are not authorized to assign tasks.");
-        navigate("/login", { replace: true });
-      } else {
-        toast.error(
-          axiosError.response?.data?.message ||
-            "Failed to assign task. Please try again."
-        );
-      }
+      console.log("Response data:", axiosError.response?.data);
+      const errorMessage =
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        "Failed to assign task. Please try again.";
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
       setSubmissionProgress(0);
@@ -901,38 +913,42 @@ const TeamLeadDashboard = () => {
                     <SelectItem value="Redline">Redline</SelectItem>
                     <SelectItem value="UPV">UPV</SelectItem>
                     <SelectItem value="QC">QC</SelectItem>
+                    <SelectItem value="Misc">Miscellaneous</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Assignment Type
-                </label>
-                <Select
-                  value={assignmentType}
-                  onValueChange={handleAssignmentTypeChange}
-                  disabled={!taskType}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {taskType === "Redline" && (
-                      <SelectItem value="PID">P&ID</SelectItem>
-                    )}
-                    {(taskType === "UPV" || taskType === "QC") && (
-                      <SelectItem value="Line">Line</SelectItem>
-                    )}
-                    {(taskType === "UPV" || taskType === "QC") && (
-                      <SelectItem value="Equipment">Equipment</SelectItem>
-                    )}
-                    {taskType === "QC" && (
-                      <SelectItem value="PID">P&ID</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Hide Assignment Type dropdown when taskType is Misc */}
+              {taskType && taskType !== "Misc" && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Assignment Type
+                  </label>
+                  <Select
+                    value={assignmentType}
+                    onValueChange={handleAssignmentTypeChange}
+                    disabled={!taskType}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {taskType === "Redline" && (
+                        <SelectItem value="PID">P&ID</SelectItem>
+                      )}
+                      {(taskType === "UPV" || taskType === "QC") && (
+                        <SelectItem value="Line">Line</SelectItem>
+                      )}
+                      {(taskType === "UPV" || taskType === "QC") && (
+                        <SelectItem value="Equipment">Equipment</SelectItem>
+                      )}
+                      {taskType === "QC" && (
+                        <SelectItem value="PID">P&ID</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium mb-1">
@@ -975,108 +991,133 @@ const TeamLeadDashboard = () => {
               </div>
             </div>
 
-            {taskType && assignmentType && (
-              <div className="border p-4 rounded-md">
-                <h3 className="font-medium mb-3">
-                  Select{" "}
-                  {assignmentType === "PID"
-                    ? "P&IDs"
-                    : assignmentType === "Line"
-                    ? "Lines"
-                    : "Equipment"}
-                </h3>
-
-                <div className="max-h-60 overflow-y-auto space-y-2">
-                  {assignmentType === "PID" && pids.length === 0 && (
-                    <p className="text-sm text-gray-500">No available P&IDs</p>
-                  )}
-                  {assignmentType === "PID" &&
-                    pids.map((pid) => (
-                      <div key={pid.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={pid.id}
-                          checked={selectedPIDs.includes(pid.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedPIDs([...selectedPIDs, pid.id]);
-                            } else {
-                              setSelectedPIDs(
-                                selectedPIDs.filter((id) => id !== pid.id)
-                              );
-                            }
-                          }}
-                        />
-                        <label htmlFor={pid.id} className="text-sm">
-                          {pid.name}
-                        </label>
-                      </div>
-                    ))}
-
-                  {assignmentType === "Line" && lines.length === 0 && (
-                    <p className="text-sm text-gray-500">No available lines</p>
-                  )}
-                  {assignmentType === "Line" &&
-                    lines.map((line) => (
-                      <div
-                        key={line.id}
-                        className="flex items-center space-x-2"
-                      >
-                        <Checkbox
-                          id={line.id}
-                          checked={selectedLines.includes(line.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedLines([...selectedLines, line.id]);
-                            } else {
-                              setSelectedLines(
-                                selectedLines.filter((id) => id !== line.id)
-                              );
-                            }
-                          }}
-                        />
-                        <label htmlFor={line.id} className="text-sm">
-                          {line.name}
-                        </label>
-                      </div>
-                    ))}
-
-                  {assignmentType === "Equipment" && equipment.length === 0 && (
-                    <p className="text-sm text-gray-500">
-                      No available equipment
-                    </p>
-                  )}
-                  {assignmentType === "Equipment" &&
-                    equipment.map((equip) => (
-                      <div
-                        key={equip.id}
-                        className="flex items-center space-x-2"
-                      >
-                        <Checkbox
-                          id={equip.id}
-                          checked={selectedEquipment.includes(equip.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedEquipment([
-                                ...selectedEquipment,
-                                equip.id,
-                              ]);
-                            } else {
-                              setSelectedEquipment(
-                                selectedEquipment.filter(
-                                  (id) => id !== equip.id
-                                )
-                              );
-                            }
-                          }}
-                        />
-                        <label htmlFor={equip.id} className="text-sm">
-                          {equip.name}
-                        </label>
-                      </div>
-                    ))}
+            {taskType &&
+              (taskType === "Misc" ? (
+                <div className="border p-4 rounded-md">
+                  <h3 className="font-medium mb-3">Task Description</h3>
+                  <textarea
+                    className="w-full p-2 border rounded-md"
+                    rows={4}
+                    placeholder="Enter the task description..."
+                    value={description}
+                    onChange={(e) => {
+                      console.log("Textarea value changed to:", e.target.value);
+                      setDescription(e.target.value);
+                    }}
+                  />
                 </div>
-              </div>
-            )}
+              ) : (
+                assignmentType && (
+                  <div className="border p-4 rounded-md">
+                    <h3 className="font-medium mb-3">
+                      Select{" "}
+                      {assignmentType === "PID"
+                        ? "P&IDs"
+                        : assignmentType === "Line"
+                        ? "Lines"
+                        : "Equipment"}
+                    </h3>
+                    {/* Existing item selection logic for PIDs, Lines, Equipment */}
+                    <div className="max-h-60 overflow-y-auto space-y-2">
+                      {assignmentType === "PID" && pids.length === 0 && (
+                        <p className="text-sm text-gray-500">
+                          No available P&IDs
+                        </p>
+                      )}
+                      {assignmentType === "PID" &&
+                        pids.map((pid) => (
+                          <div
+                            key={pid.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <Checkbox
+                              id={pid.id}
+                              checked={selectedPIDs.includes(pid.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedPIDs([...selectedPIDs, pid.id]);
+                                } else {
+                                  setSelectedPIDs(
+                                    selectedPIDs.filter((id) => id !== pid.id)
+                                  );
+                                }
+                              }}
+                            />
+                            <label htmlFor={pid.id} className="text-sm">
+                              {pid.name}
+                            </label>
+                          </div>
+                        ))}
+
+                      {assignmentType === "Line" && lines.length === 0 && (
+                        <p className="text-sm text-gray-500">
+                          No available lines
+                        </p>
+                      )}
+                      {assignmentType === "Line" &&
+                        lines.map((line) => (
+                          <div
+                            key={line.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <Checkbox
+                              id={line.id}
+                              checked={selectedLines.includes(line.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedLines([...selectedLines, line.id]);
+                                } else {
+                                  setSelectedLines(
+                                    selectedLines.filter((id) => id !== line.id)
+                                  );
+                                }
+                              }}
+                            />
+                            <label htmlFor={line.id} className="text-sm">
+                              {line.name}
+                            </label>
+                          </div>
+                        ))}
+
+                      {assignmentType === "Equipment" &&
+                        equipment.length === 0 && (
+                          <p className="text-sm text-gray-500">
+                            No available equipment
+                          </p>
+                        )}
+                      {assignmentType === "Equipment" &&
+                        equipment.map((equip) => (
+                          <div
+                            key={equip.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <Checkbox
+                              id={equip.id}
+                              checked={selectedEquipment.includes(equip.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedEquipment([
+                                    ...selectedEquipment,
+                                    equip.id,
+                                  ]);
+                                } else {
+                                  setSelectedEquipment(
+                                    selectedEquipment.filter(
+                                      (id) => id !== equip.id
+                                    )
+                                  );
+                                }
+                              }}
+                            />
+                            <label htmlFor={equip.id} className="text-sm">
+                              {equip.name}
+                            </label>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )
+              ))}
 
             {isSubmitting && (
               <div className="mt-4">
