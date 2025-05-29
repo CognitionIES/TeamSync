@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
-const { createTask } = require("../controllers/tasks.controller"); // Import createTask
+const { createTask, addTaskComment } = require("../controllers/tasks.controller"); // Add addTaskComment
 // GET /api/tasks - Fetch tasks based on user role
 router.get("/", protect, async (req, res) => {
   try {
@@ -521,5 +521,5 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       .json({ message: "Failed to update task item", error: error.message });
   }
 });
-
+router.post("/:taskId/comments", protect, addTaskComment);
 module.exports = router;

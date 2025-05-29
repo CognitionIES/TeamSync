@@ -437,19 +437,48 @@ const addTaskComment = async (req, res) => {
     const { comment } = req.body;
     const { id: userId, name, role } = req.user;
 
-    if (!comment) {
-      return res.status(400).json({ message: "Comment is required" });
+    if (!comment || typeof comment !== "string" || comment.trim() === "") {
+      return res.status(400).json({
+        message: "Comment is required and must be a non-empty string",
+      });
     }
 
+    // Verify that the task exists
+    const { rows: taskRows } = await db.query(
+      "SELECT id FROM tasks WHERE id = $1",
+      [taskId]
+    );
+    if (taskRows.length === 0) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    // Insert the comment
     const { rows } = await db.query(
-      "INSERT INTO task_comments (task_id, user_id, user_name, user_role, comment) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [taskId, userId, name, role, comment]
+      `
+      INSERT INTO task_comments (task_id, user_id, user_name, user_role, comment, created_at)
+      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      RETURNING id, task_id, user_id, user_name, user_role, comment, created_at
+      `,
+      [taskId, userId, name, role, comment.trim()]
     );
 
-    res.status(201).json({ data: rows[0] });
+    const newComment = rows[0];
+    res.status(201).json({
+      data: {
+        id: newComment.id.toString(),
+        taskId: newComment.task_id.toString(),
+        userId: newComment.user_id.toString(),
+        userName: newComment.user_name,
+        userRole: newComment.user_role,
+        comment: newComment.comment,
+        createdAt: newComment.created_at.toISOString(),
+      },
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error adding comment:", error.message, error.stack);
+    res
+      .status(500)
+      .json({ message: "Failed to add comment", error: error.message });
   }
 };
 

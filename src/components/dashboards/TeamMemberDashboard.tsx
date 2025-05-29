@@ -598,6 +598,7 @@ const TeamMemberDashboard = () => {
   const handleAddComment = async (taskId: string, comment: string) => {
     try {
       const authHeaders = getAuthHeaders();
+      console.log("Sending comment to:", `${API_URL}/tasks/${taskId}/comments`);
       await axios.post(
         `${API_URL}/tasks/${taskId}/comments`,
         { comment },
@@ -608,16 +609,30 @@ const TeamMemberDashboard = () => {
       if (updatedTask && selectedTask?.id === taskId) {
         setSelectedTask(updatedTask);
       }
+      toast.success("Comment added successfully");
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error adding comment:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to add comment"
-      );
+      if (axiosError.code === "ERR_NETWORK") {
+        toast.error(
+          "Cannot connect to the server. Please ensure the backend is running and the API URL is correct."
+        );
+      } else if (axiosError.response?.status === 404) {
+        toast.error(
+          "The task does not exist or the comment endpoint is unavailable."
+        );
+      } else if (axiosError.response?.status === 401) {
+        toast.error(
+          "You are not authorized to add a comment. Please log in again."
+        );
+      } else {
+        toast.error(
+          axiosError.response?.data?.message || "Failed to add comment"
+        );
+      }
       throw error;
     }
   };
-
   if (!isAuthenticated || user?.role !== "Team Member" || !token) {
     return null;
   }
