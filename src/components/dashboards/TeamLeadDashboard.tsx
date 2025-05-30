@@ -117,6 +117,8 @@ const TeamLeadDashboard = () => {
   const [isComplex, setIsComplex] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionProgress, setSubmissionProgress] = useState(0);
+  // New state for group select count
+  const [groupSelectCount, setGroupSelectCount] = useState<number>(30); // Default to 30
 
   // Modal state for assigned items
   const [modalIsOpen, setModalIsOpen] = useState(false);
@@ -127,7 +129,7 @@ const TeamLeadDashboard = () => {
   const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(
     null
   );
-  const [description, setDescription] = useState(""); // Add state for description
+  const [description, setDescription] = useState("");
   const [selectedItemType, setSelectedItemType] = useState<
     "PID" | "Line" | "Equipment" | null
   >(null);
@@ -353,6 +355,7 @@ const TeamLeadDashboard = () => {
       setSelectedEquipment([]);
     }
   };
+
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
@@ -503,7 +506,6 @@ const TeamLeadDashboard = () => {
     setSelectedItemType(null);
   };
 
-  // Handle opening the comments modal
   const handleViewComments = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
@@ -795,7 +797,7 @@ const TeamLeadDashboard = () => {
       console.log(
         "Sending task payload with description:",
         newTask.description
-      ); // Add debug log
+      );
       console.log("Sending task payload:", newTask);
       const response = await axios.post(
         `${API_URL}/tasks`,
@@ -847,6 +849,129 @@ const TeamLeadDashboard = () => {
     } finally {
       setIsSubmitting(false);
       setSubmissionProgress(0);
+    }
+  };
+
+  // Handler for group select count change
+  const handleGroupSelectCountChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const count = parseInt(e.target.value, 10);
+    if (isNaN(count) || count < 1) {
+      setGroupSelectCount(1);
+    } else {
+      const maxCount =
+        assignmentType === "PID"
+          ? pids.length
+          : assignmentType === "Line"
+          ? lines.length
+          : equipment.length;
+      setGroupSelectCount(Math.min(count, maxCount));
+    }
+  };
+
+  // Handler for group selection of PIDs
+  const handlePIDCheckboxChange = (
+    pidId: string,
+    index: number,
+    checked: boolean
+  ) => {
+    if (groupSelectCount > 1) {
+      const startIndex = index;
+      const endIndex = Math.min(startIndex + groupSelectCount, pids.length);
+      const pidsToSelect = pids
+        .slice(startIndex, endIndex)
+        .map((pid) => pid.id);
+      if (checked) {
+        const newSelectedPIDs = [
+          ...new Set([...selectedPIDs, ...pidsToSelect]),
+        ];
+        setSelectedPIDs(newSelectedPIDs);
+        toast.success(`Selected ${pidsToSelect.length} P&IDs`);
+      } else {
+        const newSelectedPIDs = selectedPIDs.filter(
+          (id) => !pidsToSelect.includes(id)
+        );
+        setSelectedPIDs(newSelectedPIDs);
+        toast.success(`Deselected ${pidsToSelect.length} P&IDs`);
+      }
+    } else {
+      if (checked) {
+        setSelectedPIDs([...selectedPIDs, pidId]);
+      } else {
+        setSelectedPIDs(selectedPIDs.filter((id) => id !== pidId));
+      }
+    }
+  };
+
+  // Handler for group selection of Lines
+  const handleLineCheckboxChange = (
+    lineId: string,
+    index: number,
+    checked: boolean
+  ) => {
+    if (groupSelectCount > 1) {
+      const startIndex = index;
+      const endIndex = Math.min(startIndex + groupSelectCount, lines.length);
+      const linesToSelect = lines
+        .slice(startIndex, endIndex)
+        .map((line) => line.id);
+      if (checked) {
+        const newSelectedLines = [
+          ...new Set([...selectedLines, ...linesToSelect]),
+        ];
+        setSelectedLines(newSelectedLines);
+        toast.success(`Selected ${linesToSelect.length} lines`);
+      } else {
+        const newSelectedLines = selectedLines.filter(
+          (id) => !linesToSelect.includes(id)
+        );
+        setSelectedLines(newSelectedLines);
+        toast.success(`Deselected ${linesToSelect.length} lines`);
+      }
+    } else {
+      if (checked) {
+        setSelectedLines([...selectedLines, lineId]);
+      } else {
+        setSelectedLines(selectedLines.filter((id) => id !== lineId));
+      }
+    }
+  };
+
+  // Handler for group selection of Equipment
+  const handleEquipmentCheckboxChange = (
+    equipId: string,
+    index: number,
+    checked: boolean
+  ) => {
+    if (groupSelectCount > 1) {
+      const startIndex = index;
+      const endIndex = Math.min(
+        startIndex + groupSelectCount,
+        equipment.length
+      );
+      const equipmentToSelect = equipment
+        .slice(startIndex, endIndex)
+        .map((equip) => equip.id);
+      if (checked) {
+        const newSelectedEquipment = [
+          ...new Set([...selectedEquipment, ...equipmentToSelect]),
+        ];
+        setSelectedEquipment(newSelectedEquipment);
+        toast.success(`Selected ${equipmentToSelect.length} equipment items`);
+      } else {
+        const newSelectedEquipment = selectedEquipment.filter(
+          (id) => !equipmentToSelect.includes(id)
+        );
+        setSelectedEquipment(newSelectedEquipment);
+        toast.success(`Deselected ${equipmentToSelect.length} equipment items`);
+      }
+    } else {
+      if (checked) {
+        setSelectedEquipment([...selectedEquipment, equipId]);
+      } else {
+        setSelectedEquipment(selectedEquipment.filter((id) => id !== equipId));
+      }
     }
   };
 
@@ -918,7 +1043,6 @@ const TeamLeadDashboard = () => {
                 </Select>
               </div>
 
-              {/* Hide Assignment Type dropdown when taskType is Misc */}
               {taskType && taskType !== "Misc" && (
                 <div>
                   <label className="block text-sm font-medium mb-1">
@@ -1017,7 +1141,34 @@ const TeamLeadDashboard = () => {
                         ? "Lines"
                         : "Equipment"}
                     </h3>
-                    {/* Existing item selection logic for PIDs, Lines, Equipment */}
+                    {/* Group Select Control */}
+                    <div className="mb-4 flex items-center">
+                      <label
+                        htmlFor="groupSelectCount"
+                        className="mr-2 font-medium"
+                      >
+                        Select how many at once:
+                      </label>
+                      <input
+                        type="number"
+                        id="groupSelectCount"
+                        value={groupSelectCount}
+                        onChange={handleGroupSelectCountChange}
+                        min="1"
+                        max={
+                          assignmentType === "PID"
+                            ? pids.length
+                            : assignmentType === "Line"
+                            ? lines.length
+                            : equipment.length
+                        }
+                        className="border rounded px-2 py-1 w-20"
+                      />
+                      <span className="ml-2 text-gray-600">
+                        (Click a checkbox to select the next {groupSelectCount}{" "}
+                        items)
+                      </span>
+                    </div>
                     <div className="max-h-60 overflow-y-auto space-y-2">
                       {assignmentType === "PID" && pids.length === 0 && (
                         <p className="text-sm text-gray-500">
@@ -1025,7 +1176,7 @@ const TeamLeadDashboard = () => {
                         </p>
                       )}
                       {assignmentType === "PID" &&
-                        pids.map((pid) => (
+                        pids.map((pid, index) => (
                           <div
                             key={pid.id}
                             className="flex items-center space-x-2"
@@ -1033,15 +1184,13 @@ const TeamLeadDashboard = () => {
                             <Checkbox
                               id={pid.id}
                               checked={selectedPIDs.includes(pid.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedPIDs([...selectedPIDs, pid.id]);
-                                } else {
-                                  setSelectedPIDs(
-                                    selectedPIDs.filter((id) => id !== pid.id)
-                                  );
-                                }
-                              }}
+                              onCheckedChange={(checked) =>
+                                handlePIDCheckboxChange(
+                                  pid.id,
+                                  index,
+                                  checked as boolean
+                                )
+                              }
                             />
                             <label htmlFor={pid.id} className="text-sm">
                               {pid.name}
@@ -1055,7 +1204,7 @@ const TeamLeadDashboard = () => {
                         </p>
                       )}
                       {assignmentType === "Line" &&
-                        lines.map((line) => (
+                        lines.map((line, index) => (
                           <div
                             key={line.id}
                             className="flex items-center space-x-2"
@@ -1063,15 +1212,13 @@ const TeamLeadDashboard = () => {
                             <Checkbox
                               id={line.id}
                               checked={selectedLines.includes(line.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedLines([...selectedLines, line.id]);
-                                } else {
-                                  setSelectedLines(
-                                    selectedLines.filter((id) => id !== line.id)
-                                  );
-                                }
-                              }}
+                              onCheckedChange={(checked) =>
+                                handleLineCheckboxChange(
+                                  line.id,
+                                  index,
+                                  checked as boolean
+                                )
+                              }
                             />
                             <label htmlFor={line.id} className="text-sm">
                               {line.name}
@@ -1086,7 +1233,7 @@ const TeamLeadDashboard = () => {
                           </p>
                         )}
                       {assignmentType === "Equipment" &&
-                        equipment.map((equip) => (
+                        equipment.map((equip, index) => (
                           <div
                             key={equip.id}
                             className="flex items-center space-x-2"
@@ -1094,20 +1241,13 @@ const TeamLeadDashboard = () => {
                             <Checkbox
                               id={equip.id}
                               checked={selectedEquipment.includes(equip.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedEquipment([
-                                    ...selectedEquipment,
-                                    equip.id,
-                                  ]);
-                                } else {
-                                  setSelectedEquipment(
-                                    selectedEquipment.filter(
-                                      (id) => id !== equip.id
-                                    )
-                                  );
-                                }
-                              }}
+                              onCheckedChange={(checked) =>
+                                handleEquipmentCheckboxChange(
+                                  equip.id,
+                                  index,
+                                  checked as boolean
+                                )
+                              }
                             />
                             <label htmlFor={equip.id} className="text-sm">
                               {equip.name}
