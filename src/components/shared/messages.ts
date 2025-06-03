@@ -11,7 +11,6 @@ const messages: Messages = {
     "Found a bug? Report it. Because nobody likes surprises, unless it's a surprise party with soup dumplings.",
     "The deadline is approaching faster than a cat on a laser pointer. Stay focused!",
     "Deadline is a negative inspiration, still better than no inspiration at all",
-    "I'm not lazy, I'm just conserving energy for… nothing",
   ],
   error: [
     "You've wandered too far from the path, my friend.",
@@ -37,6 +36,8 @@ const messages: Messages = {
   ],
   completion: [
     "The work is done, and the world takes note.",
+    "Perfect",
+    "Nailed it!",
     "We've hit a milestone! It's not a Nobel Prize, but it's our Nobel Prize.",
   ],
   login: [

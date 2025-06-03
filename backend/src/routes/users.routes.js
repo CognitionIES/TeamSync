@@ -30,7 +30,47 @@ router.get("/role/:role", getUsersByRole);
 router.use(protect);
 
 // Fetch team members (for Team Lead dashboard dropdown)
-router.get("/team-members", authorize(["Team Lead"]), getTeamMembers);
+router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      console.error("No user ID found in request. User:", req.user);
+      return res
+        .status(401)
+        .json({ message: "User authentication failed. Please log in again." });
+    }
+
+    console.log("Fetching team members for Team Lead ID:", req.user.id);
+    console.log("User role:", req.user.role);
+    const { rows } = await db.query(
+      `
+      SELECT u.id, u.name, u.role
+      FROM users u
+      WHERE u.id IN (
+        SELECT tm.member_id
+        FROM team_members tm
+        WHERE tm.lead_id = $1
+      )
+      `,
+      [req.user.id]
+    );
+    console.log("Team members fetched:", rows);
+    if (rows.length === 0) {
+      console.log("No team members found for Team Lead ID:", req.user.id);
+      return res.status(200).json({
+        data: [],
+        message:
+          "No team members found for this Team Lead. Please contact an Admin to assign team members.",
+      });
+    }
+    res.status(200).json({ data: rows });
+  } catch (error) {
+    console.error("Error fetching team members:", error.message, error.stack);
+    res.status(500).json({
+      message: "Failed to fetch team members. Please try again later.",
+      error: error.message,
+    });
+  }
+});
 
 // Fetch user by name (for task assignment)
 router.get("/by-name", authorize(["Team Lead"]), getUserByName);
@@ -91,6 +131,7 @@ router.get("/", async (req, res) => {
       .json({ message: "Failed to fetch users", error: error.message });
   }
 });
+
 // New route: Fetch assigned items for a specific user
 router.get("/:userId/assigned-items/:taskId", async (req, res) => {
   console.log(
@@ -229,14 +270,13 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
     res.status(200).json(response);
   } catch (error) {
     console.error("Error fetching assigned items:", error.message, error.stack);
-    res
-      .status(500)
-      .json({
-        message: "Failed to fetch assigned items",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to fetch assigned items",
+      error: error.message,
+    });
   }
 });
+
 // Get specific user (Admin only)
 router.get("/:id", authorize(["Admin"]), getUserById);
 

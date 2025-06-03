@@ -28,6 +28,7 @@ Modal.setAppElement("#root");
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 interface User {
+  role: string;
   id: string;
   name: string;
 }
@@ -98,6 +99,7 @@ const TeamLeadDashboard = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false); // Add loading state
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [pids, setPIDs] = useState<PID[]>([]);
@@ -166,7 +168,7 @@ const TeamLeadDashboard = () => {
     if (!token) {
       throw new Error("No authentication token found");
     }
-    console.log("Token being sent:", token);
+    console.log("Token being sent:", token); // Log the token
     return {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -212,25 +214,42 @@ const TeamLeadDashboard = () => {
   };
 
   const fetchTeamMembers = async () => {
+    setIsTeamMembersLoading(true);
     try {
-      const response = await axios.get<{ data: User[] }>(
+      console.log("Calling endpoint: /api/users/team-members"); // Add logging
+      console.log("Logged-in user ID:", user?.id); // Log user ID
+      const response = await axios.get<{ data: User[]; message?: string }>(
         `${API_URL}/users/team-members`,
         getAuthHeaders()
       );
+      console.log("Team members API response:", response.data);
       const members = response.data.data.map((user) => ({
         id: user.id.toString(),
         name: user.name,
       }));
       if (members.length === 0) {
-        toast.warning("No team members found. Please add team members.");
+        const message =
+          response.data.message ||
+          "No team members found. Please contact an Admin to assign team members.";
+        toast.warning(message);
       }
       setTeamMembers(members);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching team members:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to fetch team members."
-      );
+      console.log("Error response:", axiosError.response?.data);
+      const errorMessage =
+        axiosError.response?.data?.message ||
+        "Failed to fetch team members. Please try again.";
+      if (axiosError.response?.status === 401) {
+        toast.error("Session expired. Please log in again.");
+        navigate("/login", { replace: true });
+      } else {
+        toast.error(errorMessage);
+      }
+      setTeamMembers([]);
+    } finally {
+      setIsTeamMembersLoading(false);
     }
   };
 
@@ -521,9 +540,15 @@ const TeamLeadDashboard = () => {
     setSelectedTaskForComments(null);
   };
 
+  const handleAssigneeChange = (value: string) => {
+    console.log("Selected assignee:", value); // Add logging for debugging
+    setAssignee(value);
+  };
+
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
       fetchProjects();
+      fetchTeamMembers(); // Fetch team members on mount
       setGeneralMessage(getRandomMessage("general"));
     }
   }, [isAuthenticated, user, token]);
@@ -531,7 +556,6 @@ const TeamLeadDashboard = () => {
   useEffect(() => {
     if (selectedProject) {
       Promise.all([
-        fetchTeamMembers(),
         fetchPIDs(),
         fetchLines(),
         fetchEquipment(),
@@ -1041,6 +1065,11 @@ const TeamLeadDashboard = () => {
                     <SelectItem value="Misc">Miscellaneous</SelectItem>
                   </SelectContent>
                 </Select>
+                {!taskType && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    Please select a task type to enable team member selection.
+                  </p>
+                )}
               </div>
 
               {taskType && taskType !== "Misc" && (
@@ -1080,14 +1109,28 @@ const TeamLeadDashboard = () => {
                 </label>
                 <Select
                   value={assignee}
-                  onValueChange={setAssignee}
-                  disabled={!taskType || teamMembers.length === 0}
+                  onValueChange={handleAssigneeChange}
+                  disabled={
+                    !taskType ||
+                    teamMembers.length === 0 ||
+                    isTeamMembersLoading
+                  }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select member" />
+                    {isTeamMembersLoading ? (
+                      <span className="text-gray-500">
+                        Loading team members...
+                      </span>
+                    ) : (
+                      <SelectValue placeholder="Select member" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
-                    {teamMembers.length === 0 ? (
+                    {isTeamMembersLoading ? (
+                      <div className="p-2 text-sm text-gray-500">
+                        Loading...
+                      </div>
+                    ) : teamMembers.length === 0 ? (
                       <div className="p-2 text-sm text-gray-500">
                         No team members available
                       </div>
@@ -1101,7 +1144,6 @@ const TeamLeadDashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="flex items-end">
                 <Button
                   onClick={handleAssign}

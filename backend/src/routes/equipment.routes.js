@@ -68,6 +68,7 @@ router.post("/", protect, async (req, res) => {
         "Assigned",
         new Date(),
       ]
+
     );
     console.log("Equipment inserted successfully:", rows[0]);
 
@@ -111,3 +112,6 @@ router.post("/", protect, async (req, res) => {
 });
 
 module.exports = router;
+/* 
+gussa na javab ma gussoj madse 
+*/
