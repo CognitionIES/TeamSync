@@ -20,7 +20,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import MiscTaskCard from "./MiscTaskCard"; // Import the new component
 
 interface TaskCardProps {
   task: Task;
@@ -48,6 +47,17 @@ const TaskCard = ({
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
+      timeZone: "Asia/Kolkata",
+    });
+  };
+
+  // Format date as "MMM DD, YYYY"
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
       timeZone: "Asia/Kolkata",
     });
   };
@@ -103,7 +113,7 @@ const TaskCard = ({
   };
 
   // Check if the task involves lines (e.g., Redline tasks) and has a P&ID
-  const isLineTask = task.type === "Redline"; // Adjust this condition if other task types involve lines
+  const isLineTask = task.type === "Redline";
   const pidItem = task.items.find((item) => item.type === "PID");
 
   return (
@@ -113,33 +123,60 @@ const TaskCard = ({
         task.isComplex && "border-teamsync-complex border-2"
       )}
     >
-      <CardHeader className="pb-2">
+      <CardHeader
+        className={`
+          pb-2 
+          ${
+            task.status === "Completed"
+              ? "bg-green-50"
+              : task.status === "In Progress"
+              ? "bg-orange-50"
+              : "bg-blue-50"
+          }`}
+      >
         <div className="flex justify-between items-start">
           <div className="space-y-1">
             <TaskTypeIndicator type={task.type} />
-            <CardTitle className="text-lg font-semibold">{task.type}</CardTitle>
+            <CardTitle className="text-lg font-semibold mb-2">
+              {task.type}
+            </CardTitle>
           </div>
           <StatusBadge
             status={task.status as TaskStatus}
             isComplex={task.isComplex}
           />
         </div>
-        <div className="text-sm text-gray-500 space-y-1 mt-1">
-          <p>Assigned to: {task.assignee}</p>
-          <p>Project: {task.projectName || "Unknown"}</p>
-          <p>Area No: {task.areaNumber || "N/A"}</p>
+        <div className="mt-2 space-y-2">
+          
+          <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
+            <p className="text-base font-medium text-blue-800">
+              Project: {task.projectName || "Unknown"}
+            </p>
+            <p className="text-sm text-blue-700 mt-1">
+              Area No: {task.areaNumber || "N/A"}
+            </p>
+          </div>
           {isLineTask && pidItem && (
-            <p>P&ID No: {task.pidNumber || pidItem.id || "N/A"}</p>
+            <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
+              <p className="text-base font-medium text-blue-800">
+                P&ID No: {task.pidNumber || pidItem.id || "N/A"}
+              </p>
+            </div>
           )}
-        </div>
-        <div className="text-xs text-gray-400 space-y-1 mt-1">
-          <p>Assigned at: {formatTime(task.createdAt)}</p>
-          {task.completedAt && (
-            <p>Completed at: {formatTime(task.completedAt)}</p>
-          )}
-          {!task.completedAt && task.status !== "Assigned" && (
-            <p>Not completed</p>
-          )}
+          <div className="text-center py-1 px-3 bg-gray-100 rounded-md inline-block">
+            <p className="text-sm text-gray-600">
+              Assigned: {formatDate(task.createdAt)} at{" "}
+              {formatTime(task.createdAt)}
+            </p>
+            {task.completedAt ? (
+              <p className="text-sm text-gray-600 mt-1">
+                Completed: {formatDate(task.completedAt)} at{" "}
+                {formatTime(task.completedAt)}
+              </p>
+            ) : task.status !== "Assigned" ? (
+              <p className="text-sm text-gray-600 mt-1">Not completed</p>
+            ) : null}
+          </div>
         </div>
       </CardHeader>
 

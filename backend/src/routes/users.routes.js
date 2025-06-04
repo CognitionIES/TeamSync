@@ -1,9 +1,7 @@
 const express = require("express");
 const {
-  getUsers,
   getUserById,
   getUsersByRole,
-  getTeamMembers,
   getUserByName,
 } = require("../controllers/users.controller");
 const { protect, authorize } = require("../middleware/auth");

@@ -99,7 +99,7 @@ const TeamLeadDashboard = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false); // Add loading state
+  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false); 
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [pids, setPIDs] = useState<PID[]>([]);
@@ -121,7 +121,6 @@ const TeamLeadDashboard = () => {
   const [submissionProgress, setSubmissionProgress] = useState(0);
   // New state for group select count
   const [groupSelectCount, setGroupSelectCount] = useState<number>(30); // Default to 30
-
   // Modal state for assigned items
   const [modalIsOpen, setModalIsOpen] = useState(false);
   const [assignedItems, setAssignedItems] =
@@ -135,12 +134,10 @@ const TeamLeadDashboard = () => {
   const [selectedItemType, setSelectedItemType] = useState<
     "PID" | "Line" | "Equipment" | null
   >(null);
-
   // Modal state for comments
   const [commentsModalIsOpen, setCommentsModalIsOpen] = useState(false);
   const [selectedTaskForComments, setSelectedTaskForComments] =
     useState<Task | null>(null);
-
   // Track assigned items to prevent duplicates
   const [assignedItemsForDuplicates, setAssignedItemsForDuplicates] =
     useState<AssignedItems>({

@@ -27,10 +27,13 @@ interface TaskTableProps {
   showFilters?: boolean;
   showProgress?: boolean;
   showCurrentWork?: boolean;
-  showComments?: boolean; // Added to toggle Comments column
+  showComments?: boolean;
+  showProjectName?: boolean; // New prop for Project Name column
+  showAreaName?: boolean; // New prop for Area Name column
+  showPidNumber?: boolean; // New prop for P&ID Number column
   loading?: boolean;
   onViewCurrentWork?: (taskId: string, userId: string) => void;
-  onViewComments?: (taskId: string) => void; // Added to handle comments modal
+  onViewComments?: (taskId: string) => void;
 }
 
 // Helper function to truncate text
@@ -148,7 +151,10 @@ const TaskTable: React.FC<TaskTableProps> = ({
   showFilters,
   showProgress,
   showCurrentWork,
-  showComments = false, // Default to false
+  showComments = false,
+  showProjectName = false, // Default to false
+  showAreaName = false, // Default to false
+  showPidNumber = false, // Default to false
   loading = false,
   onViewCurrentWork,
   onViewComments,
@@ -210,7 +216,10 @@ const TaskTable: React.FC<TaskTableProps> = ({
       updated: updated,
       updatedAt: updatedAt || completedAt || new Date(0),
       assigneeId: task.assigneeId,
-      comments: task.comments || [], // Include comments for the button
+      comments: task.comments || [],
+      projectName: task.projectName || "Unknown", // Add projectName
+      areaNumber: task.areaNumber || "N/A", // Add areaNumber
+      pidNumber: task.pidNumber || "N/A", // Add pidNumber
     };
   });
 
@@ -231,7 +240,6 @@ const TaskTable: React.FC<TaskTableProps> = ({
       ? (aValue as number) - (bValue as number)
       : (bValue as number) - (aValue as number);
   });
-
   const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
   const startIndex = (currentPage - 1) * tasksPerPage;
   const endIndex = startIndex + tasksPerPage;

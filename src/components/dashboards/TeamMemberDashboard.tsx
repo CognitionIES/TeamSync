@@ -491,10 +491,14 @@ const TeamMemberDashboard = () => {
         const taskLines = pidItem
           ? allLines.filter((line) => line.pidId === pidItem.id)
           : [];
-        return { ...task, lines: taskLines, pidNumber: pidItem?.name ?? "" };
+        // Set pidNumber for all tasks that have a PID item
+        const updatedPidNumber = pidItem
+          ? pidItem.name
+          : task.pidNumber || "N/A";
+        return { ...task, lines: taskLines, pidNumber: updatedPidNumber };
       });
 
-      console.log("Mapped tasks:", tasksWithLines);
+      console.log("Mapped tasks with updated pidNumber:", tasksWithLines);
       setTasks(tasksWithLines);
     } catch (error) {
       console.error("Raw error in fetchTasks:", error);
