@@ -16,10 +16,18 @@ import {
 } from "@/components/ui/select";
 import StatusBadge from "./StatusBadge";
 import { Task, TaskStatus, TaskType } from "@/types";
-import { Progress } from "@/components/ui/progress";
 import { formatDistanceToNow, parseISO } from "date-fns";
-import { ArrowUpDown, Clock, RefreshCw } from "lucide-react";
+import {
+  ArrowUpDown,
+  Clock,
+  RefreshCw,
+  Filter,
+  Users,
+  Calendar,
+  Zap,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 interface TaskTableProps {
   tasks: Task[];
@@ -28,21 +36,19 @@ interface TaskTableProps {
   showProgress?: boolean;
   showCurrentWork?: boolean;
   showComments?: boolean;
-  showProjectName?: boolean; // New prop for Project Name column
-  showAreaName?: boolean; // New prop for Area Name column
-  showPidNumber?: boolean; // New prop for P&ID Number column
+  showProjectName?: boolean;
+  showAreaName?: boolean;
+  showPidNumber?: boolean;
   loading?: boolean;
   onViewCurrentWork?: (taskId: string, userId: string) => void;
   onViewComments?: (taskId: string) => void;
 }
 
-// Helper function to truncate text
 const truncateText = (text: string, maxLength: number = 20) => {
   if (text.length <= maxLength) return text;
   return `${text.substring(0, maxLength)}...`;
 };
 
-// Helper function to get current work description
 const getCurrentWork = (task: Task): string => {
   if (task.status === "Completed") return "Completed";
 
@@ -58,12 +64,11 @@ const getCurrentWork = (task: Task): string => {
   return "No active items";
 };
 
-// Format the date in GMT+5:30
 const formatDateTime = (dateStr: string | null, label: string): string => {
   if (!dateStr) return `Not ${label}`;
   try {
     const date = parseISO(dateStr);
-    const offsetMinutes = 5 * 60 + 30; // 5 hours 30 minutes in minutes
+    const offsetMinutes = 5 * 60 + 30;
     const adjustedDate = new Date(date.getTime() + offsetMinutes * 60 * 1000);
     return (
       adjustedDate.toLocaleString("en-US", {
@@ -81,80 +86,52 @@ const formatDateTime = (dateStr: string | null, label: string): string => {
   }
 };
 
-// Skeleton loading component
 const TableSkeleton = () => (
-  <Table>
-    <TableHeader>
-      <TableRow>
-        <TableHead className="w-[100px]">
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-        <TableHead>
-          <div className="h-4 bg-gray-200 rounded animate-pulse" />
-        </TableHead>
-      </TableRow>
-    </TableHeader>
-    <TableBody>
-      {[...Array(5)].map((_, index) => (
-        <TableRow key={index}>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-          <TableCell>
-            <div className="h-4 bg-gray-200 rounded animate-pulse" />
-          </TableCell>
-        </TableRow>
+  <div className="space-y-3">
+    <div className="flex space-x-3">
+      {[...Array(3)].map((_, index) => (
+        <div
+          key={index}
+          className="h-9 w-32 bg-gray-100 rounded-md animate-pulse"
+        />
       ))}
-    </TableBody>
-  </Table>
+    </div>
+    <div className="border rounded-lg overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50/50">
+            {[...Array(6)].map((_, index) => (
+              <TableHead key={index} className="p-3">
+                <div className="h-4 bg-gray-100 rounded animate-pulse" />
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {[...Array(4)].map((_, index) => (
+            <TableRow key={index}>
+              {[...Array(6)].map((_, cellIndex) => (
+                <TableCell key={cellIndex} className="p-3">
+                  <div className="h-4 bg-gray-100 rounded animate-pulse" />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  </div>
 );
 
 const TaskTable: React.FC<TaskTableProps> = ({
   tasks,
   teamMembers,
   showFilters,
-  showProgress,
   showCurrentWork,
   showComments = false,
-  showProjectName = false, // Default to false
-  showAreaName = false, // Default to false
-  showPidNumber = false, // Default to false
+  showProjectName = false,
+  showAreaName = false,
+  showPidNumber = false,
   loading = false,
   onViewCurrentWork,
   onViewComments,
@@ -163,7 +140,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
   const [filterType, setFilterType] = useState<TaskType | "All">("All");
   const [filterAssignee, setFilterAssignee] = useState<string | "All">("All");
   const [sortColumn, setSortColumn] =
-    useState<keyof (typeof rows)[0]>("updated");
+    useState<keyof (typeof rows)[0]>("assignedTime");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const tasksPerPage = 20;
@@ -190,36 +167,30 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const updatedAt = parseSafeDate(task.updatedAt);
     const completedAt = parseSafeDate(task.completedAt);
 
-    let updated: string;
-    if (task.status === "In Progress") {
-      updated = "In Progress";
-    } else {
-      updated = completedAt
-        ? `Completed ${formatDistanceToNow(completedAt, { addSuffix: true })}`
-        : updatedAt
-        ? `Updated ${formatDistanceToNow(updatedAt, { addSuffix: true })}`
-        : "Not Updated";
-    }
-
     const assignedTime = formatDateTime(task.createdAt, "Assigned");
     const completedTime = formatDateTime(task.completedAt, "Completed");
+
+    // Calculate completed lines and total lines
+    const lineItems = task.items.filter((item) => item.type === "Line");
+    const completedLines = lineItems.filter((item) => item.completed).length;
+    const totalLines = lineItems.length;
 
     return {
       id: task.id,
       type: task.type,
       assignee: task.assignee,
-      progress: task.progress,
+      completedLines: lineItems.length > 0 ? completedLines : null,
+      totalLines: lineItems.length > 0 ? totalLines : null,
       currentWork: truncateText(getCurrentWork(task), 20),
       status: task.status,
       assignedTime: assignedTime,
       completedTime: completedTime,
-      updated: updated,
       updatedAt: updatedAt || completedAt || new Date(0),
       assigneeId: task.assigneeId,
       comments: task.comments || [],
-      projectName: task.projectName || "Unknown", // Add projectName
-      areaNumber: task.areaNumber || "N/A", // Add areaNumber
-      pidNumber: task.pidNumber || "N/A", // Add pidNumber
+      projectName: task.projectName || "Unknown",
+      areaNumber: task.areaNumber || "N/A",
+      pidNumber: task.pidNumber || "N/A",
     };
   });
 
@@ -231,6 +202,11 @@ const TaskTable: React.FC<TaskTableProps> = ({
       const bDate = b.updatedAt?.getTime() || 0;
       return sortDirection === "asc" ? aDate - bDate : bDate - aDate;
     }
+    if (sortColumn === "completedLines" || sortColumn === "totalLines") {
+      const aNum = (aValue as number | null) ?? -1;
+      const bNum = (bValue as number | null) ?? -1;
+      return sortDirection === "asc" ? aNum - bNum : bNum - aNum;
+    }
     if (typeof aValue === "string" && typeof bValue === "string") {
       return sortDirection === "asc"
         ? aValue.localeCompare(bValue)
@@ -240,6 +216,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
       ? (aValue as number) - (bValue as number)
       : (bValue as number) - (aValue as number);
   });
+
   const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
   const startIndex = (currentPage - 1) * tasksPerPage;
   const endIndex = startIndex + tasksPerPage;
@@ -274,23 +251,31 @@ const TaskTable: React.FC<TaskTableProps> = ({
     }
   };
 
+  const hasActiveFilters =
+    filterStatus !== "All" || filterType !== "All" || filterAssignee !== "All";
+
   if (loading) {
     return (
-      <div className="p-6 bg-white rounded-lg shadow-md">
+      <div className="p-6 bg-white rounded-xl border border-gray-100">
         <TableSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-md">
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       {showFilters && (
-        <div className="mb-6">
-          <div className="flex items-end space-x-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
+        <div className="p-4 bg-gray-50/30 border-b border-gray-100">
+          <div className="flex items-center gap-2 mb-3">
+            <Filter className="h-4 w-4 text-gray-500" />
+            <span className="text-sm font-medium text-gray-700">Filters</span>
+            {hasActiveFilters && (
+              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[140px]">
               <Select
                 onValueChange={(value) => {
                   setFilterStatus(value as TaskStatus | "All");
@@ -298,8 +283,8 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 }}
                 value={filterStatus}
               >
-                <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
-                  <SelectValue placeholder="Filter by Status" />
+                <SelectTrigger className="h-9 text-sm border-gray-200 focus:border-gray-300 shadow-none">
+                  <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All">All Statuses</SelectItem>
@@ -310,10 +295,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
               </Select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Task Type
-              </label>
+            <div className="min-w-[140px]">
               <Select
                 onValueChange={(value) => {
                   setFilterType(value as TaskType | "All");
@@ -321,8 +303,8 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 }}
                 value={filterType}
               >
-                <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
-                  <SelectValue placeholder="Filter by Type" />
+                <SelectTrigger className="h-9 text-sm border-gray-200 focus:border-gray-300 shadow-none">
+                  <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All">All Types</SelectItem>
@@ -334,10 +316,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
             </div>
 
             {teamMembers && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Assignee
-                </label>
+              <div className="min-w-[140px]">
                 <Select
                   onValueChange={(value) => {
                     setFilterAssignee(value);
@@ -345,8 +324,8 @@ const TaskTable: React.FC<TaskTableProps> = ({
                   }}
                   value={filterAssignee}
                 >
-                  <SelectTrigger className="w-[180px] border-gray-300 focus:ring-2 focus:ring-blue-500 transition-all duration-200">
-                    <SelectValue placeholder="Filter by Assignee" />
+                  <SelectTrigger className="h-9 text-sm border-gray-200 focus:border-gray-300 shadow-none">
+                    <SelectValue placeholder="Assignee" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="All">All Assignees</SelectItem>
@@ -361,248 +340,207 @@ const TaskTable: React.FC<TaskTableProps> = ({
             )}
 
             <Button
-              variant="outline"
+              variant="ghost"
+              size="sm"
               onClick={clearFilters}
-              className="ml-4 flex items-center space-x-2 text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
-              aria-label="Clear all filters"
+              className="h-9 px-3 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
             >
-              <RefreshCw className="h-4 w-4" />
-              <span>Clear Filters</span>
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Clear
             </Button>
           </div>
         </div>
       )}
 
       {paginatedRows.length === 0 ? (
-        <div className="text-center py-10 text-gray-500">
-          <p>No tasks found.</p>
+        <div className="text-center py-12 text-gray-400">
+          <Users className="h-8 w-8 mx-auto mb-3 text-gray-300" />
+          <p className="text-sm">No tasks found</p>
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50 border-b border-gray-200">
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("type")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Type"
-                >
-                  <span>Type</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "type" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("assignee")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Assignee"
-                >
-                  <span>Assignee</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "assignee" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              {showProgress && (
-                <TableHead>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-b border-gray-100">
+                <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort("progress")}
-                    className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                    aria-label="Sort by Progress"
+                    onClick={() => handleSort("type")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
-                    <span>Progress</span>
-                    <ArrowUpDown
-                      className={`h-4 w-4 ${
-                        sortColumn === "progress" && sortDirection === "asc"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
+                    Type
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
                   </Button>
                 </TableHead>
-              )}
-              {showCurrentWork && <TableHead>Current Work</TableHead>}
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("status")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Status"
-                >
-                  <span>Status</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "status" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("assignedTime")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Assigned Time"
-                >
-                  <span>Assigned</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "assignedTime" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("completedTime")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Completed Time"
-                >
-                  <span>Completed</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "completedTime" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              <TableHead>
-                <Button
-                  variant="ghost"
-                  onClick={() => handleSort("updated")}
-                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition-colors duration-200"
-                  aria-label="Sort by Updated"
-                >
-                  <span>Updated</span>
-                  <ArrowUpDown
-                    className={`h-4 w-4 ${
-                      sortColumn === "updated" && sortDirection === "asc"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </Button>
-              </TableHead>
-              {showComments && <TableHead>Comments</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paginatedRows.map((row, index) => (
-              <TableRow
-                key={row.id}
-                className={`border-b border-gray-100 transition-colors duration-200 ${
-                  index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                } hover:bg-blue-50 cursor-pointer`}
-              >
-                <TableCell className="py-4">{row.type}</TableCell>
-                <TableCell className="py-4">{row.assignee}</TableCell>
-                {showProgress && (
-                  <TableCell className="py-4">
-                    <div className="flex items-center space-x-2">
-                      <Progress
-                        value={row.progress}
-                        className="w-[60px] h-2 bg-gray-200 [&>[data-state='complete']]:bg-blue-500 [&>[data-state='loading']]:bg-blue-500 transition-all duration-500 ease-in-out"
-                      />
-                      <span className="text-sm text-gray-600">
-                        {row.progress}%
-                      </span>
-                    </div>
-                  </TableCell>
-                )}
+                <TableHead className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("assignee")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Assignee
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </TableHead>
+                <TableHead className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("completedLines")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Lines
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </TableHead>
                 {showCurrentWork && (
-                  <TableCell className="py-4">
-                    <button
-                      onClick={() =>
-                        onViewCurrentWork?.(row.id, row.assigneeId)
-                      }
-                      className="text-blue-600 hover:underline focus:outline-none"
-                    >
-                      {row.currentWork}
-                    </button>
-                  </TableCell>
+                  <TableHead className="px-4 py-3 text-xs font-medium text-gray-600">
+                    Current Work
+                  </TableHead>
                 )}
-                <TableCell className="py-4">
-                  <StatusBadge
-                    status={row.status as TaskStatus}
-                    className={
-                      row.status === "Completed"
-                        ? "bg-green-100 text-green-800"
-                        : row.status === "In Progress"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-gray-100 text-gray-800"
-                    }
-                  />
-                </TableCell>
-                <TableCell className="py-4">
-                  <div className="flex items-center space-x-1 text-gray-600">
-                    <Clock className="h-4 w-4" />
-                    <span>{row.assignedTime}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="py-4">
-                  <div className="flex items-center space-x-1 text-gray-600">
-                    <Clock className="h-4 w-4" />
-                    <span>{row.completedTime}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="py-4">{row.updated}</TableCell>
+                <TableHead className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("status")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Status
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </TableHead>
+                <TableHead className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("assignedTime")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Assigned
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </TableHead>
+                <TableHead className="px-4 py-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleSort("completedTime")}
+                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Completed
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </TableHead>
                 {showComments && (
-                  <TableCell className="py-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => onViewComments?.(row.id)}
-                      className="text-blue-600 hover:text-blue-800 border-blue-300 hover:border-blue-400 transition-all duration-200"
-                      disabled={!onViewComments}
-                    >
-                      Comments{" "}
-                      {row.comments.length ? `(${row.comments.length})` : ""}
-                    </Button>
-                  </TableCell>
+                  <TableHead className="px-4 py-3 text-xs font-medium text-gray-600">
+                    Comments
+                  </TableHead>
                 )}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {paginatedRows.map((row, index) => (
+                <TableRow
+                  key={row.id}
+                  className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                >
+                  <TableCell className="px-4 py-3">
+                    <Badge variant="outline" className="text-xs font-medium">
+                      {row.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="px-4 py-3">
+                    <span className="text-sm font-medium text-gray-900">
+                      {row.assignee}
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-4 py-3">
+                    {row.completedLines !== null && row.totalLines !== null ? (
+                      <span className="text-sm text-gray-600">
+                        <span className="font-medium text-gray-900">
+                          {row.completedLines}
+                        </span>
+                        <span className="text-gray-400 mx-1">/</span>
+                        <span>{row.totalLines}</span>
+                      </span>
+                    ) : (
+                      <span className="text-sm text-gray-400">—</span>
+                    )}
+                  </TableCell>
+                  {showCurrentWork && (
+                    <TableCell className="px-4 py-3">
+                      <button
+                        onClick={() =>
+                          onViewCurrentWork?.(row.id, row.assigneeId)
+                        }
+                        className="text-sm text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                      >
+                        {row.currentWork}
+                      </button>
+                    </TableCell>
+                  )}
+                  <TableCell className="px-4 py-3">
+                    <StatusBadge status={row.status as TaskStatus} />
+                  </TableCell>
+                  <TableCell className="px-4 py-3">
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                      <Calendar className="h-3 w-3" />
+                      <span>{row.assignedTime}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-4 py-3">
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                      <Clock className="h-3 w-3" />
+                      <span>{row.completedTime}</span>
+                    </div>
+                  </TableCell>
+                  {showComments && (
+                    <TableCell className="px-4 py-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onViewComments?.(row.id)}
+                        className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        disabled={!onViewComments}
+                      >
+                        Comments
+                        {row.comments.length > 0 && (
+                          <Badge variant="secondary" className="ml-1 text-xs">
+                            {row.comments.length}
+                          </Badge>
+                        )}
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {sortedRows.length > tasksPerPage && (
-        <div className="flex justify-between items-center mt-4">
+        <div className="flex justify-between items-center p-4 bg-gray-50/30 border-t border-gray-100">
           <Button
             variant="outline"
+            size="sm"
             onClick={handlePreviousPage}
             disabled={currentPage === 1}
-            className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+            className="h-8 px-3 text-xs border-gray-200 hover:bg-white disabled:opacity-40"
           >
             Previous
           </Button>
-          <span className="text-sm text-gray-600">
-            Page {currentPage} of {totalPages}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">
+              {currentPage} of {totalPages}
+            </span>
+            <span className="text-xs text-gray-400">•</span>
+            <span className="text-xs text-gray-400">
+              {sortedRows.length} tasks
+            </span>
+          </div>
           <Button
             variant="outline"
+            size="sm"
             onClick={handleNextPage}
             disabled={currentPage === totalPages}
-            className="text-gray-600 hover:text-gray-800 border-gray-300 hover:border-gray-400 transition-all duration-200"
+            className="h-8 px-3 text-xs border-gray-200 hover:bg-white disabled:opacity-40"
           >
             Next
           </Button>

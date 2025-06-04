@@ -432,6 +432,7 @@ const TeamLeadDashboard = () => {
                 name: item.name || "",
                 type: item.item_type || "",
                 completed: item.completed || false,
+                completedAt: item.completed_at || null, // Include completedAt for items
               };
             })
             .filter((item): item is TaskItem => item !== null);
@@ -996,6 +997,86 @@ const TeamLeadDashboard = () => {
     }
   };
 
+  const handleExportCSV = () => {
+    if (tasks.length === 0) {
+      toast.error("No tasks available to export.");
+      return;
+    }
+
+    // Define CSV headers
+    const headers = [
+      "Task ID",
+      "Task Type",
+      "Assignee",
+      "Completed / Total",
+      "Status",
+      "Assigned On",
+      "Completed On",
+      "Comments",
+    ];
+
+    // Map tasks to CSV rows
+    const csvRows = tasks.map((task) => {
+      const lineItems = task.items.filter((item) => item.type === "Line");
+      const completedLines = lineItems.filter((item) => item.completed).length;
+      const totalLines = lineItems.length;
+      const completedTotal = lineItems.length > 0 ? `${completedLines} / ${totalLines}` : "N/A";
+
+      // Format comments into a single string
+      const commentsString = task.comments.length > 0
+        ? task.comments
+            .map((comment) => {
+              const timestamp = new Date(comment.createdAt).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                dateStyle: "medium",
+                timeStyle: "short",
+              });
+              return `${comment.userName} (${comment.userRole}) at ${timestamp}: ${comment.comment}`;
+            })
+            .join(" | ")
+        : "No comments";
+
+      return [
+        task.id,
+        task.type,
+        task.assignee || "N/A",
+        completedTotal,
+        task.status,
+        new Date(task.createdAt).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        task.completedAt
+          ? new Date(task.completedAt).toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+              dateStyle: "medium",
+              timeStyle: "short",
+            })
+          : "Not Completed",
+        `"${commentsString.replace(/"/g, '""')}"`, // Escape quotes in comments
+      ];
+    });
+
+    // Combine headers and rows
+    const csvContent = [headers, ...csvRows]
+      .map((row) => row.join(","))
+      .join("\n");
+
+    // Create a Blob and download the file
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `team_lead_tasks_${new Date().toISOString()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success("Tasks exported successfully as CSV!");
+  };
+
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
     return null;
   }
@@ -1315,7 +1396,16 @@ const TeamLeadDashboard = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Team Tasks</CardTitle>
+            <div className="flex justify-between items-center">
+              <CardTitle>Team Tasks</CardTitle>
+              <Button
+                onClick={handleExportCSV}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={isLoading || tasks.length === 0}
+              >
+                Export CSV
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -1522,14 +1612,14 @@ const TeamLeadDashboard = () => {
                             </li>
                           ))}
                         </ul>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 italic">
-                        No UPV equipment assigned.
-                      </p>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No UPV equipment assigned.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {selectedTaskType === "QC" &&
                 selectedItemType === "Equipment" && (
