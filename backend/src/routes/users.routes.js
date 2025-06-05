@@ -136,12 +136,14 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
     `Received request for /api/users/${req.params.userId}/assigned-items/${req.params.taskId}`
   );
   try {
+    // Role-based access control
     if (!["Team Lead", "Admin", "Project Manager"].includes(req.user.role)) {
       return res
         .status(403)
         .json({ message: "Not authorized to view assigned items" });
     }
 
+    // Validate userId and taskId
     const userId = parseInt(req.params.userId, 10);
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -152,6 +154,7 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       return res.status(400).json({ message: "Invalid task ID" });
     }
 
+    // Team Lead access control: ensure user is a team member under this lead
     if (req.user.role === "Team Lead") {
       console.log(
         `Checking team member relationship: member_id=${userId}, lead_id=${req.user.id}`
@@ -196,73 +199,87 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       `Fetching items for task ${taskIdFromTask} (type: ${taskType})`
     );
 
-    // Fetch task items
-    const { rows: taskItems } = await db.query(
-      "SELECT item_id, item_type, item_name FROM task_items WHERE task_id = $1",
-      [taskIdFromTask]
-    );
+    // Fetch items based on task type using JOINs to avoid item_name dependency
+    if (taskType === "Redline") {
+      const { rows: pidRows } = await db.query(
+        `
+        SELECT p.id, p.pid_number, p.project_id
+        FROM task_items ti
+        JOIN pids p ON ti.item_id = p.id
+        WHERE ti.task_id = $1 AND ti.item_type = 'PID'
+      `,
+        [taskIdFromTask]
+      );
+      response.data.redlinePIDs.items = pidRows.map((pid) => ({
+        id: pid.id.toString(),
+        pid_number: pid.pid_number,
+        project_id: pid.project_id.toString(),
+      }));
+      response.data.redlinePIDs.count = pidRows.length;
+    } else if (taskType === "UPV") {
+      const { rows: lineRows } = await db.query(
+        `
+        SELECT l.id, l.line_number, l.project_id
+        FROM task_items ti
+        JOIN lines l ON ti.item_id = l.id
+        WHERE ti.task_id = $1 AND ti.item_type = 'Line'
+      `,
+        [taskIdFromTask]
+      );
+      response.data.upvLines.items = lineRows.map((line) => ({
+        id: line.id.toString(),
+        line_number: line.line_number,
+        project_id: line.project_id.toString(),
+      }));
+      response.data.upvLines.count = lineRows.length;
 
-    for (const item of taskItems) {
-      const { item_id, item_type, item_name } = item;
+      const { rows: equipRows } = await db.query(
+        `
+        SELECT e.id, e.equipment_number AS equipment_name, e.project_id
+        FROM task_items ti
+        JOIN equipment e ON ti.item_id = e.id
+        WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
+      `,
+        [taskIdFromTask]
+      );
+      response.data.upvEquipment.items = equipRows.map((equip) => ({
+        id: equip.id.toString(),
+        equipment_name: equip.equipment_name,
+        project_id: equip.project_id.toString(),
+      }));
+      response.data.upvEquipment.count = equipRows.length;
+    } else if (taskType === "QC") {
+      const { rows: lineRows } = await db.query(
+        `
+        SELECT l.id, l.line_number, l.project_id
+        FROM task_items ti
+        JOIN lines l ON ti.item_id = l.id
+        WHERE ti.task_id = $1 AND ti.item_type = 'Line'
+      `,
+        [taskIdFromTask]
+      );
+      response.data.qcLines.items = lineRows.map((line) => ({
+        id: line.id.toString(),
+        line_number: line.line_number,
+        project_id: line.project_id.toString(),
+      }));
+      response.data.qcLines.count = lineRows.length;
 
-      if (item_type === "Line") {
-        const { rows: lineRows } = await db.query(
-          "SELECT id, line_number, project_id FROM lines WHERE id = $1",
-          [item_id]
-        );
-        const line = lineRows[0];
-        if (line) {
-          const lineData = {
-            id: line.id.toString(),
-            line_number: line.line_number,
-            project_id: line.project_id.toString(),
-          };
-
-          if (taskType === "UPV") {
-            response.data.upvLines.items.push(lineData);
-            response.data.upvLines.count++;
-          } else if (taskType === "QC") {
-            response.data.qcLines.items.push(lineData);
-            response.data.qcLines.count++;
-          }
-        }
-      } else if (item_type === "PID") {
-        const { rows: pidRows } = await db.query(
-          "SELECT id, pid_number, project_id FROM pids WHERE id = $1",
-          [item_id]
-        );
-        const pid = pidRows[0];
-        if (pid && taskType === "Redline") {
-          const pidData = {
-            id: pid.id.toString(),
-            pid_number: pid.pid_number,
-            project_id: pid.project_id.toString(),
-          };
-          response.data.redlinePIDs.items.push(pidData);
-          response.data.redlinePIDs.count++;
-        }
-      } else if (item_type === "Equipment") {
-        const { rows: equipRows } = await db.query(
-          "SELECT id, equipment_number AS equipment_name, project_id FROM equipment WHERE id = $1",
-          [item_id]
-        );
-        const equip = equipRows[0];
-        if (equip) {
-          const equipData = {
-            id: equip.id.toString(),
-            equipment_name: equip.equipment_name,
-            project_id: equip.project_id.toString(),
-          };
-
-          if (taskType === "UPV") {
-            response.data.upvEquipment.items.push(equipData);
-            response.data.upvEquipment.count++;
-          } else if (taskType === "QC") {
-            response.data.qcEquipment.items.push(equipData);
-            response.data.qcEquipment.count++;
-          }
-        }
-      }
+      const { rows: equipRows } = await db.query(
+        `
+        SELECT e.id, e.equipment_number AS equipment_name, e.project_id
+        FROM task_items ti
+        JOIN equipment e ON ti.item_id = e.id
+        WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
+      `,
+        [taskIdFromTask]
+      );
+      response.data.qcEquipment.items = equipRows.map((equip) => ({
+        id: equip.id.toString(),
+        equipment_name: equip.equipment_name,
+        project_id: equip.project_id.toString(),
+      }));
+      response.data.qcEquipment.count = equipRows.length;
     }
 
     res.status(200).json(response);
