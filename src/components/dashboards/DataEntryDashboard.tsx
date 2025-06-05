@@ -37,6 +37,8 @@ import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Progress } from "@/components/ui/progress";
+import BackgroundEffect from "../landing/BackgroundEffect";
+import FeatureHighlight from "../landing/FeatureHighlight";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -56,7 +58,7 @@ const DataEntryDashboard = () => {
 
   const pidForm = useForm({
     defaultValues: {
-      areaId: "",
+      areaId: "", // Will be validated as required
       pidNumber: "",
       lines: "",
     },
@@ -64,8 +66,16 @@ const DataEntryDashboard = () => {
 
   const equipmentForm = useForm({
     defaultValues: {
-      areaId: "",
+      areaId: "", // Will be validated as required
       equipmentList: "",
+    },
+  });
+
+  const nonInlineInstrumentForm = useForm({
+    defaultValues: {
+      areaId: "", // Will be validated as required
+      pidNumber: "", // Changed from pidId to pidNumber for manual entry
+      instrumentList: "",
     },
   });
 
@@ -143,13 +153,19 @@ const DataEntryDashboard = () => {
         throw new Error("Unexpected response format from areas API");
       }
 
-      setAreas(
-        areaData.map((area: any) => ({
-          id: area.id.toString(),
-          name: area.name,
-        }))
-      );
+      const mappedAreas = areaData.map((area: any) => ({
+        id: area.id.toString(),
+        name: area.name,
+      }));
+      setAreas(mappedAreas);
       setIsProjectSelected(true);
+
+      // Reset form fields if no areas are available
+      if (mappedAreas.length === 0) {
+        pidForm.resetField("areaId");
+        equipmentForm.resetField("areaId");
+        nonInlineInstrumentForm.resetField("areaId");
+      }
     } catch (error: any) {
       console.error("Error fetching areas:", {
         message: error.message,
@@ -165,6 +181,11 @@ const DataEntryDashboard = () => {
         errorMessage = error.response.data.message;
       }
       toast.error(errorMessage);
+
+      // Reset form fields on error
+      pidForm.resetField("areaId");
+      equipmentForm.resetField("areaId");
+      nonInlineInstrumentForm.resetField("areaId");
     }
   };
 
@@ -245,6 +266,11 @@ const DataEntryDashboard = () => {
       return;
     }
 
+    if (!values.areaId) {
+      toast.error("Area Number is required");
+      return;
+    }
+
     try {
       setIsSubmittingPID(true);
       setSubmissionProgress(0);
@@ -255,7 +281,7 @@ const DataEntryDashboard = () => {
         {
           pid_number: values.pidNumber,
           description: `P&ID for ${values.pidNumber}`,
-          area_id: values.areaId || null,
+          area_id: values.areaId,
           project_id: selectedProject,
         },
         getAuthHeaders()
@@ -322,6 +348,11 @@ const DataEntryDashboard = () => {
       return;
     }
 
+    if (!values.areaId) {
+      toast.error("Area Number is required");
+      return;
+    }
+
     try {
       setIsSubmittingPID(true);
       setSubmissionProgress(0);
@@ -335,7 +366,7 @@ const DataEntryDashboard = () => {
         const equipmentData = equipmentList.map((equipmentNumber: string) => ({
           equipmentNumber,
           description: `Equipment ${equipmentNumber}`,
-          areaId: values.areaId || null,
+          areaId: values.areaId,
           projectId: selectedProject,
         }));
 
@@ -362,17 +393,106 @@ const DataEntryDashboard = () => {
     }
   };
 
+  const onNonInlineInstrumentSubmit = async (values: any) => {
+    if (!isProjectSelected) {
+      toast.error("Please select a project first");
+      return;
+    }
+
+    if (!values.areaId) {
+      toast.error("Area Number is required");
+      return;
+    }
+
+    if (!values.pidNumber) {
+      toast.error("P&ID Number is required");
+      return;
+    }
+
+    try {
+      setIsSubmittingPID(true);
+      setSubmissionProgress(0);
+
+      // Step 1: Check if the P&ID exists, if not, create it
+      let pidId;
+      const pidCheckResponse = await axios.get(
+        `${API_URL}/pids?projectId=${selectedProject}&pidNumber=${encodeURIComponent(
+          values.pidNumber
+        )}`,
+        getAuthHeaders()
+      );
+
+      if (pidCheckResponse.data.data.length > 0) {
+        pidId = pidCheckResponse.data.data[0].id;
+      } else {
+        // Create the P&ID
+        const pidResponse = await axios.post(
+          `${API_URL}/pids`,
+          {
+            pid_number: values.pidNumber,
+            description: `P&ID for ${values.pidNumber}`,
+            area_id: values.areaId,
+            project_id: selectedProject,
+          },
+          getAuthHeaders()
+        );
+        pidId = pidResponse.data.data.id;
+      }
+      setSubmissionProgress(20);
+
+      // Step 2: Batch create non-inline instruments
+      const instrumentList = values.instrumentList
+        .split("\n")
+        .map((instrument: string) => instrument.trim())
+        .filter((instrument: string) => instrument);
+
+      if (instrumentList.length > 0) {
+        const instrumentData = instrumentList.map((instrumentTag: string) => ({
+          instrument_tag: instrumentTag,
+          description: `Non-Inline Instrument ${instrumentTag}`,
+          area_id: values.areaId,
+          pid_id: pidId,
+          project_id: selectedProject,
+        }));
+
+        await axios.post(
+          `${API_URL}/non-inline-instruments/batch`,
+          { instruments: instrumentData },
+          getAuthHeaders()
+        );
+        setSubmissionProgress(100);
+      } else {
+        setSubmissionProgress(100);
+      }
+
+      toast.success(`Non-Inline Instruments added successfully`);
+      nonInlineInstrumentForm.reset();
+    } catch (error: any) {
+      console.error("Error submitting non-inline instruments:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to add non-inline instruments";
+      toast.error(errorMessage);
+    } finally {
+      setIsSubmittingPID(false);
+      setSubmissionProgress(0);
+    }
+  };
+
   if (!isAuthenticated) {
     return null;
   }
 
   return (
     <div className="min-h-screen">
+      
       <Navbar onRefresh={handleRefresh} />
+      <BackgroundEffect />
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <h1 className="text-2xl font-bold">Data Entry Dashboard</h1>
-          <p className="text-gray-500">Add and manage P&IDs and Equipment</p>
+          <p className="text-gray-500">
+            Add and manage P&IDs, Equipment, and Non-Inline Instruments
+          </p>
         </header>
         <Card className="mb-6 border-blue-200 shadow-sm">
           <CardHeader className="bg-blue-50 border-b border-blue-100">
@@ -519,12 +639,12 @@ const DataEntryDashboard = () => {
           </Alert>
         )}
         {isProjectSelected && areas.length === 0 && (
-          <Alert variant="default" className="mb-6 animate-fade-in">
+          <Alert variant="destructive" className="mb-6 animate-fade-in">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>No Areas Available</AlertTitle>
             <AlertDescription>
-              No areas are defined for this project. You can add a new area
-              above or proceed without selecting an area.
+              No areas are defined for this project. Please add a new area above
+              before proceeding.
             </AlertDescription>
           </Alert>
         )}
@@ -533,9 +653,12 @@ const DataEntryDashboard = () => {
           onValueChange={setActiveTab}
           className="space-y-6"
         >
-          <TabsList className="grid grid-cols-2 w-full max-w-md mx-auto">
+          <TabsList className="grid grid-cols-3 w-full max-w-md mx-auto">
             <TabsTrigger value="pids">P&IDs</TabsTrigger>
             <TabsTrigger value="equipment">Equipment</TabsTrigger>
+            <TabsTrigger value="non-inline-instruments">
+              Non-Inline Instruments
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="pids" className="space-y-4">
             <Card>
@@ -557,14 +680,22 @@ const DataEntryDashboard = () => {
                       name="areaId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Area Number (Optional)</FormLabel>
+                          <FormLabel>
+                            Area Number <span className="text-red-500">*</span>
+                          </FormLabel>
                           <Select
                             value={field.value}
                             onValueChange={field.onChange}
                             disabled={!isProjectSelected || areas.length === 0}
                           >
                             <FormControl>
-                              <SelectTrigger>
+                              <SelectTrigger
+                                className={
+                                  !field.value && areas.length > 0
+                                    ? "border-red-300 ring-1 ring-red-300"
+                                    : ""
+                                }
+                              >
                                 <SelectValue
                                   placeholder={
                                     areas.length === 0
@@ -582,6 +713,11 @@ const DataEntryDashboard = () => {
                               ))}
                             </SelectContent>
                           </Select>
+                          {!field.value && areas.length > 0 && (
+                            <p className="text-sm text-red-500 mt-1">
+                              Area selection is required
+                            </p>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}
@@ -636,7 +772,11 @@ const DataEntryDashboard = () => {
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={!isProjectSelected || isSubmittingPID}
+                      disabled={
+                        !isProjectSelected ||
+                        isSubmittingPID ||
+                        areas.length === 0
+                      }
                     >
                       {isSubmittingPID ? (
                         <>
@@ -671,14 +811,22 @@ const DataEntryDashboard = () => {
                       name="areaId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Area Number (Optional)</FormLabel>
+                          <FormLabel>
+                            Area Number <span className="text-red-500">*</span>
+                          </FormLabel>
                           <Select
                             value={field.value}
                             onValueChange={field.onChange}
                             disabled={!isProjectSelected || areas.length === 0}
                           >
                             <FormControl>
-                              <SelectTrigger>
+                              <SelectTrigger
+                                className={
+                                  !field.value && areas.length > 0
+                                    ? "border-red-300 ring-1 ring-red-300"
+                                    : ""
+                                }
+                              >
                                 <SelectValue
                                   placeholder={
                                     areas.length === 0
@@ -696,6 +844,11 @@ const DataEntryDashboard = () => {
                               ))}
                             </SelectContent>
                           </Select>
+                          {!field.value && areas.length > 0 && (
+                            <p className="text-sm text-red-500 mt-1">
+                              Area selection is required
+                            </p>
+                          )}
                           <FormMessage />
                         </FormItem>
                       )}
@@ -731,7 +884,11 @@ const DataEntryDashboard = () => {
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={!isProjectSelected || isSubmittingPID}
+                      disabled={
+                        !isProjectSelected ||
+                        isSubmittingPID ||
+                        areas.length === 0
+                      }
                     >
                       {isSubmittingPID ? (
                         <>
@@ -740,6 +897,153 @@ const DataEntryDashboard = () => {
                         </>
                       ) : (
                         "Save Equipment"
+                      )}
+                    </Button>
+                  </form>
+                </Form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="non-inline-instruments" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Add New Non-Inline Instruments</CardTitle>
+                <CardDescription>
+                  Enter non-inline instrument details for the selected project
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Form {...nonInlineInstrumentForm}>
+                  <form
+                    onSubmit={nonInlineInstrumentForm.handleSubmit(
+                      onNonInlineInstrumentSubmit
+                    )}
+                    className="space-y-4"
+                  >
+                    <FormField
+                      control={nonInlineInstrumentForm.control}
+                      name="areaId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            Area Number <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            disabled={!isProjectSelected || areas.length === 0}
+                          >
+                            <FormControl>
+                              <SelectTrigger
+                                className={
+                                  !field.value && areas.length > 0
+                                    ? "border-red-300 ring-1 ring-red-300"
+                                    : ""
+                                }
+                              >
+                                <SelectValue
+                                  placeholder={
+                                    areas.length === 0
+                                      ? "No areas available"
+                                      : "Select area"
+                                  }
+                                />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {areas.map((area) => (
+                                <SelectItem key={area.id} value={area.id}>
+                                  {area.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {!field.value && areas.length > 0 && (
+                            <p className="text-sm text-red-500 mt-1">
+                              Area selection is required
+                            </p>
+                          )}
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={nonInlineInstrumentForm.control}
+                      name="pidNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            P&ID Number <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="e.g., P-101"
+                              {...field}
+                              disabled={!isProjectSelected}
+                              className={
+                                !field.value
+                                  ? "border-red-300 ring-1 ring-red-300"
+                                  : ""
+                              }
+                            />
+                          </FormControl>
+                          {!field.value && (
+                            <p className="text-sm text-red-500 mt-1">
+                              P&ID Number is required
+                            </p>
+                          )}
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={nonInlineInstrumentForm.control}
+                      name="instrumentList"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            Non-Inline Instruments (one per line)
+                          </FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Enter instrument tags, one per line (e.g., TI-101\nPI-102\nFI-103)"
+                              {...field}
+                              disabled={!isProjectSelected}
+                              rows={5}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {isSubmittingPID && (
+                      <div className="mt-4">
+                        <Progress value={submissionProgress} className="h-2" />
+                        <p className="text-sm text-gray-500 mt-2">
+                          {submissionProgress < 20
+                            ? "Checking/Creating P&ID..."
+                            : submissionProgress < 100
+                            ? "Creating non-inline instruments..."
+                            : "Finalizing..."}
+                        </p>
+                      </div>
+                    )}
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={
+                        !isProjectSelected ||
+                        isSubmittingPID ||
+                        areas.length === 0
+                      }
+                    >
+                      {isSubmittingPID ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save Non-Inline Instruments"
                       )}
                     </Button>
                   </form>

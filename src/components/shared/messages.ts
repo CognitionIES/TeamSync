@@ -6,7 +6,7 @@ interface Messages {
 
 const messages: Messages = {
   general: [
-    "What's the deal with deadlines? They're like parking spots—sometimes you circle around and realize you missed it by that much",
+    "Doing one thing differently is often the same as doing everything differently.",
     "Resources are tighter than a comic book convention budget. Prioritize wisely",
     "Found a bug? Report it. Because nobody likes surprises, unless it's a surprise party with soup dumplings.",
     "The deadline is approaching faster than a cat on a laser pointer. Stay focused!",
