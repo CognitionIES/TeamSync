@@ -3,10 +3,14 @@ const db = require("../config/db");
 // @desc    Get all tasks for a user or all tasks
 // @route   GET /api/tasks
 // @route   GET /api/tasks/user/:userId
+// @desc    Get all tasks for a user or all tasks
+// @route   GET /api/tasks
+// @route   GET /api/tasks/user/:userId
 const getTasks = async (req, res) => {
   try {
     let query, params;
     const { role, id: userId } = req.user;
+    console.log(`Fetching tasks for user: ${userId} with role: ${role}`);
 
     if (req.params.userId) {
       if (role === "Team Member" && req.params.userId != userId) {
@@ -15,21 +19,25 @@ const getTasks = async (req, res) => {
           .json({ message: "Not authorized to view tasks for other users" });
       }
       query = `
-  SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
-         t.created_at, t.updated_at, t.completed_at, t.items, t.project_id, 
-         t.description, u.name as assignee, p.name as project_name, 
-         p2.pid_number, a.area_number
-  FROM tasks t 
-  JOIN users u ON t.assignee_id = u.id 
-  LEFT JOIN projects p ON t.project_id = p.id
-  LEFT JOIN pids p2 ON p2.id = (
-    SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
-  )
-  LEFT JOIN areas a ON p2.area_id = a.id`;
+        SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
+               t.created_at, t.updated_at, t.completed_at, t.project_id, 
+               t.description, u.name as assignee, p.name as project_name, 
+               p2.pid_number, a.name as area_name
+        FROM tasks t 
+        JOIN users u ON t.assignee_id = u.id 
+        LEFT JOIN projects p ON t.project_id = p.id
+        LEFT JOIN pids p2 ON p2.id = (
+          SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
+        )
+        LEFT JOIN areas a ON p2.area_id = a.id
+        WHERE t.assignee_id = $1`;
       params = [req.params.userId];
     } else if (role === "Team Lead") {
       query = `
-        SELECT t.*, u.name as assignee, p.name as project_name, p2.pid_number, a.area_number
+        SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
+               t.created_at, t.updated_at, t.completed_at, t.project_id, 
+               t.description, u.name as assignee, p.name as project_name, 
+               p2.pid_number, a.name as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id 
         JOIN team_members tm ON t.assignee_id = tm.member_id 
@@ -42,7 +50,10 @@ const getTasks = async (req, res) => {
       params = [userId];
     } else if (role === "Project Manager" || role === "Admin") {
       query = `
-        SELECT t.*, u.name as assignee, p.name as project_name, p2.pid_number, a.area_number
+        SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
+               t.created_at, t.updated_at, t.completed_at, t.project_id, 
+               t.description, u.name as assignee, p.name as project_name, 
+               p2.pid_number, a.name as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id
         LEFT JOIN projects p ON t.project_id = p.id
@@ -53,7 +64,10 @@ const getTasks = async (req, res) => {
       params = [];
     } else {
       query = `
-        SELECT t.*, u.name as assignee, p.name as project_name, p2.pid_number, a.area_number
+        SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
+               t.created_at, t.updated_at, t.completed_at, t.project_id, 
+               t.description, u.name as assignee, p.name as project_name, 
+               p2.pid_number, a.name as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id 
         LEFT JOIN projects p ON t.project_id = p.id
@@ -65,6 +79,7 @@ const getTasks = async (req, res) => {
       params = [userId];
     }
 
+    console.log("Executing query:", query, "with params:", params);
     const { rows: tasks } = await db.query(query, params);
     console.log("Raw tasks data from database:", tasks);
 
@@ -72,27 +87,55 @@ const getTasks = async (req, res) => {
     const tasksWithDetails = await Promise.all(
       tasks.map(async (task) => {
         const { rows: items } = await db.query(
-          "SELECT * FROM task_items WHERE task_id = $1",
+          `
+          SELECT id, item_id, item_type, name, completed, created_at
+          FROM task_items 
+          WHERE task_id = $1`,
           [task.id]
         );
 
+        const formattedItems = items.map((item) => ({
+          id: item.id.toString(),
+          item_id: item.item_id.toString(),
+          item_type: item.item_type,
+          name: item.name,
+          completed: item.completed,
+          created_at: item.created_at ? item.created_at.toISOString() : null,
+        }));
+
         const { rows: comments } = await db.query(
-          "SELECT * FROM task_comments WHERE task_id = $1 ORDER BY created_at DESC",
+          `
+          SELECT id, user_id, user_name, user_role, comment, created_at
+          FROM task_comments 
+          WHERE task_id = $1 
+          ORDER BY created_at DESC`,
           [task.id]
         );
+
+        const formattedComments = comments.map((comment) => ({
+          id: comment.id.toString(),
+          user_id: comment.user_id.toString(),
+          user_name: comment.user_name,
+          user_role: comment.user_role,
+          comment: comment.comment,
+          created_at: comment.created_at
+            ? comment.created_at.toISOString()
+            : null,
+        }));
 
         let lines = [];
         if (task.type === "Redline") {
           const { rows: taskLines } = await db.query(
             `
-            SELECT tl.*, l.line_number
+            SELECT tl.id, tl.line_id, tl.completed, l.line_number
             FROM task_lines tl
             JOIN lines l ON tl.line_id = l.id
             WHERE tl.task_id = $1`,
             [task.id]
           );
           lines = taskLines.map((line) => ({
-            id: line.line_id.toString(),
+            id: line.id.toString(),
+            line_id: line.line_id.toString(),
             name: line.line_number,
             completed: line.completed,
           }));
@@ -100,8 +143,16 @@ const getTasks = async (req, res) => {
 
         return {
           ...task,
-          items,
-          comments,
+          id: task.id.toString(),
+          assignee_id: task.assignee_id.toString(),
+          project_id: task.project_id ? task.project_id.toString() : null,
+          created_at: task.created_at ? task.created_at.toISOString() : null,
+          updated_at: task.updated_at ? task.updated_at.toISOString() : null,
+          completed_at: task.completed_at
+            ? task.completed_at.toISOString()
+            : null,
+          items: formattedItems,
+          comments: formattedComments,
           lines: task.type === "Redline" ? lines : undefined,
         };
       })
@@ -109,11 +160,21 @@ const getTasks = async (req, res) => {
 
     res.status(200).json({ data: tasksWithDetails });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error fetching tasks:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+    });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch tasks", error: error.message });
   }
 };
 
+// @desc    Create a new task
+// @route   POST /api/tasks
 // @desc    Create a new task
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
@@ -192,7 +253,7 @@ const createTask = async (req, res) => {
     if (type !== "Misc") {
       for (const item of items) {
         await db.query(
-          "INSERT INTO task_items (task_id, item_id, item_type, item_name, completed) VALUES ($1, $2, $3, $4, $5)",
+          "INSERT INTO task_items (task_id, item_id, item_type, name, completed) VALUES ($1, $2, $3, $4, $5)",
           [task.id, item.itemId, item.itemType, item.itemName, false]
         );
       }
@@ -252,7 +313,7 @@ const createTask = async (req, res) => {
             id: item.itemId,
             item_id: item.itemId,
             item_type: item.itemType,
-            item_name: item.itemName,
+            name: item.itemName, // Changed from item_name to name
             completed: false,
           }));
     detailedTask.comments = [];

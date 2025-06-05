@@ -39,7 +39,7 @@ router.get("/", protect, async (req, res) => {
                  'items', (
                    SELECT json_agg(json_build_object(
                      'id', ti.id,
-                     'name', ti.item_name,
+                     'name', ti.name,
                      'item_type', ti.item_type,
                      'completed', ti.completed
                    ))

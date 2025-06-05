@@ -99,7 +99,7 @@ const TeamLeadDashboard = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false); 
+  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [pids, setPIDs] = useState<PID[]>([]);
@@ -110,7 +110,7 @@ const TeamLeadDashboard = () => {
   // Form state
   const [taskType, setTaskType] = useState<TaskType | "">("");
   const [assignmentType, setAssignmentType] = useState<
-    "PID" | "Line" | "Equipment" | ""
+    "PID" | "Line" | "Equipment" | "NonInlineInstrument" | ""
   >("");
   const [selectedPIDs, setSelectedPIDs] = useState<string[]>([]);
   const [selectedLines, setSelectedLines] = useState<string[]>([]);
@@ -147,7 +147,17 @@ const TeamLeadDashboard = () => {
       qcEquipment: [],
       redlinePIDs: [],
     });
-
+  // Define the NonInlineInstrument type
+  interface NonInlineInstrument {
+    id: string;
+    instrumentTag: string;
+    description: string;
+  }
+  const [nonInlineInstruments, setNonInlineInstruments] = useState<
+    NonInlineInstrument[]
+  >([]);
+  const [selectedNonInlineInstruments, setSelectedNonInlineInstruments] =
+    useState<string[]>([]);
   const token = localStorage.getItem("teamsync_token");
 
   useEffect(() => {
@@ -375,56 +385,58 @@ const TeamLeadDashboard = () => {
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
+      console.log("Fetching tasks for Team Lead with token:", token);
+      console.log("Selected project:", selectedProject);
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
+      console.log("Tasks API response:", response.data);
+
       const tasksData = response.data.data
         .filter((task) => {
-          return (
+          const matchesProject =
             !selectedProject ||
             task.project_id?.toString() === selectedProject ||
-            task.project_id === null
+            task.project_id === null;
+          console.log(
+            `Task ${task.id} project_id: ${task.project_id}, matches: ${matchesProject}`
           );
+          return matchesProject;
         })
-        .map((task, taskIndex) => {
+        .map((task) => {
           const commentMap = new Map<string, TaskComment>();
-          (task.comments || []).forEach(
-            (comment: any, commentIndex: number) => {
-              if (
-                !comment ||
-                !comment.id ||
-                !comment.user_id ||
-                !comment.created_at
-              ) {
-                console.warn(
-                  `Invalid comment at task index ${taskIndex}, comment index ${commentIndex}:`,
-                  comment
-                );
-                return;
-              }
-              const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
-              if (!commentMap.has(key)) {
-                commentMap.set(key, {
-                  id: comment.id.toString(),
-                  userId: comment.user_id.toString(),
-                  userName: comment.user_name || "",
-                  userRole: comment.user_role || "",
-                  comment: comment.comment || "",
-                  createdAt: comment.created_at,
-                });
-              }
+          (task.comments || []).forEach((comment, commentIndex) => {
+            if (
+              !comment ||
+              !comment.id ||
+              !comment.user_id ||
+              !comment.created_at
+            ) {
+              console.warn(
+                `Invalid comment at comment index ${commentIndex}:`,
+                comment
+              );
+              return;
             }
-          );
+            const key = `${comment.user_id}-${comment.comment}-${comment.created_at}`;
+            if (!commentMap.has(key)) {
+              commentMap.set(key, {
+                id: comment.id.toString(),
+                userId: comment.user_id.toString(),
+                userName: comment.user_name || "",
+                userRole: comment.user_role || "",
+                comment: comment.comment || "",
+                createdAt: comment.created_at,
+              });
+            }
+          });
           const uniqueComments = Array.from(commentMap.values());
 
           const mappedItems = (task.items || [])
-            .map((item: any, itemIndex: number) => {
+            .map((item) => {
               if (!item || !item.id) {
-                console.warn(
-                  `Invalid item at task index ${taskIndex}, item index ${itemIndex}:`,
-                  item
-                );
+                console.warn(`Invalid item at task id ${task.id}:`, item);
                 return null;
               }
               return {
@@ -432,14 +444,14 @@ const TeamLeadDashboard = () => {
                 name: item.name || "",
                 type: item.item_type || "",
                 completed: item.completed || false,
-                completedAt: item.completed_at || null, // Include completedAt for items
+                completedAt: item.completed_at || null,
               };
             })
-            .filter((item): item is TaskItem => item !== null);
+            .filter((item) => item !== null);
 
           return {
             id: task.id.toString(),
-            type: task.type as TaskType,
+            type: task.type,
             assignee: task.assignee || "",
             assigneeId: task.assignee_id?.toString() || "",
             status: task.status || "Assigned",
@@ -451,25 +463,31 @@ const TeamLeadDashboard = () => {
             projectId: task.project_id?.toString() || null,
             items: mappedItems,
             comments: uniqueComments,
-            pidNumber: task.pid_number ?? null,
-            projectName: task.project_name ?? "",
-            areaNumber: task.area_number ?? null,
+            pidNumber: task.pid_number ?? "N/A",
+            projectName: task.project_name ?? "Unknown",
+            areaNumber: task.area_name ?? "N/A", // Already correct
             description: task.description || "",
           };
         });
 
+      console.log("Processed tasks data:", tasksData);
       setTasks(tasksData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching tasks:", axiosError);
+      console.error("Detailed error fetching tasks:", {
+        message: axiosError.message,
+        response: axiosError.response?.data,
+        status: axiosError.response?.status,
+        headers: axiosError.response?.headers,
+      });
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch tasks"
+        axiosError.response?.data?.message ||
+          "Failed to fetch tasks. Please try again."
       );
     } finally {
       setIsLoading(false);
     }
   };
-
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const response = await axios.get<{ data: FetchedAssignedItems }>(
@@ -557,6 +575,7 @@ const TeamLeadDashboard = () => {
         fetchPIDs(),
         fetchLines(),
         fetchEquipment(),
+        fetchNonInlineInstruments(), // Add this
         fetchTasks(),
       ]).catch((error) => {
         console.error("Error fetching dashboard data:", error);
@@ -731,6 +750,29 @@ const TeamLeadDashboard = () => {
               };
             })
             .filter((item) => item !== null);
+        } else if (
+          assignmentType === "NonInlineInstrument" &&
+          selectedNonInlineInstruments.length > 0
+        ) {
+          validSelection = true;
+          selectedItems = selectedNonInlineInstruments
+            .map((instrumentId) => {
+              const instrumentObj = nonInlineInstruments.find(
+                (i) => i.id === instrumentId
+              );
+              if (!instrumentObj) {
+                console.warn(
+                  `Non-inline instrument with ID ${instrumentId} not found`
+                );
+                return null;
+              }
+              return {
+                itemId: instrumentId,
+                itemType: "NonInlineInstrument",
+                itemName: instrumentObj.instrumentTag,
+              };
+            })
+            .filter((item) => item !== null);
         }
       } else if (taskType === "QC") {
         if (assignmentType === "PID" && selectedPIDs.length > 0) {
@@ -786,6 +828,29 @@ const TeamLeadDashboard = () => {
               };
             })
             .filter((item) => item !== null);
+        } else if (
+          assignmentType === "NonInlineInstrument" &&
+          selectedNonInlineInstruments.length > 0
+        ) {
+          validSelection = true;
+          selectedItems = selectedNonInlineInstruments
+            .map((instrumentId) => {
+              const instrumentObj = nonInlineInstruments.find(
+                (i) => i.id === instrumentId
+              );
+              if (!instrumentObj) {
+                console.warn(
+                  `Non-inline instrument with ID ${instrumentId} not found`
+                );
+                return null;
+              }
+              return {
+                itemId: instrumentId,
+                itemType: "NonInlineInstrument",
+                itemName: instrumentObj.instrumentTag,
+              };
+            })
+            .filter((item) => item !== null);
         }
       }
 
@@ -826,6 +891,7 @@ const TeamLeadDashboard = () => {
         newTask,
         authHeaders
       );
+      const taskId = response.data.data.id; // Assuming the response includes the new task ID
       setSubmissionProgress(50);
 
       if (assignmentType === "Line" && taskType !== "Misc") {
@@ -835,7 +901,20 @@ const TeamLeadDashboard = () => {
           { lineIds, userId: assigneeId },
           authHeaders
         );
+      } else if (
+        assignmentType === "NonInlineInstrument" &&
+        taskType !== "Misc"
+      ) {
+        const instrumentIds = selectedItems.map((item) =>
+          parseInt(item.itemId)
+        );
+        await axios.put(
+          `${API_URL}/non-inline-instruments/assign/batch`,
+          { instrumentIds, userId: assigneeId, taskId },
+          authHeaders
+        );
       }
+
       setSubmissionProgress(100);
 
       await Promise.all([
@@ -843,6 +922,7 @@ const TeamLeadDashboard = () => {
         fetchPIDs(),
         fetchLines(),
         fetchEquipment(),
+        fetchNonInlineInstruments(),
       ]);
 
       setTaskType("");
@@ -850,6 +930,7 @@ const TeamLeadDashboard = () => {
       setSelectedPIDs([]);
       setSelectedLines([]);
       setSelectedEquipment([]);
+      setSelectedNonInlineInstruments([]);
       setAssignee("");
       setIsComplex(false);
       setDescription("");
@@ -1020,21 +1101,26 @@ const TeamLeadDashboard = () => {
       const lineItems = task.items.filter((item) => item.type === "Line");
       const completedLines = lineItems.filter((item) => item.completed).length;
       const totalLines = lineItems.length;
-      const completedTotal = lineItems.length > 0 ? `${completedLines} / ${totalLines}` : "N/A";
+      const completedTotal =
+        lineItems.length > 0 ? `${completedLines} / ${totalLines}` : "N/A";
 
       // Format comments into a single string
-      const commentsString = task.comments.length > 0
-        ? task.comments
-            .map((comment) => {
-              const timestamp = new Date(comment.createdAt).toLocaleString("en-IN", {
-                timeZone: "Asia/Kolkata",
-                dateStyle: "medium",
-                timeStyle: "short",
-              });
-              return `${comment.userName} (${comment.userRole}) at ${timestamp}: ${comment.comment}`;
-            })
-            .join(" | ")
-        : "No comments";
+      const commentsString =
+        task.comments.length > 0
+          ? task.comments
+              .map((comment) => {
+                const timestamp = new Date(comment.createdAt).toLocaleString(
+                  "en-IN",
+                  {
+                    timeZone: "Asia/Kolkata",
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }
+                );
+                return `${comment.userName} (${comment.userRole}) at ${timestamp}: ${comment.comment}`;
+              })
+              .join(" | ")
+          : "No comments";
 
       return [
         task.id,
@@ -1068,13 +1154,57 @@ const TeamLeadDashboard = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `team_lead_tasks_${new Date().toISOString()}.csv`);
+    link.setAttribute(
+      "download",
+      `team_lead_tasks_${new Date().toISOString()}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
     toast.success("Tasks exported successfully as CSV!");
+  };
+
+  const fetchNonInlineInstruments = async () => {
+    if (!selectedProject) return;
+    try {
+      const response = await axios.get<{
+        data: { id: number; instrument_tag: string; description: string }[];
+      }>(
+        `${API_URL}/non-inline-instruments/unassigned/${selectedProject}`,
+        getAuthHeaders()
+      );
+      const instrumentsData = response.data.data.map((instrument) => ({
+        id: instrument.id.toString(),
+        instrumentTag: instrument.instrument_tag,
+        description: instrument.description,
+      }));
+      console.log(
+        `Fetched non-inline instruments for project ${selectedProject}:`,
+        instrumentsData
+      );
+      setNonInlineInstruments(instrumentsData);
+      setSelectedNonInlineInstruments((prev) =>
+        prev.filter((id) =>
+          instrumentsData.some((instrument) => instrument.id === id)
+        )
+      );
+      if (instrumentsData.length === 0) {
+        toast.info(
+          "No unassigned non-inline instruments available for this project."
+        );
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching non-inline instruments:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message ||
+          "Failed to fetch non-inline instruments"
+      );
+      setNonInlineInstruments([]);
+      setSelectedNonInlineInstruments([]);
+    }
   };
 
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
@@ -1173,6 +1303,11 @@ const TeamLeadDashboard = () => {
                       {(taskType === "UPV" || taskType === "QC") && (
                         <SelectItem value="Equipment">Equipment</SelectItem>
                       )}
+                      {(taskType === "UPV" || taskType === "QC") && (
+                        <SelectItem value="NonInlineInstrument">
+                          Non-inline Instrument
+                        </SelectItem>
+                      )}
                       {taskType === "QC" && (
                         <SelectItem value="PID">P&ID</SelectItem>
                       )}
@@ -1259,7 +1394,9 @@ const TeamLeadDashboard = () => {
                         ? "P&IDs"
                         : assignmentType === "Line"
                         ? "Lines"
-                        : "Equipment"}
+                        : assignmentType === "Equipment"
+                        ? "Equipment"
+                        : "Non-inline Instruments"}
                     </h3>
                     {/* Group Select Control */}
                     <div className="mb-4 flex items-center">
@@ -1280,7 +1417,9 @@ const TeamLeadDashboard = () => {
                             ? pids.length
                             : assignmentType === "Line"
                             ? lines.length
-                            : equipment.length
+                            : assignmentType === "Equipment"
+                            ? equipment.length
+                            : nonInlineInstruments.length // Add support for NonInlineInstrument
                         }
                         className="border rounded px-2 py-1 w-20"
                       />
@@ -1374,6 +1513,87 @@ const TeamLeadDashboard = () => {
                             </label>
                           </div>
                         ))}
+
+                      {/* Add NonInlineInstrument selection here */}
+                      {assignmentType === "NonInlineInstrument" && (
+                        <div className="max-h-60 overflow-y-auto space-y-2">
+                          {nonInlineInstruments.length === 0 && (
+                            <p className="text-sm text-gray-500">
+                              No available non-inline instruments
+                            </p>
+                          )}
+                          {nonInlineInstruments.map((instrument, index) => (
+                            <div
+                              key={instrument.id}
+                              className="flex items-center space-x-2"
+                            >
+                              <Checkbox
+                                id={instrument.id}
+                                checked={selectedNonInlineInstruments.includes(
+                                  instrument.id
+                                )}
+                                onCheckedChange={(checked) => {
+                                  if (groupSelectCount > 1) {
+                                    const startIndex = index;
+                                    const endIndex = Math.min(
+                                      startIndex + groupSelectCount,
+                                      nonInlineInstruments.length
+                                    );
+                                    const itemsToSelect = nonInlineInstruments
+                                      .slice(startIndex, endIndex)
+                                      .map((i) => i.id);
+                                    if (checked) {
+                                      const newSelected = [
+                                        ...new Set([
+                                          ...selectedNonInlineInstruments,
+                                          ...itemsToSelect,
+                                        ]),
+                                      ];
+                                      setSelectedNonInlineInstruments(
+                                        newSelected
+                                      );
+                                      toast.success(
+                                        `Selected ${itemsToSelect.length} non-inline instruments`
+                                      );
+                                    } else {
+                                      const newSelected =
+                                        selectedNonInlineInstruments.filter(
+                                          (id) => !itemsToSelect.includes(id)
+                                        );
+                                      setSelectedNonInlineInstruments(
+                                        newSelected
+                                      );
+                                      toast.success(
+                                        `Deselected ${itemsToSelect.length} non-inline instruments`
+                                      );
+                                    }
+                                  } else {
+                                    if (checked) {
+                                      setSelectedNonInlineInstruments([
+                                        ...selectedNonInlineInstruments,
+                                        instrument.id,
+                                      ]);
+                                    } else {
+                                      setSelectedNonInlineInstruments(
+                                        selectedNonInlineInstruments.filter(
+                                          (id) => id !== instrument.id
+                                        )
+                                      );
+                                    }
+                                  }
+                                }}
+                              />
+                              <label
+                                htmlFor={instrument.id}
+                                className="text-sm"
+                              >
+                                {instrument.instrumentTag} -{" "}
+                                {instrument.description}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -1386,7 +1606,7 @@ const TeamLeadDashboard = () => {
                   {submissionProgress < 50
                     ? "Creating task..."
                     : submissionProgress < 100
-                    ? "Assigning lines..."
+                    ? "Assigning items..."
                     : "Finalizing..."}
                 </p>
               </div>
@@ -1612,14 +1832,14 @@ const TeamLeadDashboard = () => {
                             </li>
                           ))}
                         </ul>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500 italic">
-                      No UPV equipment assigned.
-                    </p>
-                  )}
-                </div>
-              )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">
+                        No UPV equipment assigned.
+                      </p>
+                    )}
+                  </div>
+                )}
 
               {selectedTaskType === "QC" &&
                 selectedItemType === "Equipment" && (

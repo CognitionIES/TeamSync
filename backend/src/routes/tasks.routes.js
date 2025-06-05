@@ -2,7 +2,11 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
-const { createTask, addTaskComment } = require("../controllers/tasks.controller"); // Add addTaskComment
+const {
+  createTask,
+  addTaskComment,
+} = require("../controllers/tasks.controller");
+
 // GET /api/tasks - Fetch tasks based on user role
 router.get("/", protect, async (req, res) => {
   try {
@@ -19,7 +23,7 @@ router.get("/", protect, async (req, res) => {
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
-                   'name', ti.item_name,
+                   'name', ti.name,
                    'item_type', ti.item_type,
                    'completed', ti.completed
                  ))
@@ -81,7 +85,7 @@ router.get("/", protect, async (req, res) => {
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
-                   'name', ti.item_name
+                   'name', ti.name
                  ))
                  FROM task_items ti
                  WHERE t.id = ti.task_id
@@ -114,81 +118,189 @@ router.get("/", protect, async (req, res) => {
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Team Lead") {
       console.log("Fetching tasks for Team Lead ID:", req.user.id);
-      const query = `
-        SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-               t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-               COALESCE((
-                 SELECT json_agg(json_build_object(
-                   'id', ti.id,
-                   'name', ti.item_name,
-                   'item_type', ti.item_type,
-                   'completed', ti.completed
-                 ))
-                 FROM task_items ti
-                 WHERE t.id = ti.task_id AND ti.id IS NOT NULL
-               ), '[]') as items,
-               COALESCE((
-                 SELECT json_agg(json_build_object(
-                   'id', tc.id,
-                   'user_id', tc.user_id,
-                   'user_name', tc.user_name,
-                   'user_role', tc.user_role,
-                   'comment', tc.comment,
-                   'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-                 ))
-                 FROM task_comments tc
-                 WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
-               ), '[]') as comments
-        FROM tasks t
-        LEFT JOIN users u ON t.assignee_id = u.id
-        WHERE t.assignee_id IN (
-          SELECT member_id FROM team_members WHERE lead_id = $1
-        )
-        GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
-                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-                 u.name
-      `;
-      const { rows } = await db.query(query, [req.user.id]);
-      console.log("Tasks fetched for Team Lead:", rows);
-      res.status(200).json({ data: rows });
+      try {
+        const query = `
+SELECT 
+  t.id, 
+  t.type, 
+  u.name as assignee, 
+  t.assignee_id, 
+  t.status, 
+  t.is_complex,
+  t.created_at, 
+  t.updated_at, 
+  t.completed_at, 
+  t.progress, 
+  t.project_id,
+  t.description,
+  p.name as project_name,
+  COALESCE((
+    SELECT a.name
+    FROM task_items ti
+    JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+    JOIN areas a ON pid.area_id = a.id
+    WHERE ti.task_id = t.id
+    LIMIT 1
+  ), 'N/A') as area_name,
+  COALESCE((
+    SELECT pid.pid_number
+    FROM task_items ti
+    JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+    WHERE ti.task_id = t.id
+    LIMIT 1
+  ), 'N/A') as pid_number,
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'id', ti.id,
+      'name', ti.name,
+      'item_type', ti.item_type,
+      'completed', ti.completed,
+      'completed_at', ti.completed_at
+    ))
+    FROM task_items ti
+    WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+  ), '[]') as items,
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'id', tc.id,
+      'user_id', tc.user_id,
+      'user_name', tc.user_name,
+      'user_role', tc.user_role,
+      'comment', tc.comment,
+      'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    ))
+    FROM task_comments tc
+    WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+  ), '[]') as comments
+FROM tasks t
+LEFT JOIN users u ON t.assignee_id = u.id
+LEFT JOIN projects p ON t.project_id = p.id
+WHERE t.assignee_id IN (
+  SELECT member_id FROM team_members WHERE lead_id = $1
+)
+GROUP BY 
+  t.id, 
+  t.type, 
+  t.assignee_id, 
+  t.status, 
+  t.is_complex,
+  t.created_at, 
+  t.updated_at, 
+  t.completed_at, 
+  t.progress, 
+  t.project_id,
+  t.description,
+  u.name,
+  p.name        `;
+        const { rows } = await db.query(query, [req.user.id]);
+        console.log("Tasks fetched for Team Lead:", rows);
+        res.status(200).json({ data: rows });
+      } catch (error) {
+        console.error("Detailed error fetching tasks for Team Lead:", {
+          message: error.message,
+          stack: error.stack,
+          queryError: error.code,
+          queryDetail: error.detail,
+          queryHint: error.hint,
+        });
+        res
+          .status(500)
+          .json({ message: "Failed to fetch tasks", error: error.message });
+      }
     } else if (req.user.role === "Team Member") {
       console.log("Fetching tasks for Team Member ID:", req.user.id);
-      const query = `
-    SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
-           t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-           t.description,  -- Added description field
-           COALESCE((
-             SELECT json_agg(json_build_object(
-               'id', ti.id,
-               'name', ti.item_name,
-               'item_type', ti.item_type,
-               'completed', ti.completed
-             ))
-             FROM task_items ti
-             WHERE t.id = ti.task_id AND ti.id IS NOT NULL
-           ), '[]') as items,
-           COALESCE((
-             SELECT json_agg(json_build_object(
-               'id', tc.id,
-               'user_id', tc.user_id,
-               'user_name', tc.user_name,
-               'user_role', tc.user_role,
-               'comment', tc.comment,
-               'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-             ))
-             FROM task_comments tc
-             WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
-           ), '[]') as comments
-    FROM tasks t
-    LEFT JOIN users u ON t.assignee_id = u.id
-    WHERE t.assignee_id = $1
-    GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
-             t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-             t.description, u.name  -- Added t.description to GROUP BY
-  `;
-      const { rows } = await db.query(query, [req.user.id]);
-      console.log("Tasks fetched for Team Member:", rows);
-      res.status(200).json({ data: rows });
+      try {
+        const query = `
+          SELECT 
+            t.id, 
+            t.type, 
+            u.name as assignee, 
+            t.assignee_id, 
+            t.status, 
+            t.is_complex,
+            t.created_at, 
+            t.updated_at, 
+            t.completed_at, 
+            t.progress, 
+            t.project_id,
+            t.description,
+            p.name as project_name,
+            COALESCE(area_info.area_name, 'N/A') as area_name,
+            COALESCE(pid_info.pid_number, 'N/A') as pid_number,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'id', ti.id,
+                'name', ti.name,
+                'item_type', ti.item_type,
+                'completed', ti.completed,
+                'completed_at', ti.completed_at
+              ))
+              FROM task_items ti
+              WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+            ), '[]') as items,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'id', tc.id,
+                'user_id', tc.user_id,
+                'user_name', tc.user_name,
+                'user_role', tc.user_role,
+                'comment', tc.comment,
+                'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+              ))
+              FROM task_comments tc
+              WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+            ), '[]') as comments
+          FROM tasks t
+          LEFT JOIN users u ON t.assignee_id = u.id
+          LEFT JOIN projects p ON t.project_id = p.id
+          LEFT JOIN (
+            SELECT ti.task_id, a.name as area_name
+            FROM task_items ti
+            JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+            JOIN areas a ON pid.area_id = a.id
+            GROUP BY ti.task_id, a.name
+            LIMIT 1
+          ) area_info ON area_info.task_id = t.id
+          LEFT JOIN (
+            SELECT ti.task_id, pid.pid_number
+            FROM task_items ti
+            JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+            GROUP BY ti.task_id, pid.pid_number
+            LIMIT 1
+          ) pid_info ON pid_info.task_id = t.id
+          WHERE t.assignee_id = $1
+          GROUP BY 
+            t.id, 
+            t.type, 
+            t.assignee_id, 
+            t.status, 
+            t.is_complex,
+            t.created_at, 
+            t.updated_at, 
+            t.completed_at, 
+            t.progress, 
+            t.project_id,
+            t.description,
+            u.name,
+            p.name,
+            area_info.area_name,
+            pid_info.pid_number
+        `;
+        const { rows } = await db.query(query, [req.user.id]);
+        console.log("Tasks fetched for Team Member:", rows);
+        res.status(200).json({ data: rows });
+      } catch (error) {
+        console.error("Detailed error fetching tasks for Team Member:", {
+          message: error.message,
+          stack: error.stack,
+          queryError: error.code,
+          queryDetail: error.detail,
+          queryHint: error.hint,
+        });
+        res
+          .status(500)
+          .json({ message: "Failed to fetch tasks", error: error.message });
+      }
     } else {
       return res.status(403).json({
         message: `User role ${req.user.role} is not authorized to view tasks`,
@@ -203,7 +315,7 @@ router.get("/", protect, async (req, res) => {
 });
 
 // POST /api/tasks - Create a new task
-router.post("/", protect, createTask); // Use the createTask function
+router.post("/", protect, createTask);
 
 // PATCH /api/tasks/:id/status - Update task status
 router.patch("/:id/status", protect, async (req, res) => {
@@ -282,7 +394,7 @@ router.patch("/:id/status", protect, async (req, res) => {
              json_agg(
                json_build_object(
                  'id', ti.id,
-                 'item_name', ti.item_name,
+                 'item_name', ti.name,
                  'item_type', ti.item_type,
                  'completed', ti.completed
                )
@@ -404,12 +516,16 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 
     const { rows: updatedItemRows } = await db.query(
       `
-      UPDATE task_items
-      SET 
-        completed = $1
-      WHERE id = $2
-      RETURNING *
-      `,
+  UPDATE task_items
+  SET 
+    completed = $1,
+    completed_at = CASE 
+      WHEN $1 = true THEN CURRENT_TIMESTAMP
+      ELSE NULL
+    END
+  WHERE id = $2
+  RETURNING *
+  `,
       [completed, itemId]
     );
 
@@ -470,7 +586,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
              json_agg(
                json_build_object(
                  'id', ti.id,
-                 'item_name', ti.item_name,
+                 'item_name', ti.name,
                  'item_type', ti.item_type,
                  'completed', ti.completed
                )
@@ -521,5 +637,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       .json({ message: "Failed to update task item", error: error.message });
   }
 });
+
 router.post("/:taskId/comments", protect, addTaskComment);
+
 module.exports = router;

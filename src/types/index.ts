@@ -95,10 +95,10 @@ export interface Task {
 export interface TaskItem {
   id: string;
   name: string;
-  type: "PID" | "Line" | "Equipment";
+  type: "PID" | "Line" | "Equipment" | "NonInlineInstrument";
   completed: boolean;
+  completedAt?: string | null;
 }
-
 // Mock data interfaces for development
 export interface MockData {
   users: Record<UserRole, string[]>;

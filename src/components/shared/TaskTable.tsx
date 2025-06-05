@@ -61,6 +61,11 @@ const getCurrentWork = (task: Task): string => {
   const equipmentItem = task.items.find((item) => item.type === "Equipment");
   if (equipmentItem) return `Equipment ${equipmentItem.name}`;
 
+  const instrumentItem = task.items.find(
+    (item) => item.type === "NonInlineInstrument"
+  );
+  if (instrumentItem) return `Instrument ${instrumentItem.name}`;
+
   return "No active items";
 };
 
