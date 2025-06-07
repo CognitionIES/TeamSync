@@ -702,7 +702,7 @@ const TeamMemberDashboard = () => {
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
                 assignedTasks.map((task) =>
-                  task.type === "Misc" ? (
+                  task.type === TaskType.Misc ? (
                     <MiscTaskCard
                       key={task.id}
                       task={task}

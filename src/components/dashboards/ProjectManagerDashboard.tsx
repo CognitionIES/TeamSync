@@ -1,4 +1,5 @@
- import { useState, useEffect } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -22,9 +23,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TaskTable from "../shared/TaskTable";
 import TeamPerformanceView from "../shared/TeamPerformanceView";
-import { Task, TaskStatus, TaskType, UserRole } from "@/types";
+import { Task, TaskStatus, TaskType, UserRole, ItemType } from "@/types";
 import Modal from "react-modal";
 import DashboardBackground from "../shared/DashboardBackground";
+import AssignedItemsModal from "../shared/AssignedItemsModal";
+import axios, { AxiosError } from "axios";
+import { ScrollArea } from "../ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -95,17 +106,38 @@ interface ApiTeamLead {
   }>;
 }
 
-// Transform API team lead data to match TeamLead type
-const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
-  name: apiTeamLead.team_lead,
-  team: apiTeamLead.team_members.map((member) => member.member_name),
-});
-
 // Interface for raw API user data
 interface ApiUser {
   id: string;
   name: string;
   role: string;
+}
+
+// Interface for fetched assigned items (matches the structure expected by AssignedItemsModal)
+interface FetchedAssignedItems {
+  pids: any;
+  lines: any;
+  equipment: any;
+  upvLines: {
+    count: number;
+    items: { id: string; line_number: string; project_id: string }[];
+  };
+  qcLines: {
+    count: number;
+    items: { id: string; line_number: string; project_id: string }[];
+  };
+  redlinePIDs: {
+    count: number;
+    items: { id: string; pid_number: string; project_id: string }[];
+  };
+  upvEquipment: {
+    count: number;
+    items: { id: string; equipment_name: string; project_id: string }[];
+  };
+  qcEquipment: {
+    count: number;
+    items: { id: string; equipment_name: string; project_id: string }[];
+  };
 }
 
 // Interface for transformed team lead data (matches TeamPerformanceView expectation)
@@ -114,10 +146,57 @@ interface TeamLead {
   team: string[];
 }
 
+// Transform API team lead data to match TeamLead type
+const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
+  name: apiTeamLead.team_lead,
+  team: apiTeamLead.team_members.map((member) => member.member_name),
+});
+
 // Transform API task data to match Task type (camelCase)
-const transformTask = (apiTask: ApiTask): Task => ({
+const transformTask = (apiTask: ApiTask): Task => {
+  console.log("Transforming Task:", apiTask.id, "Items:", apiTask.items);
+  const validTaskTypes = Object.values(TaskType);
+  const taskType = validTaskTypes.includes(apiTask.type as TaskType)
+    ? (apiTask.type as TaskType)
+    : TaskType.UPV;
+
+  const validItemTypes = Object.values(ItemType);
+  const items = apiTask.items.map((item, index) => {
+    const transformedItem = {
+      id: item.id,
+      name: item.item_name,
+      type: validItemTypes.includes(item.item_type as ItemType)
+        ? (item.item_type as ItemType)
+        : ItemType.Line,
+      // Simulate: Set completed to true for every even-indexed line item
+      completed:
+        item.item_type === ItemType.Line
+          ? index % 2 === 0 // Simulate completed for even indices
+          : item.completed,
+    };
+    console.log("Transformed Item:", transformedItem);
+    return transformedItem;
+  });
+
+  // Add dummy Line items if none exist (for debugging)
+  if (!items.some((item) => item.type === ItemType.Line)) {
+    items.push({
+      id: "dummy-line-1",
+      name: "L-Dummy-1",
+      type: ItemType.Line,
+      completed: false,
+    });
+    items.push({
+      id: "dummy-line-2",
+      name: "L-Dummy-2",
+      type: ItemType.Line,
+      completed: true,
+    });
+  }
+
+return {
   id: apiTask.id,
-  type: apiTask.type,
+  type: taskType,
   assignee: apiTask.assignee,
   assigneeId: apiTask.assignee_id,
   status: apiTask.status,
@@ -126,12 +205,7 @@ const transformTask = (apiTask: ApiTask): Task => ({
   updatedAt: apiTask.updated_at,
   completedAt: apiTask.completed_at,
   progress: apiTask.progress,
-  items: apiTask.items.map((item) => ({
-    id: item.id,
-    name: item.item_name,
-    type: item.item_type as "PID" | "Line" | "Equipment",
-    completed: item.completed,
-  })),
+  items,
   comments: apiTask.comments.map((comment) => ({
     id: comment.id,
     userId: comment.user_id,
@@ -144,8 +218,10 @@ const transformTask = (apiTask: ApiTask): Task => ({
   pidNumber: "",
   projectName: "",
   areaNumber: "",
-  description: ""
-});
+  description: "",
+  lines: undefined,
+};
+};
 
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -156,10 +232,17 @@ const ProjectManagerDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [modalIsOpen, setModalIsOpen] = useState(false);
-  const [assignedItems, setAssignedItems] = useState(null);
+  const [commentsModalIsOpen, setCommentsModalIsOpen] = useState(false);
+  const [selectedComments, setSelectedComments] = useState<Task["comments"]>(
+    []
+  );
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [assignedItems, setAssignedItems] =
+    useState<FetchedAssignedItems | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState(null);
-
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedTaskType, setSelectedTaskType] = useState<string>("");
+  const [selectedItemType, setSelectedItemType] = useState<string>("");
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -167,7 +250,7 @@ const ProjectManagerDashboard = () => {
         throw new Error("No authentication token found");
       }
 
-      const response = await fetch(
+      const response = await axios.get<{ data: FetchedAssignedItems }>(
         `${API_URL}/users/${userId}/assigned-items/${taskId}`,
         {
           headers: {
@@ -177,16 +260,17 @@ const ProjectManagerDashboard = () => {
         }
       );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to fetch assigned items: ${errorText}`);
-      }
-
-      const data = await response.json();
-      return data.data;
+      console.log("API Response for Assigned Items:", response.data);
+      return response.data.data;
     } catch (error) {
-      console.error("Error fetching assigned items:", error.message);
-      throw error;
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error(
+        "Error fetching assigned items:",
+        axiosError.response?.data || axiosError.message
+      );
+      throw new Error(
+        axiosError.response?.data?.message || "Failed to fetch assigned items"
+      );
     }
   };
 
@@ -194,12 +278,66 @@ const ProjectManagerDashboard = () => {
     setSelectedUserId(userId);
     setLoadingItems(true);
     try {
+      const task = tasks.find((t) => t.id === taskId);
+      console.log("Selected Task:", task);
+      if (!task) {
+        setSelectedTaskType("");
+        setSelectedItemType("");
+        console.log(
+          "Task not found, setting taskType and itemType to empty strings"
+        );
+        toast.error("Task not found. Cannot display assigned items.");
+        return; // Prevent opening the modal
+      }
+
+      setSelectedTaskType(task.type);
+      console.log("Task Items:", task.items);
+      let itemType: ItemType | null = null;
+      if (task.items.length > 0) {
+        itemType = task.items[0].type; // Already validated in transformTask
+      } else {
+        switch (task.type) {
+          case TaskType.Redline:
+            itemType = ItemType.PID;
+            break;
+          case TaskType.UPV:
+          case TaskType.QC:
+            itemType = ItemType.Line;
+            break;
+          default:
+            itemType = null;
+        }
+      }
+      console.log("Determined Item Type:", itemType);
+
+      if (!itemType) {
+        console.log(
+          "Task Type:",
+          task.type,
+          "Has Items:",
+          task.items.length > 0
+        );
+        toast.error(
+          `Unsupported task type: ${task.type}. Cannot display assigned items.`
+        );
+        setSelectedTaskType("");
+        setSelectedItemType("");
+        return; // Prevent opening the modal
+      }
+
+      setSelectedItemType(itemType);
+      console.log("Task Type:", task.type, "Item Type:", itemType);
+
       const items = await fetchAssignedItems(userId, taskId);
+      console.log("Fetched Assigned Items:", items);
       setAssignedItems(items);
       setModalIsOpen(true);
     } catch (error) {
-      toast.error("Failed to fetch assigned items");
+      console.error("Error in handleViewCurrentWork:", error);
+      toast.error(`Failed to fetch assigned items: ${error.message}`);
       setAssignedItems(null);
+      setSelectedTaskType("");
+      setSelectedItemType("");
     } finally {
       setLoadingItems(false);
     }
@@ -209,8 +347,25 @@ const ProjectManagerDashboard = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
     setSelectedUserId(null);
+    setSelectedTaskType("");
+    setSelectedItemType("");
+  };
+  const handleViewComments = (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) {
+      setSelectedTask(task);
+      setSelectedComments(task.comments || []);
+      setCommentsModalIsOpen(true);
+    } else {
+      toast.error("Task not found. Cannot display comments.");
+    }
   };
 
+  const closeCommentsModal = () => {
+    setCommentsModalIsOpen(false);
+    setSelectedComments([]);
+    setSelectedTask(null);
+  };
   const fetchData = async () => {
     setIsLoading(true);
     setError(null);
@@ -234,7 +389,7 @@ const ProjectManagerDashboard = () => {
       );
 
       const tasksText = await tasksResponse.text();
-      console.log("Tasks Response Body:", tasksText.substring(0, 200));
+      console.log("Tasks Response Body (Full):", tasksText); // Log the full response
 
       if (!tasksResponse.ok) {
         let errorMessage = `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`;
@@ -265,7 +420,6 @@ const ProjectManagerDashboard = () => {
       const transformedTasks = tasksData.data.map(transformTask);
       setTasks(transformedTasks);
       console.log("Transformed Tasks:", transformedTasks);
-
       let teamLeadsData = [];
       try {
         const teamsResponse = await fetch(`${API_URL}/teams`, {
@@ -387,8 +541,8 @@ const ProjectManagerDashboard = () => {
           }
           usersData = usersDataResponse.data;
         }
-      } catch (userError) {
-        console.error("Error fetching users:", userError.message);
+      } catch (error) {
+        console.error("Error fetching users:", error.message);
         toast.error("Failed to fetch users data");
       }
       setUsers(usersData);
@@ -722,7 +876,7 @@ const ProjectManagerDashboard = () => {
                     <p className="text-4xl font-bold text-green-600">
                       {completedToday}
                     </p>
-                    <p className="text-sm text-gray-500 mt-1">tasks Finished</p>
+                    <p className="text-sm text-gray-500 mt-1">Tasks Finished</p>
                   </CardContent>
                 </Card>
               </div>
@@ -740,8 +894,10 @@ const ProjectManagerDashboard = () => {
                   showFilters={true}
                   showProgress={true}
                   showCurrentWork={true}
+                  showComments={true} // Enable comments
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
+                  onViewComments={handleViewComments} // Add handler
                 />
               </CardContent>
             </Card>
@@ -891,8 +1047,10 @@ const ProjectManagerDashboard = () => {
                   showFilters={true}
                   showProgress={true}
                   showCurrentWork={true}
+                  showComments={true} // Enable comments
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
+                  onViewComments={handleViewComments} // Add handler
                 />
               </CardContent>
             </Card>
@@ -926,239 +1084,77 @@ const ProjectManagerDashboard = () => {
           </TabsContent>
         </Tabs>
 
-        <Modal
-          isOpen={modalIsOpen}
-          onRequestClose={closeModal}
-          style={{
-            content: {
-              top: "50%",
-              left: "50%",
-              right: "auto",
-              bottom: "auto",
-              marginRight: "-50%",
-              transform: "translate(-50%, -50%)",
-              width: "90%",
-              maxWidth: "600px",
-              maxHeight: "80vh",
-              overflowY: "auto",
-              padding: "24px",
-              borderRadius: "12px",
-              backgroundColor: "#fff",
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-            },
-            overlay: {
-              backgroundColor: "rgba(0, 0, 0, 0.6)",
-              zIndex: 1000,
-            },
-          }}
-          contentLabel="Assigned Items Modal"
+        {selectedTaskType && selectedItemType && (
+          <AssignedItemsModal
+            isOpen={modalIsOpen}
+            onClose={closeModal}
+            assignedItems={assignedItems}
+            loadingItems={loadingItems}
+            userName={
+              selectedUserId
+                ? users.find((user) => user.id === selectedUserId)?.name ||
+                  "Unknown User"
+                : ""
+            }
+            taskType={selectedTaskType}
+            itemType={selectedItemType}
+          />
+        )}
+
+        {/* Comments Modal */}
+        <Dialog
+          open={commentsModalIsOpen}
+          onOpenChange={setCommentsModalIsOpen}
         >
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-800">
-              Assigned Items{" "}
-              {selectedUserId
-                ? `for ${
-                    users.find((user) => user.id === selectedUserId)?.name ||
-                    "Unknown User"
-                  }`
-                : ""}
-            </h2>
-            <button
-              onClick={closeModal}
-              className="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors duration-200"
-              aria-label="Close modal"
-            >
-              <svg
-                className="h-6 w-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {loadingItems ? (
-            <div className="text-center py-8">
-              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
-              <p className="mt-2 text-gray-600">Loading assigned items...</p>
-            </div>
-          ) : assignedItems ? (
-            <div className="space-y-6">
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  UPV Lines ({assignedItems.upvLines.count})
-                </h3>
-                {assignedItems.upvLines.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.upvLines.items.map((line) => (
-                        <li
-                          key={line.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Line:</strong> {line.line_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {line.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No UPV lines assigned.
-                  </p>
-                )}
-              </div>
-
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  QC Lines ({assignedItems.qcLines.count})
-                </h3>
-                {assignedItems.qcLines.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.qcLines.items.map((line) => (
-                        <li
-                          key={line.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Line:</strong> {line.line_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {line.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No QC lines assigned.
-                  </p>
-                )}
-              </div>
-
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  Redline P&IDs ({assignedItems.redlinePIDs.count})
-                </h3>
-                {assignedItems.redlinePIDs.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.redlinePIDs.items.map((pid) => (
-                        <li
-                          key={pid.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>P&ID:</strong> {pid.pid_number}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {pid.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No Redline P&IDs assigned.
-                  </p>
-                )}
-              </div>
-
-              <div className="border-b border-gray-200 pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  UPV Equipment ({assignedItems.upvEquipment.count})
-                </h3>
-                {assignedItems.upvEquipment.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.upvEquipment.items.map((equip) => (
-                        <li
-                          key={equip.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Equipment:</strong> {equip.equipment_name}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {equip.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No UPV equipment assigned.
-                  </p>
-                )}
-              </div>
-
-              <div className="pb-4">
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  QC Equipment ({assignedItems.qcEquipment.count})
-                </h3>
-                {assignedItems.qcEquipment.count > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
-                    <ul className="space-y-2">
-                      {assignedItems.qcEquipment.items.map((equip) => (
-                        <li
-                          key={equip.id}
-                          className="text-sm text-gray-600 flex justify-between items-center"
-                        >
-                          <span>
-                            <strong>Equipment:</strong> {equip.equipment_name}
-                          </span>
-                          <span className="text-gray-500">
-                            Project ID: {equip.project_id}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">
-                    No QC equipment assigned.
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-red-600 font-medium">
-                Failed to load assigned items.
-              </p>
-              <p className="text-gray-500 mt-2">
-                Please try again or contact support if the issue persists.
-              </p>
-            </div>
-          )}
-
-          {!loadingItems && (
-            <div className="mt-6 flex justify-end">
-              <Button
-                onClick={closeModal}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition-colors duration-200"
-              >
-                Close
-              </Button>
-            </div>
-          )}
-        </Modal>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>
+                Comments for Task {selectedTask?.id || ""}
+              </DialogTitle>
+              <DialogDescription>
+                Task Type: {selectedTask?.type || "Unknown"} | Assignee:{" "}
+                {selectedTask?.assignee || "Unknown"}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="max-h-[300px] mt-4">
+              {selectedComments.length > 0 ? (
+                <div className="space-y-4">
+                  {selectedComments.map((comment) => (
+                    <div
+                      key={comment.id}
+                      className="border-b border-gray-200 pb-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">
+                          {comment.userName}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          ({comment.userRole})
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-700 mt-1">
+                        {comment.comment}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(comment.createdAt).toLocaleString("en-US", {
+                          month: "short",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: false,
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  No comments available for this task.
+                </p>
+              )}
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

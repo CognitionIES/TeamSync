@@ -175,12 +175,11 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const assignedTime = formatDateTime(task.createdAt, "Assigned");
     const completedTime = formatDateTime(task.completedAt, "Completed");
 
-    // Calculate completed lines and total lines
     const lineItems = task.items.filter((item) => item.type === "Line");
     const completedLines = lineItems.filter((item) => item.completed).length;
     const totalLines = lineItems.length;
 
-    return {
+    const row = {
       id: task.id,
       type: task.type,
       assignee: task.assignee,
@@ -197,6 +196,8 @@ const TaskTable: React.FC<TaskTableProps> = ({
       areaNumber: task.areaNumber || "N/A",
       pidNumber: task.pidNumber || "N/A",
     };
+    console.log("Task Row:", row); // Debug log
+    return row;
   });
 
   const sortedRows = [...rows].sort((a, b) => {
@@ -464,10 +465,12 @@ const TaskTable: React.FC<TaskTableProps> = ({
                         <span className="text-gray-400 mx-1">/</span>
                         <span>{row.totalLines}</span>
                       </span>
+                    ) : row.totalLines === 0 ? (
+                      <span className="text-sm text-gray-400">No Lines</span>
                     ) : (
                       <span className="text-sm text-gray-400">—</span>
                     )}
-                  </TableCell>
+                  </TableCell>{" "}
                   {showCurrentWork && (
                     <TableCell className="px-4 py-3">
                       <button

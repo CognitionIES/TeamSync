@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // User roles
 export type UserRole =
   | "Data Entry"
@@ -59,7 +60,6 @@ export interface Equipment {
 }
 
 // Task types
-export type TaskType = "Redline" | "UPV" | "QC" | "Misc";
 export type TaskStatus = "Assigned" | "In Progress" | "Completed";
 
 export interface TaskComment {
@@ -72,9 +72,24 @@ export interface TaskComment {
 }
 
 // @/types.ts
+export enum TaskType {
+  UPV = "UPV",
+  QC = "QC",
+  Redline = "Redline",
+  Misc = "Misc",
+}
+
+export enum ItemType {
+  PID = "PID",
+  Line = "Line",
+  Equipment = "Equipment",
+  NonInlineInstrument = "NonInlineInstrument",
+}
+
 export interface Task {
+  lines: any;
   id: string;
-  type: TaskType;
+  type: TaskType; // Use enum
   assignee: string;
   assigneeId: string;
   status: TaskStatus;
@@ -83,14 +98,25 @@ export interface Task {
   updatedAt: string;
   completedAt: string | null;
   progress: number;
+  items: Array<{
+    id: string;
+    name: string;
+    type: ItemType; // Use enum
+    completed: boolean;
+  }>;
+  comments: Array<{
+    id: string;
+    userId: string;
+    userName: string;
+    userRole: UserRole;
+    comment: string;
+    createdAt: string;
+  }>;
   projectId: string;
+  pidNumber: string;
   projectName: string;
   areaNumber: string;
-  items: TaskItem[];
-  comments: TaskComment[];
-  description: string; 
-  pidNumber: string;
-  lines?: { id: string; name: string; pidId: string; completed: boolean }[];
+  description: string;
 }
 export interface TaskItem {
   id: string;

@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
 import { Progress } from "@/components/ui/progress";
+import AssignedItemsModal from "../shared/AssignedItemsModal";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
@@ -108,7 +109,7 @@ const TeamLeadDashboard = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [generalMessage, setGeneralMessage] = useState<string>("");
   // Form state
-  const [taskType, setTaskType] = useState<TaskType | "">("");
+  const [taskType, setTaskType] = useState<TaskType | "Misc" | "">("");
   const [assignmentType, setAssignmentType] = useState<
     "PID" | "Line" | "Equipment" | "NonInlineInstrument" | ""
   >("");
@@ -449,6 +450,7 @@ const TeamLeadDashboard = () => {
             })
             .filter((item) => item !== null);
 
+          // Add lines property as required by Task type
           return {
             id: task.id.toString(),
             type: task.type,
@@ -467,6 +469,7 @@ const TeamLeadDashboard = () => {
             projectName: task.project_name ?? "Unknown",
             areaNumber: task.area_name ?? "N/A", // Already correct
             description: task.description || "",
+            lines: task.lines || [], // <-- Ensure lines property exists
           };
         });
 
@@ -1653,7 +1656,7 @@ const TeamLeadDashboard = () => {
         </Card>
 
         {/* Modal for Assigned Items */}
-        <Modal
+        {/* <Modal
           isOpen={modalIsOpen}
           onRequestClose={closeModal}
           style={{
@@ -1895,8 +1898,16 @@ const TeamLeadDashboard = () => {
               </Button>
             </div>
           )}
-        </Modal>
-
+        </Modal> */}
+        <AssignedItemsModal
+          isOpen={modalIsOpen}
+          onClose={closeModal}
+          assignedItems={assignedItems}
+          loadingItems={loadingItems}
+          userName={userName}
+          taskType={selectedTaskType}
+          itemType={selectedItemType}
+        />
         {/* Modal for Comments */}
         <Modal
           isOpen={commentsModalIsOpen}
