@@ -32,9 +32,9 @@ import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
-  TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  TooltipContent,
 } from "@/components/ui/tooltip";
 import MiscTaskCard from "../shared/MiscTaskCard";
 
@@ -643,7 +643,15 @@ const TeamMemberDashboard = () => {
 
   const assignedTasks = tasks.filter((task) => task.status === "Assigned");
   const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
-  const completedTasks = tasks.filter((task) => task.status === "Completed");
+  const completedTasks = tasks
+    .filter((task) => task.status === "Completed")
+    .sort((a, b) => {
+      const dateA = new Date(a.completedAt!);
+      const dateB = new Date(b.completedAt!);
+      if (isNaN(dateA.getTime())) return 1;
+      if (isNaN(dateB.getTime())) return -1;
+      return dateB.getTime() - dateA.getTime();
+    });
 
   const taskCounts = {
     assigned: assignedTasks.length,
