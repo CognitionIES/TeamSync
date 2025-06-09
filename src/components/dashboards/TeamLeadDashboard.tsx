@@ -75,23 +75,53 @@ interface FetchedAssignedItems {
   equipment: any;
   upvLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      id: string;
+      line_number: string;
+      project_id: string;
+      project_name: string;
+      area_number: string | null;
+    }[];
   };
   qcLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      id: string;
+      line_number: string;
+      project_id: string;
+      project_name: string;
+      area_number: string | null;
+    }[];
   };
   redlinePIDs: {
     count: number;
-    items: { id: string; pid_number: string; project_id: string }[];
+    items: {
+      id: string;
+      pid_number: string;
+      project_id: string;
+      project_name: string;
+      area_number: string | null;
+    }[];
   };
   upvEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      project_name: string;
+      area_number: string | null;
+    }[];
   };
   qcEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      project_name: string;
+      area_number: string | null;
+    }[];
   };
 }
 
@@ -497,14 +527,44 @@ const TeamLeadDashboard = () => {
         `${API_URL}/users/${userId}/assigned-items/${taskId}`,
         getAuthHeaders()
       );
-      return response.data.data;
+      const data = response.data.data;
+
+      // Map project_id to project_name using the projects array
+      const mapProjectName = (items: any[]) =>
+        items.map((item) => ({
+          ...item,
+          project_name:
+            projects.find((p) => p.id === item.project_id)?.name || "Unknown",
+        }));
+
+      return {
+        upvLines: {
+          count: data.upvLines.count,
+          items: mapProjectName(data.upvLines.items),
+        },
+        qcLines: {
+          count: data.qcLines.count,
+          items: mapProjectName(data.qcLines.items),
+        },
+        redlinePIDs: {
+          count: data.redlinePIDs.count,
+          items: mapProjectName(data.redlinePIDs.items),
+        },
+        upvEquipment: {
+          count: data.upvEquipment.count,
+          items: mapProjectName(data.upvEquipment.items),
+        },
+        qcEquipment: {
+          count: data.qcEquipment.count,
+          items: mapProjectName(data.qcEquipment.items),
+        },
+      };
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching assigned items:", axiosError);
       throw axiosError;
     }
   };
-
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
     setSelectedUserId(userId);
     setLoadingItems(true);
@@ -520,7 +580,12 @@ const TeamLeadDashboard = () => {
       }
 
       const items = await fetchAssignedItems(userId, taskId);
-      setAssignedItems(items);
+      setAssignedItems({
+        pids: [],
+        lines: [],
+        equipment: [],
+        ...items,
+      });
       setModalIsOpen(true);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;

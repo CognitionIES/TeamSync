@@ -2,27 +2,57 @@ import Modal from "react-modal";
 import { Button } from "@/components/ui/button";
 import { getRandomMessage } from "@/components/shared/messages";
 
-// Define the shape of assigned items (same as in both dashboards)
+// Define the shape of assigned items
 interface AssignedItems {
   upvLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      area_number: string;
+      id: string;
+      line_number: string;
+      project_id: string;
+      project_name: string;
+    }[];
   };
   qcLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      area_number: string;
+      id: string;
+      line_number: string;
+      project_id: string;
+      project_name: string;
+    }[];
   };
   redlinePIDs: {
     count: number;
-    items: { id: string; pid_number: string; project_id: string }[];
+    items: {
+      area_number: string;
+      id: string;
+      pid_number: string;
+      project_id: string;
+      project_name: string;
+    }[];
   };
   upvEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      area_number: string;
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      project_name: string;
+    }[];
   };
   qcEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      area_number: string;
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      project_name: string;
+    }[];
   };
 }
 
@@ -33,8 +63,8 @@ interface AssignedItemsModalProps {
   assignedItems: AssignedItems | null;
   loadingItems: boolean;
   userName: string;
-  taskType: string; // Made required
-  itemType: string; // Made required
+  taskType: string;
+  itemType: string;
 }
 
 const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
@@ -46,6 +76,36 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
   taskType,
   itemType,
 }) => {
+  // Extract project name from the first non-empty category
+  const projectName = assignedItems
+    ? assignedItems.upvLines.items.length > 0
+      ? assignedItems.upvLines.items[0].project_name
+      : assignedItems.qcLines.items.length > 0
+      ? assignedItems.qcLines.items[0].project_name
+      : assignedItems.redlinePIDs.items.length > 0
+      ? assignedItems.redlinePIDs.items[0].project_name
+      : assignedItems.upvEquipment.items.length > 0
+      ? assignedItems.upvEquipment.items[0].project_name
+      : assignedItems.qcEquipment.items.length > 0
+      ? assignedItems.qcEquipment.items[0].project_name
+      : "Unknown"
+    : "Unknown";
+  // Extract area number based on taskType
+  const areaNumber = assignedItems
+    ? taskType === "UPV" && assignedItems.upvLines.items.length > 0
+      ? assignedItems.upvLines.items[0].area_number ?? "Not Assigned"
+      : taskType === "QC" && assignedItems.qcLines.items.length > 0
+      ? assignedItems.qcLines.items[0].area_number ?? "Not Assigned"
+      : taskType === "Redline" && assignedItems.redlinePIDs.items.length > 0
+      ? assignedItems.redlinePIDs.items[0].area_number ?? "Not Assigned"
+      : taskType === "UPV" && assignedItems.upvEquipment.items.length > 0
+      ? assignedItems.upvEquipment.items[0].area_number ?? "Not Assigned"
+      : taskType === "QC" && assignedItems.qcEquipment.items.length > 0
+      ? assignedItems.qcEquipment.items[0].area_number ?? "Not Assigned"
+      : "Not Assigned"
+    : "Not Assigned";
+
+  console.log("Extracted areaNumber:", areaNumber); // Debug log
   return (
     <Modal
       isOpen={isOpen}
@@ -60,7 +120,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
           transform: "translate(-50%, -50%)",
           width: "90%",
           maxWidth: "600px",
-          maxHeight: "80vh",
+          maxHeight: "600px",
           overflowY: "auto",
           padding: "24px",
           borderRadius: "12px",
@@ -75,9 +135,17 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
       contentLabel="Assigned Items Modal"
     >
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">
-          Assigned Items {userName ? `for ${userName}` : ""}
-        </h2>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">
+            Assigned Items {userName ? `for ${userName}` : ""}
+          </h2>
+          <p className=" text-base font-semibold text-red-800 mt-1">
+            Project: {projectName || "Still Searching..."}{" "}
+          </p>
+          <p className="text-sm text-gray-600 mt-1">
+            Area No.: {areaNumber || "Still Searching..."}
+          </p>{" "}
+        </div>
         <button
           onClick={onClose}
           className="text-gray-500 hover:text-gray-700 focus:outline-none transition-colors duration-200"
@@ -106,8 +174,8 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
           <p className="mt-2 text-gray-600">{getRandomMessage("loading")}</p>
         </div>
       ) : assignedItems ? (
-        <div className="space-y-6">
-          {(taskType === "UPV" && itemType === "Line") && (
+        <div className=" space-y-8">
+          {taskType === "UPV" && itemType === "Line" && (
             <div className="border-b border-gray-200 pb-4">
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
                 UPV Lines ({assignedItems.upvLines.count})
@@ -123,9 +191,6 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>Line:</strong> {line.line_number}
                         </span>
-                        <span className="text-gray-500">
-                          Project ID: {line.project_id}
-                        </span>
                       </li>
                     ))}
                   </ul>
@@ -138,13 +203,13 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
             </div>
           )}
 
-          {(taskType === "QC" && itemType === "Line") && (
-            <div className="border-b border-gray-200 pb-4">
-              <h3 className="text-lg font-semibold text-gray-700 mb-2">
+          {taskType === "QC" && itemType === "Line" && (
+            <div className="border-b  border-gray-200 pb-4">
+              <h3 className="text-lg  font-semibold text-gray-700 mb-2">
                 QC Lines ({assignedItems.qcLines.count})
               </h3>
               {assignedItems.qcLines.count > 0 ? (
-                <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                <div className="bg-gray-50  rounded-lg p-4 max-h-40 overflow-y-auto">
                   <ul className="space-y-2">
                     {assignedItems.qcLines.items.map((line) => (
                       <li
@@ -153,9 +218,6 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                       >
                         <span>
                           <strong>Line:</strong> {line.line_number}
-                        </span>
-                        <span className="text-gray-500">
-                          Project ID: {line.project_id}
                         </span>
                       </li>
                     ))}
@@ -169,7 +231,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
             </div>
           )}
 
-          {(taskType === "Redline" && itemType === "PID") && (
+          {taskType === "Redline" && itemType === "PID" && (
             <div className="border-b border-gray-200 pb-4">
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
                 Redline P&IDs ({assignedItems.redlinePIDs.count})
@@ -186,7 +248,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                           <strong>P&ID:</strong> {pid.pid_number}
                         </span>
                         <span className="text-gray-500">
-                          Project ID: {pid.project_id}
+                          Project: {pid.project_name || "Unknown"}
                         </span>
                       </li>
                     ))}
@@ -200,7 +262,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
             </div>
           )}
 
-          {(taskType === "UPV" && itemType === "Equipment") && (
+          {taskType === "UPV" && itemType === "Equipment" && (
             <div className="border-b border-gray-200 pb-4">
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
                 UPV Equipment ({assignedItems.upvEquipment.count})
@@ -217,7 +279,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                           <strong>Equipment:</strong> {equip.equipment_name}
                         </span>
                         <span className="text-gray-500">
-                          Project ID: {equip.project_id}
+                          Project: {equip.project_name || "Unknown"}
                         </span>
                       </li>
                     ))}
@@ -231,7 +293,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
             </div>
           )}
 
-          {(taskType === "QC" && itemType === "Equipment") && (
+          {taskType === "QC" && itemType === "Equipment" && (
             <div className="pb-4">
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
                 QC Equipment ({assignedItems.qcEquipment.count})
@@ -248,7 +310,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                           <strong>Equipment:</strong> {equip.equipment_name}
                         </span>
                         <span className="text-gray-500">
-                          Project ID: {equip.project_id}
+                          Project: {equip.project_name || "Unknown"}
                         </span>
                       </li>
                     ))}
@@ -262,7 +324,6 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
             </div>
           )}
 
-          {/* Fallback for invalid taskType or itemType */}
           {!(
             (taskType === "UPV" && itemType === "Line") ||
             (taskType === "QC" && itemType === "Line") ||

@@ -835,7 +835,6 @@ const TeamMemberDashboard = () => {
               )}
             </div>
           </div>
-
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-teamsync-inProgress rounded-full mr-2"></div>
@@ -870,7 +869,6 @@ const TeamMemberDashboard = () => {
               )}
             </div>
           </div>
-
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-teamsync-completed rounded-full mr-2"></div>
@@ -887,9 +885,10 @@ const TeamMemberDashboard = () => {
                         variant="ghost"
                         className="flex w-full justify-between items-center h-[60px] p-3 bg-green-50 hover:bg-green-100 rounded-lg shadow-sm transition-all duration-200"
                       >
-                        <div className="flex flex-col  items-start text-left">
-                          <span className="font-semibold text-sm text-green-800 truncate max-w-[60%]">
-                            QC - {task.projectName} - Area No: {task.areaNumber}
+                        <div className="flex flex-col items-start text-left">
+                          <span className="font-semibold text-sm text-green-800 truncate">
+                            {task.type} - {task.projectName} - Area No:{" "}
+                            {task.areaNumber}
                           </span>
                           <div className="text-xs text-gray-600 mt-1">
                             <span>Assigned: {formatDate(task.createdAt)}</span>
@@ -929,7 +928,7 @@ const TeamMemberDashboard = () => {
                 </div>
               )}
             </div>
-          </div>
+          </div>{" "}
         </div>
 
         <Dialog open={isCommentsOpen} onOpenChange={setIsCommentsOpen}>

@@ -131,6 +131,8 @@ router.get("/", async (req, res) => {
 });
 
 // New route: Fetch assigned items for a specific user
+// Fetch assigned items for a specific user
+// Fetch assigned items for a specific user
 router.get("/:userId/assigned-items/:taskId", async (req, res) => {
   console.log(
     `Received request for /api/users/${req.params.userId}/assigned-items/${req.params.taskId}`
@@ -199,89 +201,117 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       `Fetching items for task ${taskIdFromTask} (type: ${taskType})`
     );
 
-    // Fetch items based on task type using JOINs to avoid item_name dependency
+    // Fetch items based on task type using JOINs to include project_name and area_number
     if (taskType === "Redline") {
       const { rows: pidRows } = await db.query(
         `
-        SELECT p.id, p.pid_number, p.project_id
+        SELECT p.id, p.pid_number, p.project_id, pr.name AS project_name, a.name AS area_number
         FROM task_items ti
         JOIN pids p ON ti.item_id = p.id
+        JOIN projects pr ON p.project_id = pr.id
+        LEFT JOIN areas a ON p.area_id = a.id
         WHERE ti.task_id = $1 AND ti.item_type = 'PID'
       `,
         [taskIdFromTask]
       );
+      console.log("Raw pidRows:", pidRows); // Debug log
       response.data.redlinePIDs.items = pidRows.map((pid) => ({
         id: pid.id.toString(),
         pid_number: pid.pid_number,
         project_id: pid.project_id.toString(),
+        project_name: pid.project_name,
+        area_number: pid.area_number || "N/A",
       }));
       response.data.redlinePIDs.count = pidRows.length;
     } else if (taskType === "UPV") {
       const { rows: lineRows } = await db.query(
         `
-        SELECT l.id, l.line_number, l.project_id
+        SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
         FROM task_items ti
         JOIN lines l ON ti.item_id = l.id
+        JOIN projects pr ON l.project_id = pr.id
+        LEFT JOIN pids p ON l.pid_id = p.id
+        LEFT JOIN areas a ON p.area_id = a.id
         WHERE ti.task_id = $1 AND ti.item_type = 'Line'
       `,
         [taskIdFromTask]
       );
+      console.log("Raw lineRows (UPV):", lineRows); // Debug log
       response.data.upvLines.items = lineRows.map((line) => ({
         id: line.id.toString(),
         line_number: line.line_number,
         project_id: line.project_id.toString(),
+        project_name: line.project_name,
+        area_number: line.area_number || "N/A",
       }));
       response.data.upvLines.count = lineRows.length;
 
       const { rows: equipRows } = await db.query(
         `
-        SELECT e.id, e.equipment_number AS equipment_name, e.project_id
+        SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
         FROM task_items ti
         JOIN equipment e ON ti.item_id = e.id
+        JOIN projects pr ON e.project_id = pr.id
+        LEFT JOIN areas a ON e.area_id = a.id
         WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
       `,
         [taskIdFromTask]
       );
+      console.log("Raw equipRows (UPV):", equipRows); // Debug log
       response.data.upvEquipment.items = equipRows.map((equip) => ({
         id: equip.id.toString(),
         equipment_name: equip.equipment_name,
         project_id: equip.project_id.toString(),
+        project_name: equip.project_name,
+        area_number: equip.area_number || "N/A",
       }));
       response.data.upvEquipment.count = equipRows.length;
     } else if (taskType === "QC") {
       const { rows: lineRows } = await db.query(
         `
-        SELECT l.id, l.line_number, l.project_id
+        SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
         FROM task_items ti
         JOIN lines l ON ti.item_id = l.id
+        JOIN projects pr ON l.project_id = pr.id
+        LEFT JOIN pids p ON l.pid_id = p.id
+        LEFT JOIN areas a ON p.area_id = a.id
         WHERE ti.task_id = $1 AND ti.item_type = 'Line'
       `,
         [taskIdFromTask]
       );
+      console.log("Raw lineRows (QC):", lineRows); // Debug log
       response.data.qcLines.items = lineRows.map((line) => ({
         id: line.id.toString(),
         line_number: line.line_number,
         project_id: line.project_id.toString(),
+        project_name: line.project_name,
+        area_number: line.area_number || "N/A",
       }));
       response.data.qcLines.count = lineRows.length;
 
       const { rows: equipRows } = await db.query(
         `
-        SELECT e.id, e.equipment_number AS equipment_name, e.project_id
+        SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
         FROM task_items ti
         JOIN equipment e ON ti.item_id = e.id
+        JOIN projects pr ON e.project_id = pr.id
+        LEFT JOIN areas a ON e.area_id = a.id
         WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
       `,
         [taskIdFromTask]
       );
+      console.log("Raw equipRows (QC):", equipRows); // Debug log
       response.data.qcEquipment.items = equipRows.map((equip) => ({
         id: equip.id.toString(),
         equipment_name: equip.equipment_name,
         project_id: equip.project_id.toString(),
+        project_name: equip.project_name,
+        area_number: equip.area_number || "N/A",
       }));
       response.data.qcEquipment.count = equipRows.length;
     }
 
+    console.log("Final API Response:", response); // Debug log
     res.status(200).json(response);
   } catch (error) {
     console.error("Error fetching assigned items:", error.message, error.stack);
@@ -291,7 +321,6 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
     });
   }
 });
-
 // Get specific user (Admin only)
 router.get("/:id", authorize(["Admin"]), getUserById);
 
