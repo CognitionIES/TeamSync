@@ -341,7 +341,16 @@ const formatTime = (dateString: string) => {
     timeZone: "Asia/Kolkata",
   });
 };
-
+// Add this at the top of the TeamMemberDashboard component
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+};
 const TeamMemberDashboard = () => {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -871,21 +880,49 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map((task) =>
-                  task.type === "Misc" ? (
-                    <MiscTaskCard
-                      key={task.id}
-                      task={task}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                completedTasks.map((task) => (
+                  <Collapsible key={task.id} defaultOpen={false}>
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        className="flex w-full justify-between items-center h-[60px] p-3 bg-green-50 hover:bg-green-100 rounded-lg shadow-sm transition-all duration-200"
+                      >
+                        <div className="flex flex-col  items-start text-left">
+                          <span className="font-semibold text-sm text-green-800 truncate max-w-[60%]">
+                            QC - {task.projectName} - Area No: {task.areaNumber}
+                          </span>
+                          <div className="text-xs text-gray-600 mt-1">
+                            <span>Assigned: {formatDate(task.createdAt)}</span>
+                            {task.completedAt && (
+                              <span className="ml-2">
+                                Completed: {formatDate(task.completedAt)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <ChevronDown className="h-4 w-4 CollapsibleChevron text-green-600" />
+                          <ChevronUp className="h-4 w-4 hidden CollapsibleChevron text-green-600" />
+                        </div>
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
+                      <div className="border-l-2 border-green-200 pl-4">
+                        {task.type === "Misc" ? (
+                          <MiscTaskCard
+                            task={task}
+                            onOpenComments={handleOpenComments}
+                          />
+                        ) : (
+                          <RedlineTaskCard
+                            task={task}
+                            onOpenComments={handleOpenComments}
+                          />
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No completed tasks"}
@@ -914,3 +951,21 @@ const TeamMemberDashboard = () => {
   );
 };
 export default TeamMemberDashboard;
+
+/*
+.CollapsibleTrigger[aria-expanded="true"] .CollapsibleChevron:first-child {
+  display: none;
+}
+
+.CollapsibleTrigger[aria-expanded="true"] .CollapsibleChevron:last-child {
+  display: block !important;
+}
+
+.CollapsibleTrigger[aria-expanded="false"] .CollapsibleChevron:first-child {
+  display: block !important;
+}
+
+.CollapsibleTrigger[aria-expanded="false"] .CollapsibleChevron:last-child {
+  display: none;
+}
+*/
