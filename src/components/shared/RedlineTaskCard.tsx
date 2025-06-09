@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { memo, useState } from "react";
+ import { memo, useState } from "react";
 import { Task, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
