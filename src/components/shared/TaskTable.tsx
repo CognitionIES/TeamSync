@@ -145,7 +145,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
   const [filterType, setFilterType] = useState<TaskType | "All">("All");
   const [filterAssignee, setFilterAssignee] = useState<string | "All">("All");
   const [sortColumn, setSortColumn] =
-    useState<keyof (typeof rows)[0]>("assignedTime");
+    useState<keyof (typeof rows)[0]>("createdAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const tasksPerPage = 20;
@@ -169,6 +169,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
       }
     };
 
+    const createdAt = parseSafeDate(task.createdAt);
     const updatedAt = parseSafeDate(task.updatedAt);
     const completedAt = parseSafeDate(task.completedAt);
 
@@ -187,6 +188,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
       totalLines: lineItems.length > 0 ? totalLines : null,
       currentWork: truncateText(getCurrentWork(task), 20),
       status: task.status,
+      createdAt: createdAt || new Date(0),
       assignedTime: assignedTime,
       completedTime: completedTime,
       updatedAt: updatedAt || completedAt || new Date(0),
@@ -203,9 +205,13 @@ const TaskTable: React.FC<TaskTableProps> = ({
   const sortedRows = [...rows].sort((a, b) => {
     const aValue = a[sortColumn];
     const bValue = b[sortColumn];
-    if (sortColumn === "updatedAt") {
-      const aDate = a.updatedAt?.getTime() || 0;
-      const bDate = b.updatedAt?.getTime() || 0;
+    if (sortColumn === "createdAt" || sortColumn === "updatedAt") {
+      const aDate =
+        (sortColumn === "createdAt" ? a.createdAt : a.updatedAt)?.getTime() ||
+        0;
+      const bDate =
+        (sortColumn === "createdAt" ? b.createdAt : b.updatedAt)?.getTime() ||
+        0;
       return sortDirection === "asc" ? aDate - bDate : bDate - aDate;
     }
     if (sortColumn === "completedLines" || sortColumn === "totalLines") {
@@ -416,7 +422,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
-                    onClick={() => handleSort("assignedTime")}
+                    onClick={() => handleSort("createdAt")}
                     className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
                     Assigned
