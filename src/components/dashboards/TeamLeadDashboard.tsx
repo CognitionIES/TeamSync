@@ -44,6 +44,11 @@ interface Project {
   name: string;
 }
 
+interface Area {
+  id: string;
+  name: string;
+}
+
 interface PID {
   id: string;
   name: string;
@@ -133,8 +138,11 @@ const TeamLeadDashboard = () => {
   const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [selectedArea, setSelectedArea] = useState<string>("");
   const [pids, setPIDs] = useState<PID[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  const [isLoadingLines, setIsLoadingLines] = useState(false);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [generalMessage, setGeneralMessage] = useState<string>("");
@@ -250,6 +258,35 @@ const TeamLeadDashboard = () => {
     }
   };
 
+  const fetchAreas = async () => {
+    if (!selectedProject) return;
+    try {
+      const response = await axios.get(
+        `${API_URL}/areas/project/${selectedProject}`,
+        getAuthHeaders()
+      );
+      const areasData = response.data.data.map((area) => ({
+        id: area.id.toString(),
+        name: area.name,
+      }));
+      setAreas(areasData);
+      if (areasData.length > 0) {
+        setSelectedArea(areasData[0].id); // Auto-select the first area
+      } else {
+        setSelectedArea("");
+        toast.info("No areas available for this project.");
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching areas:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch areas"
+      );
+      setAreas([]);
+      setSelectedArea("");
+    }
+  };
+
   const fetchTeamMembers = async () => {
     setIsTeamMembersLoading(true);
     try {
@@ -291,11 +328,14 @@ const TeamLeadDashboard = () => {
   };
 
   const fetchPIDs = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedArea) return;
     try {
       const response = await axios.get<{
         data: { id: number; pid_number: string; project_id: number }[];
-      }>(`${API_URL}/pids?projectId=${selectedProject}`, getAuthHeaders());
+      }>(
+        `${API_URL}/pids?projectId=${selectedProject}&areaId=${selectedArea}`,
+        getAuthHeaders()
+      );
       const pidsData = response.data.data
         .filter(
           (pid) =>
@@ -311,7 +351,7 @@ const TeamLeadDashboard = () => {
         prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId))
       );
       if (pidsData.length === 0) {
-        toast.info("No unassigned P&IDs available for this project.");
+        toast.info("No unassigned P&IDs available for this project and area.");
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -325,7 +365,8 @@ const TeamLeadDashboard = () => {
   };
 
   const fetchLines = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedArea) return;
+    setIsLoadingLines(true);
     try {
       const response = await axios.get<{
         data: {
@@ -334,7 +375,10 @@ const TeamLeadDashboard = () => {
           pid_id: number;
           pid_number: string;
         }[];
-      }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders());
+      }>(
+        `${API_URL}/lines/unassigned/${selectedProject}?areaId=${selectedArea}`,
+        getAuthHeaders()
+      );
       const linesData = response.data.data
         .filter(
           (line) =>
@@ -346,13 +390,16 @@ const TeamLeadDashboard = () => {
           name: line.line_number,
           pidId: line.pid_id.toString(),
         }));
-      console.log(`Fetched lines for project ${selectedProject}:`, linesData);
+      console.log(
+        `Fetched lines for project ${selectedProject}, area ${selectedArea}:`,
+        linesData
+      );
       setLines(linesData);
       setSelectedLines((prev) =>
         prev.filter((lineId) => linesData.some((line) => line.id === lineId))
       );
       if (linesData.length === 0) {
-        toast.info("No unassigned lines available for this project.");
+        toast.info("No unassigned lines available for this project and area.");
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -362,11 +409,13 @@ const TeamLeadDashboard = () => {
       );
       setLines([]);
       setSelectedLines([]);
+    } finally {
+      setIsLoadingLines(false);
     }
   };
 
   const fetchEquipment = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedArea) return;
     try {
       const response = await axios.get<{
         data: {
@@ -375,7 +424,7 @@ const TeamLeadDashboard = () => {
           area_id?: number;
           project_id: number;
         }[];
-      }>(`${API_URL}/equipment`, getAuthHeaders());
+      }>(`${API_URL}/equipment?areaId=${selectedArea}`, getAuthHeaders());
       const equipmentData = response.data.data
         .filter((equip) => equip.project_id.toString() === selectedProject)
         .filter(
@@ -399,7 +448,9 @@ const TeamLeadDashboard = () => {
         )
       );
       if (equipmentData.length === 0) {
-        toast.info("No unassigned equipment available for this project.");
+        toast.info(
+          "No unassigned equipment available for this project and area."
+        );
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -479,7 +530,6 @@ const TeamLeadDashboard = () => {
             })
             .filter((item) => item !== null);
 
-          // Add lines property as required by Task type
           return {
             id: task.id.toString(),
             type: task.type,
@@ -496,9 +546,9 @@ const TeamLeadDashboard = () => {
             comments: uniqueComments,
             pidNumber: task.pid_number ?? "N/A",
             projectName: task.project_name ?? "Unknown",
-            areaNumber: task.area_name ?? "N/A", // Already correct
+            areaNumber: task.area_name ?? "N/A",
             description: task.description || "",
-            lines: task.lines || [], // <-- Ensure lines property exists
+            lines: task.lines || [],
           };
         });
 
@@ -529,7 +579,6 @@ const TeamLeadDashboard = () => {
       );
       const data = response.data.data;
 
-      // Map project_id to project_name using the projects array
       const mapProjectName = (items: any[]) =>
         items.map((item) => ({
           ...item,
@@ -565,6 +614,7 @@ const TeamLeadDashboard = () => {
       throw axiosError;
     }
   };
+
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
     setSelectedUserId(userId);
     setLoadingItems(true);
@@ -625,20 +675,29 @@ const TeamLeadDashboard = () => {
   };
 
   const handleAssigneeChange = (value: string) => {
-    console.log("Selected assignee:", value); // Add logging for debugging
+    console.log("Selected assignee:", value);
     setAssignee(value);
   };
 
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
       fetchProjects();
-      fetchTeamMembers(); // Fetch team members on mount
+      fetchTeamMembers();
       setGeneralMessage(getRandomMessage("general"));
     }
   }, [isAuthenticated, user, token]);
 
   useEffect(() => {
     if (selectedProject) {
+      fetchAreas();
+    } else {
+      setAreas([]);
+      setSelectedArea("");
+    }
+  }, [selectedProject]);
+
+  useEffect(() => {
+    if (selectedProject && selectedArea) {
       Promise.all([
         fetchPIDs(),
         fetchLines(),
@@ -649,9 +708,15 @@ const TeamLeadDashboard = () => {
         console.error("Error fetching dashboard data:", error);
         toast.error("Failed to load dashboard data");
       });
+    } else {
+      setPIDs([]);
+      setLines([]);
+      setEquipment([]);
+      setNonInlineInstruments([]);
+      setTasks([]);
     }
-  }, [selectedProject]);
-
+  }, [selectedProject, selectedArea]);
+  
   useEffect(() => {
     const upvLines: string[] = [];
     const upvEquipment: string[] = [];
@@ -727,8 +792,8 @@ const TeamLeadDashboard = () => {
   };
 
   const handleAssign = async () => {
-    if (!taskType || !assignee || !selectedProject) {
-      toast.error("Please select task type, assignee, and project");
+    if (!taskType || !assignee || !selectedProject || !selectedArea) {
+      toast.error("Please select task type, assignee, project, and area");
       return;
     }
 
@@ -943,10 +1008,8 @@ const TeamLeadDashboard = () => {
       const newTask = {
         type: taskType,
         assigneeId,
-        isComplex,
-        projectName: project.name,
         projectId: parseInt(selectedProject),
-        items: taskType === "Misc" ? [] : selectedItems,
+        areaId: parseInt(selectedArea),
         description: taskType === "Misc" ? description : undefined,
       };
       console.log(
@@ -959,7 +1022,7 @@ const TeamLeadDashboard = () => {
         newTask,
         authHeaders
       );
-      const taskId = response.data.data.id; // Assuming the response includes the new task ID
+      const taskId = response.data.data.id;
       setSubmissionProgress(50);
 
       if (assignmentType === "Line" && taskType !== "Misc") {
@@ -1023,7 +1086,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Handler for group select count change
   const handleGroupSelectCountChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -1041,7 +1103,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Handler for group selection of PIDs
   const handlePIDCheckboxChange = (
     pidId: string,
     index: number,
@@ -1075,7 +1136,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Handler for group selection of Lines
   const handleLineCheckboxChange = (
     lineId: string,
     index: number,
@@ -1109,7 +1169,6 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  // Handler for group selection of Equipment
   const handleEquipmentCheckboxChange = (
     equipId: string,
     index: number,
@@ -1152,7 +1211,6 @@ const TeamLeadDashboard = () => {
       return;
     }
 
-    // Define CSV headers
     const headers = [
       "Task ID",
       "Task Type",
@@ -1164,7 +1222,6 @@ const TeamLeadDashboard = () => {
       "Comments",
     ];
 
-    // Map tasks to CSV rows
     const csvRows = tasks.map((task) => {
       const lineItems = task.items.filter((item) => item.type === "Line");
       const completedLines = lineItems.filter((item) => item.completed).length;
@@ -1172,7 +1229,6 @@ const TeamLeadDashboard = () => {
       const completedTotal =
         lineItems.length > 0 ? `${completedLines} / ${totalLines}` : "N/A";
 
-      // Format comments into a single string
       const commentsString =
         task.comments.length > 0
           ? task.comments
@@ -1208,16 +1264,14 @@ const TeamLeadDashboard = () => {
               timeStyle: "short",
             })
           : "Not Completed",
-        `"${commentsString.replace(/"/g, '""')}"`, // Escape quotes in comments
+        `"${commentsString.replace(/"/g, '""')}"`,
       ];
     });
 
-    // Combine headers and rows
     const csvContent = [headers, ...csvRows]
       .map((row) => row.join(","))
       .join("\n");
 
-    // Create a Blob and download the file
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1235,12 +1289,12 @@ const TeamLeadDashboard = () => {
   };
 
   const fetchNonInlineInstruments = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || !selectedArea) return;
     try {
       const response = await axios.get<{
         data: { id: number; instrument_tag: string; description: string }[];
       }>(
-        `${API_URL}/non-inline-instruments/unassigned/${selectedProject}`,
+        `${API_URL}/non-inline-instruments/unassigned/${selectedProject}?areaId=${selectedArea}`,
         getAuthHeaders()
       );
       const instrumentsData = response.data.data.map((instrument) => ({
@@ -1260,7 +1314,7 @@ const TeamLeadDashboard = () => {
       );
       if (instrumentsData.length === 0) {
         toast.info(
-          "No unassigned non-inline instruments available for this project."
+          "No unassigned non-inline instruments available for this project and area."
         );
       }
     } catch (error) {
@@ -1283,6 +1337,8 @@ const TeamLeadDashboard = () => {
     (member) => member.id === selectedUserId
   );
   const userName = selectedUser ? selectedUser.name : "";
+  const selectedAreaName =
+    areas.find((area) => area.id === selectedArea)?.name || "N/A";
 
   return (
     <div className="min-h-screen">
@@ -1322,6 +1378,32 @@ const TeamLeadDashboard = () => {
                         {project.name}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Area</label>
+                <Select
+                  value={selectedArea}
+                  onValueChange={setSelectedArea}
+                  disabled={!selectedProject || areas.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select area" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {areas.length === 0 ? (
+                      <div className="p-2 text-sm text-gray-500">
+                        No areas available
+                      </div>
+                    ) : (
+                      areas.map((area) => (
+                        <SelectItem key={area.id} value={area.id}>
+                          {area.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1429,7 +1511,11 @@ const TeamLeadDashboard = () => {
                 <Button
                   onClick={handleAssign}
                   disabled={
-                    !taskType || !assignee || isSubmitting || !selectedProject
+                    !taskType ||
+                    !assignee ||
+                    isSubmitting ||
+                    !selectedProject ||
+                    !selectedArea
                   }
                   className="w-full"
                 >
@@ -1461,12 +1547,11 @@ const TeamLeadDashboard = () => {
                       {assignmentType === "PID"
                         ? "P&IDs"
                         : assignmentType === "Line"
-                        ? "Lines"
+                        ? `Lines (Area: ${selectedAreaName})`
                         : assignmentType === "Equipment"
                         ? "Equipment"
                         : "Non-inline Instruments"}
                     </h3>
-                    {/* Group Select Control */}
                     <div className="mb-4 flex items-center">
                       <label
                         htmlFor="groupSelectCount"
@@ -1487,7 +1572,7 @@ const TeamLeadDashboard = () => {
                             ? lines.length
                             : assignmentType === "Equipment"
                             ? equipment.length
-                            : nonInlineInstruments.length // Add support for NonInlineInstrument
+                            : nonInlineInstruments.length
                         }
                         className="border rounded px-2 py-1 w-20"
                       />
@@ -1525,12 +1610,20 @@ const TeamLeadDashboard = () => {
                           </div>
                         ))}
 
-                      {assignmentType === "Line" && lines.length === 0 && (
+                      {assignmentType === "Line" && isLoadingLines && (
                         <p className="text-sm text-gray-500">
-                          No available lines
+                          Loading lines for area {selectedAreaName}...
                         </p>
                       )}
                       {assignmentType === "Line" &&
+                        !isLoadingLines &&
+                        lines.length === 0 && (
+                          <p className="text-sm text-gray-500">
+                            No available lines for area {selectedAreaName}
+                          </p>
+                        )}
+                      {assignmentType === "Line" &&
+                        !isLoadingLines &&
                         lines.map((line, index) => (
                           <div
                             key={line.id}
@@ -1582,7 +1675,6 @@ const TeamLeadDashboard = () => {
                           </div>
                         ))}
 
-                      {/* Add NonInlineInstrument selection here */}
                       {assignmentType === "NonInlineInstrument" && (
                         <div className="max-h-60 overflow-y-auto space-y-2">
                           {nonInlineInstruments.length === 0 && (
@@ -1735,7 +1827,6 @@ const TeamLeadDashboard = () => {
           taskType={selectedTaskType}
           itemType={selectedItemType}
         />
-        {/* Modal for Comments */}
         <Modal
           isOpen={commentsModalIsOpen}
           onRequestClose={closeCommentsModal}

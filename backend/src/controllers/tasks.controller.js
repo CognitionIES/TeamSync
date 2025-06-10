@@ -22,14 +22,16 @@ const getTasks = async (req, res) => {
         SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
                t.created_at, t.updated_at, t.completed_at, t.project_id, 
                t.description, u.name as assignee, p.name as project_name, 
-               p2.pid_number, a.name as area_name
+               COALESCE((
+                 SELECT pid_number 
+                 FROM pids 
+                 WHERE id = (SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1)
+               ), 'N/A') as pid_number, 
+               COALESCE(a.name, 'N/A') as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id 
         LEFT JOIN projects p ON t.project_id = p.id
-        LEFT JOIN pids p2 ON p2.id = (
-          SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
-        )
-        LEFT JOIN areas a ON p2.area_id = a.id
+        LEFT JOIN areas a ON t.area_id = a.id
         WHERE t.assignee_id = $1`;
       params = [req.params.userId];
     } else if (role === "Team Lead") {
@@ -37,15 +39,17 @@ const getTasks = async (req, res) => {
         SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
                t.created_at, t.updated_at, t.completed_at, t.project_id, 
                t.description, u.name as assignee, p.name as project_name, 
-               p2.pid_number, a.name as area_name
+               COALESCE((
+                 SELECT pid_number 
+                 FROM pids 
+                 WHERE id = (SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1)
+               ), 'N/A') as pid_number, 
+               COALESCE(a.name, 'N/A') as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id 
         JOIN team_members tm ON t.assignee_id = tm.member_id 
         LEFT JOIN projects p ON t.project_id = p.id
-        LEFT JOIN pids p2 ON p2.id = (
-          SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
-        )
-        LEFT JOIN areas a ON p2.area_id = a.id
+        LEFT JOIN areas a ON t.area_id = a.id
         WHERE tm.lead_id = $1`;
       params = [userId];
     } else if (role === "Project Manager" || role === "Admin") {
@@ -53,28 +57,32 @@ const getTasks = async (req, res) => {
         SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
                t.created_at, t.updated_at, t.completed_at, t.project_id, 
                t.description, u.name as assignee, p.name as project_name, 
-               p2.pid_number, a.name as area_name
+               COALESCE((
+                 SELECT pid_number 
+                 FROM pids 
+                 WHERE id = (SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1)
+               ), 'N/A') as pid_number, 
+               COALESCE(a.name, 'N/A') as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id
         LEFT JOIN projects p ON t.project_id = p.id
-        LEFT JOIN pids p2 ON p2.id = (
-          SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
-        )
-        LEFT JOIN areas a ON p2.area_id = a.id`;
+        LEFT JOIN areas a ON t.area_id = a.id`;
       params = [];
     } else {
       query = `
         SELECT t.id, t.type, t.assignee_id, t.status, t.is_complex, t.progress, 
                t.created_at, t.updated_at, t.completed_at, t.project_id, 
                t.description, u.name as assignee, p.name as project_name, 
-               p2.pid_number, a.name as area_name
+               COALESCE((
+                 SELECT pid_number 
+                 FROM pids 
+                 WHERE id = (SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1)
+               ), 'N/A') as pid_number, 
+               COALESCE(a.name, 'N/A') as area_name
         FROM tasks t 
         JOIN users u ON t.assignee_id = u.id 
         LEFT JOIN projects p ON t.project_id = p.id
-        LEFT JOIN pids p2 ON p2.id = (
-          SELECT item_id FROM task_items WHERE task_id = t.id AND item_type = 'PID' LIMIT 1
-        )
-        LEFT JOIN areas a ON p2.area_id = a.id
+        LEFT JOIN areas a ON t.area_id = a.id
         WHERE t.assignee_id = $1`;
       params = [userId];
     }
@@ -172,7 +180,6 @@ const getTasks = async (req, res) => {
       .json({ message: "Failed to fetch tasks", error: error.message });
   }
 };
-
 // @desc    Create a new task
 // @route   POST /api/tasks
 // @desc    Create a new task
@@ -184,21 +191,15 @@ const createTask = async (req, res) => {
       return res.status(400).json({ message: "Invalid request body" });
     }
 
-    const { type, assigneeId, isComplex, items, projectId } = req.body;
-    const description =
-      typeof req.body.description === "string" ? req.body.description : "";
+    const { type, assigneeId, projectId, areaId, description } = req.body;
     console.log("Received task data:", req.body);
     console.log("Description value before validation:", description);
 
-    if (!type || !assigneeId || !projectId) {
-      return res
-        .status(400)
-        .json({ message: "Task type, assignee, and project ID are required" });
-    }
-    if (type !== "Misc" && (!items || items.length === 0)) {
-      return res
-        .status(400)
-        .json({ message: "Items are required for this task type" });
+    // Validate input
+    if (!type || !assigneeId || !projectId || !areaId) {
+      return res.status(400).json({
+        message: "Task type, assignee, project ID, and area ID are required",
+      });
     }
     if (type === "Misc") {
       if (
@@ -214,117 +215,254 @@ const createTask = async (req, res) => {
       }
     }
 
-    await db.query("BEGIN");
+    // Role-based access control
+    if (!["Team Lead", "Admin", "Project Manager"].includes(req.user.role)) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to create tasks" });
+    }
 
+    // Validate area belongs to the project
+    const { rows: areaCheck } = await db.query(
+      "SELECT id FROM areas WHERE id = $1 AND project_id = $2",
+      [areaId, projectId]
+    );
+    if (areaCheck.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Invalid area_id for the given project" });
+    }
+
+    // Validate assignee exists
     const { rows: userRows } = await db.query(
-      "SELECT id FROM users WHERE id = $1",
+      "SELECT id, name FROM users WHERE id = $1",
       [assigneeId]
     );
     if (userRows.length === 0) {
-      await db.query("ROLLBACK");
       return res.status(400).json({ message: "Assignee not found" });
     }
 
+    // Validate project exists
     const { rows: projectRows } = await db.query(
-      "SELECT id FROM projects WHERE id = $1",
+      "SELECT id, name FROM projects WHERE id = $1",
       [projectId]
     );
     if (projectRows.length === 0) {
-      await db.query("ROLLBACK");
       return res.status(400).json({ message: "Project not found" });
     }
 
-    console.log("Creating task in database with description:", description);
+    // Validate assignee belongs to the team (for Team Lead)
+    if (req.user.role === "Team Lead") {
+      const { rows: teamCheck } = await db.query(
+        "SELECT 1 FROM team_members WHERE member_id = $1 AND lead_id = $2",
+        [assigneeId, req.user.id]
+      );
+      if (teamCheck.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "Assignee is not in your team" });
+      }
+    }
+
+    // Begin transaction
+    await db.query("BEGIN");
+
+    // Create the task
     const { rows: taskRows } = await db.query(
-      "INSERT INTO tasks (type, assignee_id, is_complex, status, progress, project_id, description) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+      `
+      INSERT INTO tasks (type, assignee_id, status, is_complex, progress, project_id, area_id, description)
+      VALUES ($1, $2, 'Assigned', false, 0, $3, $4, $5)
+      RETURNING *
+    `,
       [
         type,
         assigneeId,
-        isComplex,
-        "Assigned",
-        0,
         projectId,
+        areaId,
         type === "Misc" ? description : null,
       ]
     );
 
     const task = taskRows[0];
+    let items = [];
 
-    if (type !== "Misc") {
-      for (const item of items) {
-        await db.query(
-          "INSERT INTO task_items (task_id, item_id, item_type, name, completed) VALUES ($1, $2, $3, $4, $5)",
-          [task.id, item.itemId, item.itemType, item.itemName, false]
+    // Assign items based on task type and selected area
+    if (type === "Redline") {
+      // Fetch P&IDs for the selected area
+      const { rows: pids } = await db.query(
+        `
+        SELECT id, pid_number
+        FROM pids
+        WHERE project_id = $1 AND area_id = $2
+      `,
+        [projectId, areaId]
+      );
+
+      // Insert P&IDs into task_items
+      for (const pid of pids) {
+        const { rows: itemRows } = await db.query(
+          `
+          INSERT INTO task_items (task_id, item_id, item_type, name, completed)
+          VALUES ($1, $2, 'PID', $3, false)
+          RETURNING id, item_id, item_type, name, completed, created_at
+        `,
+          [task.id, pid.id, pid.pid_number]
         );
+        items.push(itemRows[0]);
       }
 
-      if (type === "Redline") {
-        const pidItem = items.find((item) => item.itemType === "PID");
-        if (pidItem) {
-          const { rows: lines } = await db.query(
-            "SELECT id FROM lines WHERE pid_id = $1",
-            [pidItem.itemId]
+      // Fetch lines for the selected P&IDs
+      const pidIds = pids.map((pid) => pid.id);
+      if (pidIds.length > 0) {
+        const { rows: lines } = await db.query(
+          `
+          SELECT id, line_number
+          FROM lines
+          WHERE pid_id = ANY($1::int[])
+        `,
+          [pidIds]
+        );
+
+        // Insert lines into task_items and task_lines
+        for (const line of lines) {
+          const { rows: itemRows } = await db.query(
+            `
+            INSERT INTO task_items (task_id, item_id, item_type, name, completed)
+            VALUES ($1, $2, 'Line', $3, false)
+            RETURNING id, item_id, item_type, name, completed, created_at
+          `,
+            [task.id, line.id, line.line_number]
           );
-          for (const line of lines) {
-            await db.query(
-              "INSERT INTO task_lines (task_id, line_id, completed) VALUES ($1, $2, $3)",
-              [task.id, line.id, false]
-            );
-          }
+          items.push(itemRows[0]);
+
+          await db.query(
+            `
+            INSERT INTO task_lines (task_id, line_id, completed)
+            VALUES ($1, $2, false)
+          `,
+            [task.id, line.id]
+          );
         }
       }
+    } else if (type === "UPV" || type === "QC") {
+      // Fetch equipment for the selected area
+      const { rows: equipment } = await db.query(
+        `
+        SELECT id, equipment_number
+        FROM equipment
+        WHERE project_id = $1 AND area_id = $2
+      `,
+        [projectId, areaId]
+      );
+
+      for (const equip of equipment) {
+        const { rows: itemRows } = await db.query(
+          `
+          INSERT INTO task_items (task_id, item_id, item_type, name, completed)
+          VALUES ($1, $2, 'Equipment', $3, false)
+          RETURNING id, item_id, item_type, name, completed, created_at
+        `,
+          [task.id, equip.id, equip.equipment_number]
+        );
+        items.push(itemRows[0]);
+      }
+
+      // Fetch lines via P&IDs in the selected area
+      const { rows: pids } = await db.query(
+        `
+        SELECT id
+        FROM pids
+        WHERE project_id = $1 AND area_id = $2
+      `,
+        [projectId, areaId]
+      );
+
+      const pidIds = pids.map((pid) => pid.id);
+      if (pidIds.length > 0) {
+        const { rows: lines } = await db.query(
+          `
+          SELECT id, line_number
+          FROM lines
+          WHERE pid_id = ANY($1::int[])
+        `,
+          [pidIds]
+        );
+
+        for (const line of lines) {
+          const { rows: itemRows } = await db.query(
+            `
+            INSERT INTO task_items (task_id, item_id, item_type, name, completed)
+            VALUES ($1, $2, 'Line', $3, false)
+            RETURNING id, item_id, item_type, name, completed, created_at
+          `,
+            [task.id, line.id, line.line_number]
+          );
+          items.push(itemRows[0]);
+        }
+      }
+    } else if (type === "Misc") {
+      // Misc tasks don't require items, but area_id is stored
     }
 
+    // Log the task creation in audit_logs
     const assigneeName = userRows[0]?.name || "Unknown";
+    const projectName = projectRows[0]?.name || "Unknown";
     const taskName =
-      type === "Misc"
-        ? `Misc Task`
-        : items.map((item) => `${item.itemType} ${item.itemName}`).join(", ");
+      type === "Misc" ? `Misc Task` : `${type} Task for Area ID ${areaId}`;
     if (req.user) {
       await db.query(
-        "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
+        `
+        INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp, project_name, team_name)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
         [
           "Task Assignment",
-          `${type} ${taskName}`,
+          taskName,
           req.user.id,
-          `${type} Task ${taskName}`,
+          `${type} Task assigned to ${assigneeName} in project ${projectName}`,
           new Date(),
+          projectName,
+          req.user.name || "Unknown",
         ]
       );
     }
 
+    // Commit transaction
     await db.query("COMMIT");
 
-    const { rows: detailedTasks } = await db.query(
-      `
-      SELECT t.*, u.name as assignee, p.name as project_name
-      FROM tasks t 
-      JOIN users u ON t.assignee_id = u.id 
-      LEFT JOIN projects p ON t.project_id = p.id
-      WHERE t.id = $1`,
-      [task.id]
-    );
+    // Format the response
+    const formattedItems = items.map((item) => ({
+      id: item.id.toString(),
+      item_id: item.item_id.toString(),
+      item_type: item.item_type,
+      name: item.name,
+      completed: item.completed,
+      created_at: item.created_at ? item.created_at.toISOString() : null,
+    }));
 
-    const detailedTask = detailedTasks[0];
-    detailedTask.items =
-      type === "Misc"
-        ? []
-        : items.map((item) => ({
-            id: item.itemId,
-            item_id: item.itemId,
-            item_type: item.itemType,
-            name: item.itemName, // Changed from item_name to name
-            completed: false,
-          }));
-    detailedTask.comments = [];
+    const detailedTask = {
+      ...task,
+      id: task.id.toString(),
+      assignee_id: task.assignee_id.toString(),
+      project_id: task.project_id.toString(),
+      area_id: task.area_id.toString(),
+      created_at: task.created_at ? task.created_at.toISOString() : null,
+      updated_at: task.updated_at ? task.updated_at.toISOString() : null,
+      completed_at: task.completed_at ? task.completed_at.toISOString() : null,
+      assignee: assigneeName,
+      project_name: projectName,
+      items: formattedItems,
+      comments: [],
+    };
 
     res.status(201).json({ data: detailedTask });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("Error creating task:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to create task", error: error.message });
+    console.error("Error creating task:", error.message, error.stack);
+    res.status(500).json({
+      message: "Failed to create task",
+      error: error.message,
+    });
   }
 };
 

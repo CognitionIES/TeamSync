@@ -9,6 +9,7 @@ const { protect } = require("../middleware/auth");
 router.get("/unassigned/:projectId", protect, async (req, res) => {
   try {
     const { projectId } = req.params;
+    const { areaId } = req.query; // Extract areaId from query parameters
 
     const projectIdNum = parseInt(projectId, 10);
     if (isNaN(projectIdNum)) {
@@ -31,15 +32,27 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    const { rows } = await db.query(
-      `
-      SELECT lines.*, pids.pid_number AS pid_number
+    let query = `
+      SELECT lines.*, pids.pid_number AS pid_number, pids.area_id
       FROM lines
       JOIN pids ON lines.pid_id = pids.id
       WHERE lines.project_id = $1 AND lines.assigned_to_id IS NULL
-      `,
-      [projectIdNum]
-    );
+    `;
+    let queryParams = [projectIdNum];
+
+    // Add area filter if areaId is provided
+    if (areaId) {
+      const areaIdNum = parseInt(areaId, 10);
+      if (isNaN(areaIdNum)) {
+        return res
+          .status(400)
+          .json({ message: "areaId must be a valid number" });
+      }
+      query += ` AND pids.area_id = $2`;
+      queryParams.push(areaIdNum);
+    }
+
+    const { rows } = await db.query(query, queryParams);
 
     if (rows.length === 0) {
       return res
@@ -78,12 +91,10 @@ router.post("/batch", protect, async (req, res) => {
 
       if (!line_number || !pid_id || !project_id) {
         await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            message:
-              "Line number, P&ID ID, and project ID are required for each line",
-          });
+        return res.status(400).json({
+          message:
+            "Line number, P&ID ID, and project ID are required for each line",
+        });
       }
 
       const projectIdNum = parseInt(project_id, 10);
@@ -114,11 +125,9 @@ router.post("/batch", protect, async (req, res) => {
       );
       if (pidCheck.rows.length === 0) {
         await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            message: "Invalid P&ID ID for this project in one of the lines",
-          });
+        return res.status(400).json({
+          message: "Invalid P&ID ID for this project in one of the lines",
+        });
       }
 
       const { rows } = await db.query(
@@ -390,12 +399,10 @@ router.get("/assigned", protect, async (req, res) => {
     res.status(200).json({ data: rows });
   } catch (error) {
     console.error("Error fetching assigned lines:", error.message, error.stack);
-    res
-      .status(500)
-      .json({
-        message: "Failed to fetch assigned lines",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to fetch assigned lines",
+      error: error.message,
+    });
   }
 });
 
