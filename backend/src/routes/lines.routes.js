@@ -9,7 +9,6 @@ const { protect } = require("../middleware/auth");
 router.get("/unassigned/:projectId", protect, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { areaId } = req.query; // Extract areaId from query parameters
 
     const projectIdNum = parseInt(projectId, 10);
     if (isNaN(projectIdNum)) {
@@ -32,27 +31,15 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    let query = `
-      SELECT lines.*, pids.pid_number AS pid_number, pids.area_id
+    const { rows } = await db.query(
+      `
+      SELECT lines.*, pids.pid_number AS pid_number
       FROM lines
       JOIN pids ON lines.pid_id = pids.id
       WHERE lines.project_id = $1 AND lines.assigned_to_id IS NULL
-    `;
-    let queryParams = [projectIdNum];
-
-    // Add area filter if areaId is provided
-    if (areaId) {
-      const areaIdNum = parseInt(areaId, 10);
-      if (isNaN(areaIdNum)) {
-        return res
-          .status(400)
-          .json({ message: "areaId must be a valid number" });
-      }
-      query += ` AND pids.area_id = $2`;
-      queryParams.push(areaIdNum);
-    }
-
-    const { rows } = await db.query(query, queryParams);
+      `,
+      [projectIdNum]
+    );
 
     if (rows.length === 0) {
       return res
