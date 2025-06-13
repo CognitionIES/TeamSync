@@ -13,7 +13,7 @@ router.get("/", protect, async (req, res) => {
     console.log("User role:", req.user.role);
     console.log("User ID:", req.user.id);
 
-    const { project, team } = req.query; // Extract query parameters for filtering
+    const { project, team } = req.query;
 
     if (req.user.role === "Admin") {
       console.log("Fetching all tasks for Admin...");
@@ -49,13 +49,11 @@ router.get("/", protect, async (req, res) => {
       const values = [];
       const conditions = [];
 
-      // Apply project filter using project name
       if (project) {
         conditions.push(`p.name = $${values.length + 1}`);
         values.push(project);
       }
 
-      // Apply team filter
       if (team) {
         query += `
           JOIN team_members tm ON t.assignee_id = tm.member_id
@@ -177,7 +175,7 @@ LEFT JOIN users u ON t.assignee_id = u.id
 LEFT JOIN projects p ON t.project_id = p.id
 WHERE t.assignee_id IN (
   SELECT member_id FROM team_members WHERE lead_id = $1
-)
+) OR t.assignee_id = $1
 GROUP BY 
   t.id, 
   t.type, 
@@ -191,7 +189,8 @@ GROUP BY
   t.project_id,
   t.description,
   u.name,
-  p.name        `;
+  p.name
+        `;
         const { rows } = await db.query(query, [req.user.id]);
         console.log("Tasks fetched for Team Lead:", rows);
         res.status(200).json({ data: rows });
@@ -347,9 +346,7 @@ router.patch("/:id/status", protect, async (req, res) => {
     );
 
     if (taskRows.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "Task not found or not assigned to you" });
+      return res.status(404).json({ message: "No Tasks for You!!" });
     }
 
     const task = taskRows[0];

@@ -691,16 +691,19 @@ const TeamLeadDashboard = () => {
   };
 
   const handleAssignmentTypeChange = (value: string) => {
+    console.log("Assignment type changed to:", value); // Add this log
     if (
       value === "PID" ||
       value === "Line" ||
       value === "Equipment" ||
+      value === "NonInlineInstrument" ||
       value === ""
     ) {
       setAssignmentType(value);
       setSelectedPIDs([]);
       setSelectedLines([]);
       setSelectedEquipment([]);
+      setSelectedNonInlineInstruments([]); // Reset non-inline instruments selection
     }
   };
 
@@ -1487,7 +1490,9 @@ const TeamLeadDashboard = () => {
                             ? lines.length
                             : assignmentType === "Equipment"
                             ? equipment.length
-                            : nonInlineInstruments.length // Add support for NonInlineInstrument
+                            : assignmentType === "NonInlineInstrument"
+                            ? nonInlineInstruments.length
+                            : 0 // Fallback // Add support for NonInlineInstrument
                         }
                         className="border rounded px-2 py-1 w-20"
                       />
@@ -1524,7 +1529,6 @@ const TeamLeadDashboard = () => {
                             </label>
                           </div>
                         ))}
-
                       {assignmentType === "Line" && lines.length === 0 && (
                         <p className="text-sm text-gray-500">
                           No available lines
@@ -1552,7 +1556,6 @@ const TeamLeadDashboard = () => {
                             </label>
                           </div>
                         ))}
-
                       {assignmentType === "Equipment" &&
                         equipment.length === 0 && (
                           <p className="text-sm text-gray-500">
@@ -1581,7 +1584,6 @@ const TeamLeadDashboard = () => {
                             </label>
                           </div>
                         ))}
-
                       {/* Add NonInlineInstrument selection here */}
                       {assignmentType === "NonInlineInstrument" && (
                         <div className="max-h-60 overflow-y-auto space-y-2">
@@ -1600,7 +1602,15 @@ const TeamLeadDashboard = () => {
                                 checked={selectedNonInlineInstruments.includes(
                                   instrument.id
                                 )}
-                                onCheckedChange={(checked) => {
+                                onCheckedChange={(checked: boolean) => {
+                                  console.log(
+                                    `Checkbox for instrument ${instrument.id} changed to:`,
+                                    checked
+                                  ); // Add this log
+                                  console.log(
+                                    "Current selectedNonInlineInstruments:",
+                                    selectedNonInlineInstruments
+                                  );
                                   if (groupSelectCount > 1) {
                                     const startIndex = index;
                                     const endIndex = Math.min(
@@ -1649,6 +1659,10 @@ const TeamLeadDashboard = () => {
                                       );
                                     }
                                   }
+                                  console.log(
+                                    "Updated selectedNonInlineInstruments:",
+                                    selectedNonInlineInstruments
+                                  );
                                 }}
                               />
                               <label
@@ -1661,7 +1675,7 @@ const TeamLeadDashboard = () => {
                             </div>
                           ))}
                         </div>
-                      )}
+                      )}{" "}
                     </div>
                   </div>
                 )

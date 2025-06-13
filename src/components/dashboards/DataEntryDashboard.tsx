@@ -392,7 +392,6 @@ const DataEntryDashboard = () => {
       setSubmissionProgress(0);
     }
   };
-
   const onNonInlineInstrumentSubmit = async (values: any) => {
     if (!isProjectSelected) {
       toast.error("Please select a project first");
@@ -418,7 +417,7 @@ const DataEntryDashboard = () => {
       const pidCheckResponse = await axios.get(
         `${API_URL}/pids?projectId=${selectedProject}&pidNumber=${encodeURIComponent(
           values.pidNumber
-        )}`,
+        )}&areaId=${values.areaId}`,
         getAuthHeaders()
       );
 
@@ -436,8 +435,16 @@ const DataEntryDashboard = () => {
           },
           getAuthHeaders()
         );
+        if (!pidResponse.data.data?.id) {
+          throw new Error("Failed to create P&ID: No ID returned");
+        }
         pidId = pidResponse.data.data.id;
       }
+
+      if (!pidId) {
+        throw new Error("P&ID ID is undefined after creation");
+      }
+
       setSubmissionProgress(20);
 
       // Step 2: Batch create non-inline instruments
@@ -446,31 +453,48 @@ const DataEntryDashboard = () => {
         .map((instrument: string) => instrument.trim())
         .filter((instrument: string) => instrument);
 
-      if (instrumentList.length > 0) {
-        const instrumentData = instrumentList.map((instrumentTag: string) => ({
-          instrument_tag: instrumentTag,
-          description: `Non-Inline Instrument ${instrumentTag}`,
-          area_id: values.areaId,
-          pid_id: pidId,
-          project_id: selectedProject,
-        }));
-
-        await axios.post(
-          `${API_URL}/non-inline-instruments/batch`,
-          { instruments: instrumentData },
-          getAuthHeaders()
-        );
-        setSubmissionProgress(100);
-      } else {
-        setSubmissionProgress(100);
+      if (instrumentList.length === 0) {
+        toast.error("Please provide at least one non-inline instrument");
+        setSubmissionProgress(0);
+        return;
       }
+
+      const instrumentData = instrumentList.map((instrumentTag: string) => {
+        const description = `Non-Inline Instrument ${instrumentTag}`; // Ensure description is always a string
+        return {
+          instrumentTag,
+          description: description || "Default Description", // Fallback in case description is falsy
+          areaId: values.areaId,
+          pidId: pidId,
+        };
+      });
+
+      console.log("Instrument Data being sent:", instrumentData); // Log the payload for debugging
+
+      await axios.post(
+        `${API_URL}/non-inline-instruments/batch`,
+        { instruments: instrumentData },
+        getAuthHeaders()
+      );
+      setSubmissionProgress(100);
 
       toast.success(`Non-Inline Instruments added successfully`);
       nonInlineInstrumentForm.reset();
     } catch (error: any) {
       console.error("Error submitting non-inline instruments:", error);
-      const errorMessage =
-        error.response?.data?.message || "Failed to add non-inline instruments";
+      console.log("Full error response:", error.response);
+      let errorMessage =
+        "Failed to add non-inline instruments. Please try again.";
+      if (error.response?.status === 404) {
+        errorMessage =
+          "Non-inline instruments endpoint not found. Please contact support.";
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.message.includes("P&ID")) {
+        errorMessage = error.message;
+      }
       toast.error(errorMessage);
     } finally {
       setIsSubmittingPID(false);
@@ -484,7 +508,6 @@ const DataEntryDashboard = () => {
 
   return (
     <div className="min-h-screen">
-      
       <Navbar onRefresh={handleRefresh} />
       <BackgroundEffect />
       <div className="container mx-auto p-4 sm:p-6">

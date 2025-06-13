@@ -3,29 +3,66 @@ const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
 
-// @desc    Get all P&IDs
-// @route   GET /api/pids
+// @desc    Get P&IDs with filters
+// @route   GET /api/pids?projectId=<projectId>&pidNumber=<pidNumber>&areaId=<areaId>
 // @access  Private
 router.get("/", protect, async (req, res) => {
   try {
-    const { projectId } = req.query;
+    const { projectId, pidNumber, areaId } = req.query;
     let query = "SELECT * FROM pids";
     const values = [];
+    let paramIndex = 1;
+
+    const conditions = [];
 
     if (projectId) {
       const projectIdNum = parseInt(projectId, 10);
       if (isNaN(projectIdNum)) {
-        return res.status(400).json({ message: "projectId must be a valid number" });
+        return res
+          .status(400)
+          .json({ message: "projectId must be a valid number" });
       }
-      query += " WHERE project_id = $1";
+      conditions.push(`project_id = $${paramIndex}`);
       values.push(projectIdNum);
+      paramIndex++;
+    }
+
+    if (pidNumber) {
+      conditions.push(`pid_number = $${paramIndex}`);
+      values.push(pidNumber);
+      paramIndex++;
+    }
+
+    if (areaId) {
+      const areaIdNum = parseInt(areaId, 10);
+      if (isNaN(areaIdNum)) {
+        return res
+          .status(400)
+          .json({ message: "areaId must be a valid number" });
+      }
+      conditions.push(`area_id = $${paramIndex}`);
+      values.push(areaIdNum);
+      paramIndex++;
+    }
+
+    if (conditions.length > 0) {
+      query += " WHERE " + conditions.join(" AND ");
     }
 
     const { rows } = await db.query(query, values);
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching P&IDs:", error.stack);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error fetching P&IDs:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+    });
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 
@@ -35,13 +72,27 @@ router.get("/", protect, async (req, res) => {
 router.get("/area/:areaId", protect, async (req, res) => {
   try {
     const { areaId } = req.params;
+    const areaIdNum = parseInt(areaId, 10);
+    if (isNaN(areaIdNum)) {
+      return res.status(400).json({ message: "areaId must be a valid number" });
+    }
+
     const { rows } = await db.query("SELECT * FROM pids WHERE area_id = $1", [
-      areaId,
+      areaIdNum,
     ]);
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching P&IDs for area:", error.stack);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error fetching P&IDs for area:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+    });
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 
@@ -96,32 +147,58 @@ router.post("/", protect, async (req, res) => {
       }
     }
 
+    // Verify user exists for audit logging
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        message: "User authentication failed: No user ID found",
+      });
+    }
+
+    const userCheck = await db.query("SELECT id FROM users WHERE id = $1", [
+      req.user.id,
+    ]);
+    if (userCheck.rows.length === 0) {
+      return res.status(400).json({
+        message: `User ID ${req.user.id} does not exist in the users table`,
+      });
+    }
+
     const { rows } = await db.query(
       "INSERT INTO pids (pid_number, description, area_id, project_id, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [pid_number, description, areaIdNum, projectIdNum, new Date()]
+      [
+        pid_number,
+        description || `P&ID ${pid_number}`,
+        areaIdNum,
+        projectIdNum,
+        new Date(),
+      ]
     );
 
     // Log the action in audit logs
-    if (req.user) {
-      console.log("Logging audit for user:", req.user.id); // Fixed in previous step
-      await db.query(
-        "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
-        [
-          "P&ID Creation",
-          pid_number,
-          req.user.id, // Fixed in previous step
-          `P&ID ${pid_number}`,
-          new Date(),
-        ]
-      );
-    } else {
-      console.warn("No user found for audit logging");
-    }
+    await db.query(
+      "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
+      [
+        "P&ID Creation",
+        pid_number,
+        req.user.id,
+        `P&ID ${pid_number}`,
+        new Date(),
+      ]
+    );
 
     res.status(201).json({ data: rows[0] });
   } catch (error) {
-    console.error("Error creating P&ID:", error.stack);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error creating P&ID:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+    });
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 

@@ -224,7 +224,6 @@ const createTask = async (req, res) => {
       await db.query("ROLLBACK");
       return res.status(400).json({ message: "Assignee not found" });
     }
-
     const { rows: projectRows } = await db.query(
       "SELECT id FROM projects WHERE id = $1",
       [projectId]
