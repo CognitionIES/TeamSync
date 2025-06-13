@@ -76,14 +76,17 @@ router.get("/", protect, async (req, res) => {
       console.log("Tasks fetched for Admin:", rows);
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Project Manager") {
-      console.log("Fetching all tasks for Project Manager...");
-      const query = `
+      console.log("Fetching tasks for Project Manager ID:", req.user.id);
+      try {
+        const query = `
         SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
                t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', ti.id,
-                   'name', ti.name
+                   'item_name', ti.name,
+                   'item_type', ti.item_type,
+                   'completed', ti.completed
                  ))
                  FROM task_items ti
                  WHERE t.id = ti.task_id
@@ -91,29 +94,42 @@ router.get("/", protect, async (req, res) => {
                COALESCE((
                  SELECT json_agg(json_build_object(
                    'id', tc.id,
-                   'text', tc.comment
+                   'user_id', tc.user_id,
+                   'user_name', tc.user_name,
+                   'user_role', tc.user_role,
+                   'comment', tc.comment,
+                   'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                  ))
                  FROM task_comments tc
                  WHERE t.id = tc.task_id
                ), '[]') as comments
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
         WHERE t.assignee_id IN (
-          SELECT member_id
-          FROM team_members
-          WHERE lead_id IN (
-            SELECT member_id
-            FROM team_members
-            WHERE lead_id = $1
-          )
+          SELECT id
+          FROM users
+          WHERE role IN ('Team Lead', 'Team Member')
         )
         GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
                  t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
                  u.name
       `;
-      const { rows } = await db.query(query, [req.user.id]);
-      console.log("Tasks fetched for Project Manager:", rows);
-      res.status(200).json({ data: rows });
+        const { rows } = await db.query(query, []);
+        console.log("Tasks fetched for Project Manager:", rows);
+        res.status(200).json({ data: rows });
+      } catch (error) {
+        console.error("Error fetching tasks for Project Manager:", {
+          message: error.message,
+          stack: error.stack,
+          queryError: error.code,
+          queryDetail: error.detail,
+          queryHint: error.hint,
+        });
+        res
+          .status(500)
+          .json({ message: "Failed to fetch tasks", error: error.message });
+      }
     } else if (req.user.role === "Team Lead") {
       console.log("Fetching tasks for Team Lead ID:", req.user.id);
       try {
