@@ -962,7 +962,7 @@ const TeamLeadDashboard = () => {
         newTask,
         authHeaders
       );
-      const taskId = response.data.data.id; // Assuming the response includes the new task ID
+      const taskId = response.data.data.id;
       setSubmissionProgress(50);
 
       if (assignmentType === "Line" && taskType !== "Misc") {
@@ -979,6 +979,20 @@ const TeamLeadDashboard = () => {
         const instrumentIds = selectedItems.map((item) =>
           parseInt(item.itemId)
         );
+        // Validate instrumentIds
+        const invalidIds = instrumentIds.filter((id) => isNaN(id) || id <= 0);
+        if (invalidIds.length > 0) {
+          throw new Error(
+            `Invalid instrument IDs: ${invalidIds.join(
+              ", "
+            )}. All IDs must be positive integers.`
+          );
+        }
+        console.log("Assigning non-inline instruments with payload:", {
+          instrumentIds,
+          userId: assigneeId,
+          taskId,
+        }); // Add logging
         await axios.put(
           `${API_URL}/non-inline-instruments/assign/batch`,
           { instrumentIds, userId: assigneeId, taskId },
@@ -1025,7 +1039,6 @@ const TeamLeadDashboard = () => {
       setSubmissionProgress(0);
     }
   };
-
   // Handler for group select count change
   const handleGroupSelectCountChange = (
     e: React.ChangeEvent<HTMLInputElement>

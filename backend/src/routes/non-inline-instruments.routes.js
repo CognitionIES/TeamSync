@@ -24,6 +24,7 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
       LEFT JOIN task_items ti ON ni.id = ti.item_id AND ti.item_type = 'NonInlineInstrument'
       WHERE a.project_id = $1
         AND ti.id IS NULL
+        AND ni.assigned_to IS NULL
     `;
     const { rows } = await db.query(query, [projectId]);
     console.log(
@@ -45,8 +46,7 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
       error: error.message,
     });
   }
-});
-// @desc    Batch create non-inline instruments
+}); // @desc    Batch create non-inline instruments
 // @route   POST /api/non-inline-instruments/batch
 // @access  Private
 router.post("/batch", protect, async (req, res) => {
@@ -213,7 +213,7 @@ router.post("/batch", protect, async (req, res) => {
 // @route   PUT /api/non-inline-instruments/assign/batch
 // @access  Private
 router.put("/assign/batch", protect, async (req, res) => {
-  const client = await db.pool.connect(); // Fix: Use db.pool.connect()
+  const client = await db.pool.connect();
   try {
     await client.query("BEGIN");
 
@@ -231,6 +231,19 @@ router.put("/assign/batch", protect, async (req, res) => {
         .json({ message: "Instrument IDs are required and must be an array" });
     }
 
+    // Validate instrumentIds are integers
+    const invalidIds = instrumentIds.filter(
+      (id) => !Number.isInteger(id) || id <= 0
+    );
+    if (invalidIds.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: `Invalid instrument IDs: ${invalidIds.join(
+          ", "
+        )}. All IDs must be positive integers.`,
+      });
+    }
+
     if (!userId) {
       await client.query("ROLLBACK");
       return res.status(400).json({ message: "User ID is required" });
@@ -239,6 +252,21 @@ router.put("/assign/batch", protect, async (req, res) => {
     if (!taskId) {
       await client.query("ROLLBACK");
       return res.status(400).json({ message: "Task ID is required" });
+    }
+
+    // Validate userId and taskId are integers
+    if (!Number.isInteger(userId) || userId <= 0) {
+      await client.query("ROLLBACK");
+      return res
+        .status(400)
+        .json({ message: "User ID must be a positive integer" });
+    }
+
+    if (!Number.isInteger(taskId) || taskId <= 0) {
+      await client.query("ROLLBACK");
+      return res
+        .status(400)
+        .json({ message: "Task ID must be a positive integer" });
     }
 
     // Validate req.user.id
@@ -327,14 +355,14 @@ router.put("/assign/batch", protect, async (req, res) => {
       });
     }
 
-    // Update the non-inline instruments to assign them to the user and task
+    // Update the non-inline instruments to assign them to the user
     await client.query(
       `
       UPDATE non_inline_instruments 
-      SET assigned_user_id = $1, task_id = $2, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ANY($3::int[])
+      SET assigned_to = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ANY($2::int[])
       `,
-      [userId, taskId, instrumentIds]
+      [userId, instrumentIds]
     );
 
     // Log the assignment in audit_logs
@@ -379,18 +407,28 @@ router.put("/assign/batch", protect, async (req, res) => {
       hint: error.hint,
     });
 
-    // Provide more specific error messages for common database errors
+    // Handle more specific database errors
     if (error.code === "23503") {
-      // Foreign key violation
       return res.status(400).json({
         message: "Foreign key violation in database",
         error: error.message,
       });
     }
     if (error.code === "23502") {
-      // Not-null constraint violation
       return res.status(400).json({
         message: "Not-null constraint violation in database",
+        error: error.message,
+      });
+    }
+    if (error.code === "22P02") {
+      return res.status(400).json({
+        message: "Invalid data type in request (e.g., non-integer ID)",
+        error: error.message,
+      });
+    }
+    if (error.code === "42703") {
+      return res.status(500).json({
+        message: "Database schema error: undefined column",
         error: error.message,
       });
     }
@@ -403,5 +441,4 @@ router.put("/assign/batch", protect, async (req, res) => {
     client.release();
   }
 });
-
 module.exports = router;
