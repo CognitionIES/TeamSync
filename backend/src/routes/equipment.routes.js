@@ -62,13 +62,12 @@ router.post("/", protect, async (req, res) => {
       [
         equipmentNumber,
         description,
-        typeId || null, // typeId is optional
+        typeId || null,
         areaId || null,
         projectId,
         "Assigned",
         new Date(),
       ]
-
     );
     console.log("Equipment inserted successfully:", rows[0]);
 
@@ -111,7 +110,131 @@ router.post("/", protect, async (req, res) => {
   }
 });
 
+// @desc    Create multiple equipment entries in batch
+// @route   POST /api/equipment/batch
+// @access  Private
+// @desc    Create multiple equipment entries in batch
+// @route   POST /api/equipment/batch
+// @access  Private
+router.post("/batch", protect, async (req, res) => {
+  console.log("Received POST request to /api/equipment/batch");
+  try {
+    if (req.user.role !== "Data Entry") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to add equipment`,
+      });
+    }
+
+    const { equipment } = req.body;
+
+    if (!equipment || !Array.isArray(equipment) || equipment.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Equipment array is required and must not be empty" });
+    }
+
+    const createdEquipment = [];
+    await db.query("BEGIN");
+
+    for (const equip of equipment) {
+      const { equipmentNumber, description, areaId, projectId } = equip;
+
+      if (!equipmentNumber || !areaId || !projectId) {
+        await db.query("ROLLBACK");
+        return res
+          .status(400)
+          .json({
+            message:
+              "equipmentNumber, areaId, and projectId are required for each equipment",
+          });
+      }
+
+      const { rows: projectRows } = await db.query(
+        "SELECT id FROM projects WHERE id = $1",
+        [parseInt(projectId)]
+      );
+      if (projectRows.length === 0) {
+        await db.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({ message: `Project with ID ${projectId} not found` });
+      }
+
+      const { rows: areaRows } = await db.query(
+        "SELECT id FROM areas WHERE id = $1 AND project_id = $2",
+        [parseInt(areaId), parseInt(projectId)]
+      );
+      if (areaRows.length === 0) {
+        await db.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({
+            message: `Area with ID ${areaId} not found in project ${projectId}`,
+          });
+      }
+
+      const { rows: existingEquipment } = await db.query(
+        "SELECT id FROM equipment WHERE equipment_number = $1 AND project_id = $2",
+        [equipmentNumber, parseInt(projectId)]
+      );
+      if (existingEquipment.length > 0) {
+        await db.query("ROLLBACK");
+        return res
+          .status(400)
+          .json({
+            message: `Equipment number ${equipmentNumber} already exists in project ${projectId}`,
+          });
+      }
+
+      const { rows: newEquipmentRows } = await db.query(
+        `
+        INSERT INTO equipment (equipment_number, description, area_id, project_id, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+        RETURNING *
+        `,
+        [
+          equipmentNumber,
+          description || "",
+          parseInt(areaId),
+          parseInt(projectId),
+          "Assigned",
+        ]
+      );
+
+      const newEquipment = newEquipmentRows[0];
+      createdEquipment.push(newEquipment);
+
+      if (req.user && req.user.userId) {
+        await db.query(
+          "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
+          [
+            "Equipment Creation",
+            equipmentNumber,
+            req.user.userId,
+            `Equipment ${equipmentNumber}`,
+            new Date(),
+          ]
+        );
+      }
+    }
+
+    await db.query("COMMIT");
+    res.status(201).json({ data: createdEquipment });
+  } catch (error) {
+    await db.query("ROLLBACK");
+    console.error("Error adding equipment batch:", error.message, error.stack);
+    if (
+      error.code === "23505" &&
+      error.constraint === "equipment_number_unique"
+    ) {
+      return res
+        .status(400)
+        .json({ message: "One or more equipment numbers already exist" });
+    }
+    res
+      .status(500)
+      .json({ message: "Failed to add equipment", error: error.message });
+  }
+});
+
 module.exports = router;
-/* 
-gussa na javab ma gussoj madse 
-*/
