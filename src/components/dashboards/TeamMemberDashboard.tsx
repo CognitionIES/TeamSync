@@ -464,43 +464,26 @@ const TeamMemberDashboard = () => {
           progress: task.progress || 0,
           projectId: task.project_id?.toString() || "Unknown",
           projectName: task.project_name || "Unknown",
-          areaNumber: task.area_number || "N/A",
+          areaNumber: task.area_name || "N/A",
           items: mappedItems,
           comments: uniqueComments,
-          description: task.task_desc || task.desc || task.description || "",
+          description: task.description || "",
           pidNumber: task.pid_number ?? "",
         };
       });
 
-      const pidIds = tasksData
-        .filter((task) => task.type === "Redline")
-        .map((task) => task.items.find((item) => item.type === "PID")?.id)
-        .filter((id): id is string => !!id);
-
-      let allLines: {
-        id: string;
-        name: string;
-        pidId: string;
-        completed: boolean;
-      }[] = [];
-      if (pidIds.length > 0) {
-        const linesResponse = await axios.get<{
-          data: { id: number; line_number: string; pid_id: number }[];
-        }>(`${API_URL}/lines?pid_ids=${pidIds.join(",")}`, getAuthHeaders());
-        allLines = linesResponse.data.data.map((line) => ({
-          id: line.id.toString(),
-          name: line.line_number,
-          pidId: line.pid_id.toString(),
-          completed: false,
-        }));
-      }
-
+      // Remove the /api/lines call and directly use items for lines
       const tasksWithLines = tasksData.map((task) => {
         const pidItem = task.items.find((item) => item.type === "PID");
-        const taskLines = pidItem
-          ? allLines.filter((line) => line.pidId === pidItem.id)
-          : [];
-        // Set pidNumber for all tasks that have a PID item
+        // Filter items to get lines directly
+        const taskLines = task.items
+          .filter((item) => item.type === "Line")
+          .map((item) => ({
+            id: item.id,
+            name: item.name,
+            pidId: pidItem?.id || "",
+            completed: item.completed,
+          }));
         const updatedPidNumber = pidItem
           ? pidItem.name
           : task.pidNumber || "N/A";
@@ -526,7 +509,6 @@ const TeamMemberDashboard = () => {
       console.log("isLoading set to false");
     }
   };
-
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
       fetchTasks();
