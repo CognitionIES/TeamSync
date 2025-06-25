@@ -476,7 +476,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
                     ) : (
                       <span className="text-sm text-gray-400">—</span>
                     )}
-                  </TableCell>{" "}
+                  </TableCell>
                   {showCurrentWork && (
                     <TableCell className="px-4 py-3">
                       <button

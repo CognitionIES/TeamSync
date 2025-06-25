@@ -82,6 +82,7 @@ const TeamPerformanceView: React.FC<TeamPerformanceProps> = ({
 
   // Apply time filters to tasks
   const getFilteredTasks = () => {
+    if (!tasks) return []; // Add fallback for undefined tasks
     const currentTime = new Date();
     const weekAgo = new Date(currentTime.getTime() - 7 * 24 * 60 * 60 * 1000);
     const monthAgo = new Date(currentTime.getTime() - 30 * 24 * 60 * 60 * 1000);

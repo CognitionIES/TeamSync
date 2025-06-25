@@ -33,6 +33,7 @@ app.use("/api/audit-logs", require("./routes/auditLogs.routes"));
 app.use("/api/areas", require("./routes/areas.routes"));
 app.use("/api/pids", require("./routes/pids.routes"));
 app.use("/api/lines", require("./routes/lines.routes"));
+app.use("/api/metrics", require("./routes/metrics.routes"));
 app.use("/api/project-stats", require("./routes/projectStats.routes")); 
 app.use("/api/task-status", require("./routes/taskStatus.routes")); 
 app.use("/api/non-inline-instruments", require("./routes/non-inline-instruments.routes"));

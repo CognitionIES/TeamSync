@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import {
@@ -17,7 +18,6 @@ import {
   CheckCircle,
   Users,
   RefreshCw,
-  BarChart3,
   AlertTriangle,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -28,22 +28,28 @@ import Modal from "react-modal";
 import DashboardBackground from "../shared/DashboardBackground";
 import AssignedItemsModal from "../shared/AssignedItemsModal";
 import axios, { AxiosError } from "axios";
-import { ScrollArea } from "../ui/scroll-area";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Progress } from "@/components/ui/progress";
 
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 
-// Define API_URL using environment variable, with a fallback for local development
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
-// Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleTimeString("en-IN", {
@@ -54,7 +60,6 @@ const formatTime = (dateString: string) => {
   });
 };
 
-// Interface for raw API task data (snake_case)
 interface ApiTask {
   id: string;
   type: TaskType;
@@ -82,13 +87,12 @@ interface ApiTask {
   }>;
 }
 
-// Interface for raw API team lead data
 interface ApiTeamLead {
   id: string;
   team_lead: string;
   team_members: Array<{
     id: string;
-    member_id: string;
+    member_id: string; // This suggests the column is `member_id`, not `user_id`
     member_name: string;
   }>;
   tasks: Array<{
@@ -105,15 +109,12 @@ interface ApiTeamLead {
     }>;
   }>;
 }
-
-// Interface for raw API user data
 interface ApiUser {
   id: string;
   name: string;
   role: string;
 }
 
-// Interface for fetched assigned items (matches the structure expected by AssignedItemsModal)
 interface FetchedAssignedItems {
   pids: any;
   lines: any;
@@ -140,19 +141,43 @@ interface FetchedAssignedItems {
   };
 }
 
-// Interface for transformed team lead data (matches TeamPerformanceView expectation)
 interface TeamLead {
+  id: string;
   name: string;
   team: string[];
 }
 
-// Transform API team lead data to match TeamLead type
+interface MetricEntry {
+  date?: string;
+  week_start?: string;
+  month_start?: string;
+  counts: {
+    [itemType: string]: {
+      [taskType: string]: number;
+    };
+  };
+}
+
+interface MetricsData {
+  daily: MetricEntry[];
+  weekly: MetricEntry[];
+  monthly: MetricEntry[];
+}
+
+interface ProjectProgress {
+  projectId: string;
+  projectName: string;
+  completedItems: number;
+  targetItems: number;
+  progress: string;
+}
+
 const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
+  id: apiTeamLead.id,
   name: apiTeamLead.team_lead,
   team: apiTeamLead.team_members.map((member) => member.member_name),
 });
 
-// Transform API task data to match Task type (camelCase)
 const transformTask = (apiTask: ApiTask): Task => {
   console.log("Transforming Task:", apiTask.id, "Items:", apiTask.items);
   const validTaskTypes = Object.values(TaskType);
@@ -168,17 +193,13 @@ const transformTask = (apiTask: ApiTask): Task => {
       type: validItemTypes.includes(item.item_type as ItemType)
         ? (item.item_type as ItemType)
         : ItemType.Line,
-      // Simulate: Set completed to true for every even-indexed line item
       completed:
-        item.item_type === ItemType.Line
-          ? index % 2 === 0 // Simulate completed for even indices
-          : item.completed,
+        item.item_type === ItemType.Line ? index % 2 === 0 : item.completed,
     };
     console.log("Transformed Item:", transformedItem);
     return transformedItem;
   });
 
-  // Add dummy Line items if none exist (for debugging)
   if (!items.some((item) => item.type === ItemType.Line)) {
     items.push({
       id: "dummy-line-1",
@@ -194,33 +215,33 @@ const transformTask = (apiTask: ApiTask): Task => {
     });
   }
 
-return {
-  id: apiTask.id,
-  type: taskType,
-  assignee: apiTask.assignee,
-  assigneeId: apiTask.assignee_id,
-  status: apiTask.status,
-  isComplex: apiTask.is_complex,
-  createdAt: apiTask.created_at,
-  updatedAt: apiTask.updated_at,
-  completedAt: apiTask.completed_at,
-  progress: apiTask.progress,
-  items,
-  comments: apiTask.comments.map((comment) => ({
-    id: comment.id,
-    userId: comment.user_id,
-    userName: comment.user_name,
-    userRole: comment.user_role as UserRole,
-    comment: comment.comment,
-    createdAt: comment.created_at,
-  })),
-  projectId: "",
-  pidNumber: "",
-  projectName: "",
-  areaNumber: "",
-  description: "",
-  lines: undefined,
-};
+  return {
+    id: apiTask.id,
+    type: taskType,
+    assignee: apiTask.assignee,
+    assigneeId: apiTask.assignee_id,
+    status: apiTask.status,
+    isComplex: apiTask.is_complex,
+    createdAt: apiTask.created_at,
+    updatedAt: apiTask.updated_at,
+    completedAt: apiTask.completed_at,
+    progress: apiTask.progress,
+    items,
+    comments: apiTask.comments.map((comment) => ({
+      id: comment.id,
+      userId: comment.user_id,
+      userName: comment.user_name,
+      userRole: comment.user_role as UserRole,
+      comment: comment.comment,
+      createdAt: comment.created_at,
+    })),
+    projectId: "",
+    pidNumber: "",
+    projectName: "",
+    areaNumber: "",
+    description: "",
+    lines: undefined,
+  };
 };
 
 const ProjectManagerDashboard = () => {
@@ -243,6 +264,27 @@ const ProjectManagerDashboard = () => {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedTaskType, setSelectedTaskType] = useState<string>("");
   const [selectedItemType, setSelectedItemType] = useState<string>("");
+  const [selectedMetricsUser, setSelectedMetricsUser] = useState<string>("");
+  const [selectedMetricsTeam, setSelectedMetricsTeam] = useState<string>("");
+  const [selectedProjectItemType, setSelectedProjectItemType] =
+    useState<string>("lines");
+  const [selectedProjectTaskType, setSelectedProjectTaskType] =
+    useState<string>("all");
+  const [individualMetrics, setIndividualMetrics] = useState<MetricsData>({
+    daily: [],
+    weekly: [],
+    monthly: [],
+  });
+  const [teamMetrics, setTeamMetrics] = useState<MetricsData>({
+    daily: [],
+    weekly: [],
+    monthly: [],
+  });
+  const [teamMetricsError, setTeamMetricsError] = useState<string | null>(null);
+  const [projectProgress, setProjectProgress] = useState<ProjectProgress[]>([]);
+  const [individualMetricsError, setIndividualMetricsError] = useState<
+    string | null
+  >(null);
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -287,14 +329,14 @@ const ProjectManagerDashboard = () => {
           "Task not found, setting taskType and itemType to empty strings"
         );
         toast.error("Task not found. Cannot display assigned items.");
-        return; // Prevent opening the modal
+        return;
       }
 
       setSelectedTaskType(task.type);
       console.log("Task Items:", task.items);
       let itemType: ItemType | null = null;
       if (task.items.length > 0) {
-        itemType = task.items[0].type; // Already validated in transformTask
+        itemType = task.items[0].type;
       } else {
         switch (task.type) {
           case TaskType.Redline:
@@ -322,7 +364,7 @@ const ProjectManagerDashboard = () => {
         );
         setSelectedTaskType("");
         setSelectedItemType("");
-        return; // Prevent opening the modal
+        return;
       }
 
       setSelectedItemType(itemType);
@@ -330,7 +372,63 @@ const ProjectManagerDashboard = () => {
 
       const items = await fetchAssignedItems(userId, taskId);
       console.log("Fetched Assigned Items:", items);
-      setAssignedItems(items);
+
+      // Map fetched items to match AssignedItems type
+      const mappedItems = {
+        ...items,
+        upvLines: {
+          ...items.upvLines,
+          items: items.upvLines.items.map((item: any) => ({
+            area_number: item.area_number ?? "",
+            project_name: item.project_name ?? "",
+            id: item.id,
+            line_number: item.line_number,
+            project_id: item.project_id,
+          })),
+        },
+        qcLines: {
+          ...items.qcLines,
+          items: items.qcLines.items.map((item: any) => ({
+            area_number: item.area_number ?? "",
+            project_name: item.project_name ?? "",
+            id: item.id,
+            line_number: item.line_number,
+            project_id: item.project_id,
+          })),
+        },
+        redlinePIDs: {
+          ...items.redlinePIDs,
+          items: items.redlinePIDs.items.map((item: any) => ({
+            area_number: item.area_number ?? "",
+            project_name: item.project_name ?? "",
+            id: item.id,
+            pid_number: item.pid_number,
+            project_id: item.project_id,
+          })),
+        },
+        upvEquipment: {
+          ...items.upvEquipment,
+          items: items.upvEquipment.items.map((item: any) => ({
+            area_number: item.area_number ?? "",
+            project_name: item.project_name ?? "",
+            id: item.id,
+            equipment_name: item.equipment_name,
+            project_id: item.project_id,
+          })),
+        },
+        qcEquipment: {
+          ...items.qcEquipment,
+          items: items.qcEquipment.items.map((item: any) => ({
+            area_number: item.area_number ?? "",
+            project_name: item.project_name ?? "",
+            id: item.id,
+            equipment_name: item.equipment_name,
+            project_id: item.project_id,
+          })),
+        },
+      };
+
+      setAssignedItems(mappedItems);
       setModalIsOpen(true);
     } catch (error) {
       console.error("Error in handleViewCurrentWork:", error);
@@ -350,6 +448,7 @@ const ProjectManagerDashboard = () => {
     setSelectedTaskType("");
     setSelectedItemType("");
   };
+
   const handleViewComments = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
@@ -366,6 +465,94 @@ const ProjectManagerDashboard = () => {
     setSelectedComments([]);
     setSelectedTask(null);
   };
+
+  const fetchIndividualMetrics = async (userId: string) => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      const response = await axios.get(
+        `${API_URL}/metrics/individual/lines/daily?userId=${userId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      setIndividualMetrics((prev) => ({
+        ...prev,
+        daily: response.data.daily_lines, // Update daily with new structure
+        weekly: [], // Clear or fetch separately if needed
+        monthly: [], // Clear or fetch separately if needed
+      }));
+      setIndividualMetricsError(null);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching individual metrics:", axiosError);
+      const errorMessage =
+        axiosError.response?.data?.message ||
+        "Failed to fetch individual metrics";
+      setIndividualMetricsError(errorMessage);
+      setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
+      toast.error(errorMessage);
+    }
+  };
+  const fetchTeamMetrics = async (teamId: string) => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      const response = await axios.get(
+        `${API_URL}/metrics/team/lines?teamId=${teamId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      setTeamMetrics(response.data);
+      setTeamMetricsError(null);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching team metrics:", axiosError);
+      const errorMessage =
+        axiosError.response?.data?.message || "Failed to fetch team metrics";
+      setTeamMetricsError(errorMessage);
+      setTeamMetrics({ daily: [], weekly: [], monthly: [] });
+      toast.error(errorMessage);
+    }
+  };
+  const fetchProjectProgress = async (itemType: string, taskType: string) => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      const params = new URLSearchParams({ itemType });
+      if (taskType && taskType !== "all") params.append("taskType", taskType);
+
+      const response = await axios.get(
+        `${API_URL}/metrics/projects/progress?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+      setProjectProgress(response.data.data);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching project progress:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch project progress"
+      );
+    }
+  };
+
   const fetchData = async () => {
     setIsLoading(true);
     setError(null);
@@ -382,18 +569,10 @@ const ProjectManagerDashboard = () => {
         },
       });
 
-      console.log("Tasks Response Status:", tasksResponse.status);
-      console.log(
-        "Tasks Response Headers:",
-        tasksResponse.headers.get("content-type")
-      );
-
-      const tasksText = await tasksResponse.text();
-      console.log("Tasks Response Body (Full):", tasksText); // Log the full response
-
       if (!tasksResponse.ok) {
         let errorMessage = `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`;
         const contentType = tasksResponse.headers.get("content-type");
+        const tasksText = await tasksResponse.text();
         if (contentType && contentType.includes("application/json")) {
           const errorData = JSON.parse(tasksText);
           errorMessage += ` - ${errorData.message || "Unknown error"}`;
@@ -406,20 +585,13 @@ const ProjectManagerDashboard = () => {
         throw new Error(errorMessage);
       }
 
-      const tasksContentType = tasksResponse.headers.get("content-type");
-      if (!tasksContentType || !tasksContentType.includes("application/json")) {
-        throw new Error(
-          `Tasks API returned non-JSON response: ${tasksText.substring(0, 100)}`
-        );
-      }
-
-      const tasksData = JSON.parse(tasksText);
+      const tasksData = await tasksResponse.json();
       if (!tasksData.data) {
         throw new Error("Tasks API response missing 'data' field");
       }
       const transformedTasks = tasksData.data.map(transformTask);
       setTasks(transformedTasks);
-      console.log("Transformed Tasks:", transformedTasks);
+
       let teamLeadsData = [];
       try {
         const teamsResponse = await fetch(`${API_URL}/teams`, {
@@ -429,18 +601,10 @@ const ProjectManagerDashboard = () => {
           },
         });
 
-        console.log("Teams Response Status:", teamsResponse.status);
-        console.log(
-          "Teams Response Headers:",
-          teamsResponse.headers.get("content-type")
-        );
-
-        const teamsText = await teamsResponse.text();
-        console.log("Teams Response Body:", teamsText.substring(0, 200));
-
         if (!teamsResponse.ok) {
           let errorMessage = `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`;
           const contentType = teamsResponse.headers.get("content-type");
+          const teamsText = await teamsResponse.text();
           if (contentType && contentType.includes("application/json")) {
             const errorData = JSON.parse(teamsText);
             errorMessage += ` - ${errorData.message || "Unknown error"}`;
@@ -454,30 +618,7 @@ const ProjectManagerDashboard = () => {
           throw new Error(errorMessage);
         }
 
-        const teamsContentType = teamsResponse.headers.get("content-type");
-        if (
-          !teamsContentType ||
-          !teamsContentType.includes("application/json")
-        ) {
-          throw new Error(
-            `Teams API returned non-JSON response: ${teamsText.substring(
-              0,
-              100
-            )}`
-          );
-        }
-
-        let teamsData;
-        try {
-          teamsData = JSON.parse(teamsText);
-          console.log("Parsed Teams Data:", teamsData);
-        } catch (parseError) {
-          console.error("Error parsing teams response:", parseError.message);
-          throw new Error(
-            `Failed to parse Teams API response: ${teamsText.substring(0, 100)}`
-          );
-        }
-
+        const teamsData = await teamsResponse.json();
         if (
           !teamsData ||
           typeof teamsData !== "object" ||
@@ -522,19 +663,6 @@ const ProjectManagerDashboard = () => {
           console.warn(errorMessage);
           toast.error("Failed to fetch users data");
         } else {
-          const usersContentType = usersResponse.headers.get("content-type");
-          if (
-            !usersContentType ||
-            !usersContentType.includes("application/json")
-          ) {
-            throw new Error(
-              `Users API returned non-JSON response: ${usersText.substring(
-                0,
-                100
-              )}`
-            );
-          }
-
           const usersDataResponse = JSON.parse(usersText);
           if (!usersDataResponse.data) {
             throw new Error("Users API response missing 'data' field");
@@ -547,11 +675,29 @@ const ProjectManagerDashboard = () => {
       }
       setUsers(usersData);
 
+      if (usersData.length > 0) {
+        setSelectedMetricsUser(usersData[0].id);
+        await fetchIndividualMetrics(usersData[0].id);
+      }
+      if (teamLeadsData.length > 0) {
+        const teamId = teamLeadsData[0].id;
+        setSelectedMetricsTeam(teamId);
+        await fetchTeamMetrics(teamId);
+      }
+      await fetchProjectProgress(
+        selectedProjectItemType,
+        selectedProjectTaskType
+      );
+
       toast.success("Data refreshed");
     } catch (error) {
       console.error("Fetch error:", error.message);
-      setError(error.message || "Failed to fetch data");
-      toast.error(error.message || "Failed to fetch data");
+      const errorMessage =
+        error.message === "Failed to fetch"
+          ? "Unable to connect to the server. Please ensure the backend is running on localhost:3000."
+          : error.message || "Failed to fetch data";
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -560,6 +706,22 @@ const ProjectManagerDashboard = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (selectedMetricsUser) {
+      fetchIndividualMetrics(selectedMetricsUser);
+    }
+  }, [selectedMetricsUser]);
+
+  useEffect(() => {
+    if (selectedMetricsTeam) {
+      fetchTeamMetrics(selectedMetricsTeam);
+    }
+  }, [selectedMetricsTeam]);
+
+  useEffect(() => {
+    fetchProjectProgress(selectedProjectItemType, selectedProjectTaskType);
+  }, [selectedProjectItemType, selectedProjectTaskType]);
 
   const teamMembers = Array.from(new Set(users.map((user) => user.name)));
 
@@ -753,7 +915,7 @@ const ProjectManagerDashboard = () => {
         <header className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800">
+              <h1 className="text-3xl  font-semibold text-gray-800">
                 Project Manager Dashboard
               </h1>
               <p className="text-gray-600 mt-1">
@@ -796,6 +958,7 @@ const ProjectManagerDashboard = () => {
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
+            <TabsTrigger value="metrics">Metrics</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
@@ -831,7 +994,7 @@ const ProjectManagerDashboard = () => {
                   <CardHeader className="pb-2 bg-gradient-to-r from-indigo-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-indigo-100 rounded-lg">
-                        <BarChart3 size={18} className="text-indigo-600" />
+                        <Clock size={18} className="text-indigo-600" />
                       </div>
                       <CardTitle className="text-lg">Assigned Today</CardTitle>
                     </div>
@@ -894,10 +1057,10 @@ const ProjectManagerDashboard = () => {
                   showFilters={true}
                   showProgress={true}
                   showCurrentWork={true}
-                  showComments={true} // Enable comments
+                  showComments={true}
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
-                  onViewComments={handleViewComments} // Add handler
+                  onViewComments={handleViewComments}
                 />
               </CardContent>
             </Card>
@@ -957,7 +1120,7 @@ const ProjectManagerDashboard = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {teamLeads.map((lead) => (
                             <Card
-                              key={lead.name}
+                              key={lead.id}
                               className="border border-gray-200 bg-white shadow-sm"
                             >
                               <CardHeader className="pb-2 bg-gradient-to-r from-gray-50 to-transparent">
@@ -1047,114 +1210,652 @@ const ProjectManagerDashboard = () => {
                   showFilters={true}
                   showProgress={true}
                   showCurrentWork={true}
-                  showComments={true} // Enable comments
+                  showComments={true}
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
-                  onViewComments={handleViewComments} // Add handler
+                  onViewComments={handleViewComments}
                 />
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="performance" className="animate-fade-in">
-            {isLoading ? (
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <div className="h-5 w-32 bg-gray-200 rounded animate-pulse"></div>
-                    <div className="h-4 w-48 bg-gray-200 rounded mt-1 animate-pulse"></div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-80 bg-gray-200 rounded animate-pulse"></div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <div className="h-5 w-32 bg-gray-200 rounded animate-pulse"></div>
-                    <div className="h-4 w-48 bg-gray-200 rounded mt-1 animate-pulse"></div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-80 bg-gray-200 rounded animate-pulse"></div>
-                  </CardContent>
-                </Card>
-              </div>
-            ) : (
-              <TeamPerformanceView tasks={tasks} teamLeads={teamLeads} />
-            )}
+            <TeamPerformanceView
+              teamLeads={teamLeads}
+              isLoading={isLoading}
+              onViewCurrentWork={handleViewCurrentWork}
+              onViewComments={handleViewComments}
+            />
+          </TabsContent>
+
+          <TabsContent value="metrics" className="space-y-6 animate-fade-in">
+            <Card className="shadow-md border-blue-200">
+              <CardHeader className="bg-gradient-to-r from-blue-50 to-transparent border-b border-blue-100">
+                <CardTitle className="text-lg text-blue-800">
+                  Individual Metrics
+                </CardTitle>
+                <CardDescription>
+                  Metrics for an individual daily, weekly, and monthly
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="mb-4 flex gap-4">
+                  <div>
+                    <label className="block mb-2 text-sm font-medium">
+                      Select User
+                    </label>
+                    <Select
+                      value={selectedMetricsUser}
+                      onValueChange={setSelectedMetricsUser}
+                      disabled={isLoading}
+                    >
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder="Choose user..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.map((user) => (
+                          <SelectItem key={user.id} value={user.id}>
+                            {user.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {individualMetricsError && (
+                  <p className="text-red-600 text-center py-4">
+                    {individualMetricsError}
+                  </p>
+                )}
+
+                <Tabs defaultValue="daily" className="space-y-4">
+                  <TabsList className="grid grid-cols-3 w-full max-w-md">
+                    <TabsTrigger value="daily">Daily</TabsTrigger>
+                    <TabsTrigger value="weekly">Weekly</TabsTrigger>
+                    <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="daily">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {individualMetrics.daily.map((metric, index) => {
+                          console.log("Daily Metric:", metric);
+                          const user = users.find(
+                            (u) => u.id === selectedMetricsUser
+                          );
+                          const userTeam = teamLeads.find((team) =>
+                            team.team.includes(user?.name || "")
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{user?.name || "Unknown"}</TableCell>
+                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.upv || 0) +
+                                  (metric.counts?.lines?.qc || 0) +
+                                  (metric.counts?.lines?.redline || 0) +
+                                  (metric.counts?.lines?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.equipment?.upv || 0) +
+                                  (metric.counts?.equipment?.qc || 0) +
+                                  (metric.counts?.equipment?.redline || 0) +
+                                  (metric.counts?.equipment?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.non_line_instruments?.upv ||
+                                  0) +
+                                  (metric.counts?.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts?.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts?.non_line_instruments?.misc ||
+                                    0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.pids?.upv || 0) +
+                                  (metric.counts?.pids?.qc || 0) +
+                                  (metric.counts?.pids?.redline || 0) +
+                                  (metric.counts?.pids?.misc || 0)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>
+                  <TabsContent value="weekly">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {individualMetrics.weekly.map((metric, index) => {
+                          const user = users.find(
+                            (u) => u.id === selectedMetricsUser
+                          );
+                          const userTeam = teamLeads.find((team) =>
+                            team.team.includes(user?.name || "")
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{user?.name || "Unknown"}</TableCell>
+                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.upv || 0) +
+                                  (metric.counts?.lines?.qc || 0) +
+                                  (metric.counts?.lines?.redline || 0) +
+                                  (metric.counts?.lines?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.equipment?.upv || 0) +
+                                  (metric.counts?.equipment?.qc || 0) +
+                                  (metric.counts?.equipment?.redline || 0) +
+                                  (metric.counts?.equipment?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.non_line_instruments?.upv ||
+                                  0) +
+                                  (metric.counts?.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts?.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts?.non_line_instruments?.misc ||
+                                    0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.pids?.upv || 0) +
+                                  (metric.counts?.pids?.qc || 0) +
+                                  (metric.counts?.pids?.redline || 0) +
+                                  (metric.counts?.pids?.misc || 0)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>
+                  <TabsContent value="monthly">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {individualMetrics.monthly.map((metric, index) => {
+                          const user = users.find(
+                            (u) => u.id === selectedMetricsUser
+                          );
+                          const userTeam = teamLeads.find((team) =>
+                            team.team.includes(user?.name || "")
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{user?.name || "Unknown"}</TableCell>
+                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.upv || 0) +
+                                  (metric.counts?.lines?.qc || 0) +
+                                  (metric.counts?.lines?.redline || 0) +
+                                  (metric.counts?.lines?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.equipment?.upv || 0) +
+                                  (metric.counts?.equipment?.qc || 0) +
+                                  (metric.counts?.equipment?.redline || 0) +
+                                  (metric.counts?.equipment?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.non_line_instruments?.upv ||
+                                  0) +
+                                  (metric.counts?.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts?.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts?.non_line_instruments?.misc ||
+                                    0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.pids?.upv || 0) +
+                                  (metric.counts?.pids?.qc || 0) +
+                                  (metric.counts?.pids?.redline || 0) +
+                                  (metric.counts?.pids?.misc || 0)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>{" "}
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-md border-green-200">
+              <CardHeader className="bg-gradient-to-r from-green-50 to-transparent border-b border-green-100">
+                <CardTitle className="text-lg text-green-800">
+                  Team Metrics
+                </CardTitle>
+                <CardDescription>
+                  Metrics for a team daily, weekly, and monthly
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="mb-4 flex gap-4">
+                  <div>
+                    <label className="block mb-2 text-sm font-medium">
+                      Select Team
+                    </label>
+                    <Select
+                      value={selectedMetricsTeam}
+                      onValueChange={setSelectedMetricsTeam}
+                      disabled={isLoading}
+                    >
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder="Choose team..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teamLeads.map((team) => (
+                          <SelectItem key={team.id} value={team.id}>
+                            {team.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {teamMetricsError && (
+                  <p className="text-red-600 text-center py-4">
+                    {teamMetricsError}
+                  </p>
+                )}
+
+                <Tabs defaultValue="daily" className="space-y-4">
+                  <TabsList className="grid grid-cols-3 w-full max-w-md">
+                    <TabsTrigger value="daily">Daily</TabsTrigger>
+                    <TabsTrigger value="weekly">Weekly</TabsTrigger>
+                    <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="daily">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                          <TableHead>UPV</TableHead>
+                          <TableHead>QC</TableHead>
+                          <TableHead>Redline</TableHead>
+                          <TableHead>Misc</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {teamMetrics.daily.map((metric, index) => {
+                          const team = teamLeads.find(
+                            (t) => t.id === selectedMetricsTeam
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{team?.name || "Unknown"}</TableCell>
+                              <TableCell>
+                                {(metric.counts.lines?.upv || 0) +
+                                  (metric.counts.lines?.qc || 0) +
+                                  (metric.counts.lines?.redline || 0) +
+                                  (metric.counts.lines?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts.equipment?.upv || 0) +
+                                  (metric.counts.equipment?.qc || 0) +
+                                  (metric.counts.equipment?.redline || 0) +
+                                  (metric.counts.equipment?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts.non_line_instruments?.upv ||
+                                  0) +
+                                  (metric.counts.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts.non_line_instruments?.misc ||
+                                    0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts.pids?.upv || 0) +
+                                  (metric.counts.pids?.qc || 0) +
+                                  (metric.counts.pids?.redline || 0) +
+                                  (metric.counts.pids?.misc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts.lines?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts.lines?.qc || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts.lines?.redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts.lines?.misc || 0}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>
+                  <TabsContent value="weekly">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                          <TableHead>UPV</TableHead>
+                          <TableHead>QC</TableHead>
+                          <TableHead>Redline</TableHead>
+                          <TableHead>Misc</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {teamMetrics.weekly.map((metric, index) => {
+                          const team = teamLeads.find(
+                            (t) => t.id === selectedMetricsTeam
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{team?.name || "Unknown"}</TableCell>
+                              <TableCell>
+                                {metric.counts?.lines?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.equipment?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.non_line_instruments?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.pids?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.upv || 0) +
+                                  (metric.counts?.equipment?.upv || 0) +
+                                  (metric.counts?.non_line_instruments?.upv ||
+                                    0) +
+                                  (metric.counts?.pids?.upv || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.qc || 0) +
+                                  (metric.counts?.equipment?.qc || 0) +
+                                  (metric.counts?.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts?.pids?.qc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.redline || 0) +
+                                  (metric.counts?.equipment?.redline || 0) +
+                                  (metric.counts?.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts?.pids?.redline || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.misc || 0) +
+                                  (metric.counts?.equipment?.misc || 0) +
+                                  (metric.counts?.non_line_instruments?.misc ||
+                                    0) +
+                                  (metric.counts?.pids?.misc || 0)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>
+
+                  <TabsContent value="monthly">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Team Name</TableHead>
+                          <TableHead>Lines</TableHead>
+                          <TableHead>Equipment</TableHead>
+                          <TableHead>Non-Line Instruments</TableHead>
+                          <TableHead>P&IDs</TableHead>
+                          <TableHead>UPV</TableHead>
+                          <TableHead>QC</TableHead>
+                          <TableHead>Redline</TableHead>
+                          <TableHead>Misc</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {teamMetrics.monthly.map((metric, index) => {
+                          const team = teamLeads.find(
+                            (t) => t.id === selectedMetricsTeam
+                          );
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{team?.name || "Unknown"}</TableCell>
+                              <TableCell>
+                                {metric.counts?.lines?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.equipment?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.non_line_instruments?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.pids?.upv || 0}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.upv || 0) +
+                                  (metric.counts?.equipment?.upv || 0) +
+                                  (metric.counts?.non_line_instruments?.upv ||
+                                    0) +
+                                  (metric.counts?.pids?.upv || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.qc || 0) +
+                                  (metric.counts?.equipment?.qc || 0) +
+                                  (metric.counts?.non_line_instruments?.qc ||
+                                    0) +
+                                  (metric.counts?.pids?.qc || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.redline || 0) +
+                                  (metric.counts?.equipment?.redline || 0) +
+                                  (metric.counts?.non_line_instruments
+                                    ?.redline || 0) +
+                                  (metric.counts?.pids?.redline || 0)}
+                              </TableCell>
+                              <TableCell>
+                                {(metric.counts?.lines?.misc || 0) +
+                                  (metric.counts?.equipment?.misc || 0) +
+                                  (metric.counts?.non_line_instruments?.misc ||
+                                    0) +
+                                  (metric.counts?.pids?.misc || 0)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            <Card className="shadow-md border-purple-200">
+              <CardHeader className="bg-gradient-to-r from-purple-50 to-transparent border-b border-purple-100">
+                <CardTitle className="text-lg text-purple-800">
+                  Project Progress
+                </CardTitle>
+                <CardDescription>
+                  Progress of projects by item type and task type
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="mb-4 flex gap-4">
+                  <div>
+                    <label className="block mb-2 text-sm font-medium">
+                      Item Type
+                    </label>
+                    <Select
+                      value={selectedProjectItemType}
+                      onValueChange={setSelectedProjectItemType}
+                      disabled={isLoading}
+                    >
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder="Choose item type..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="lines">Lines</SelectItem>
+                        <SelectItem value="equipment">Equipment</SelectItem>
+                        <SelectItem value="non_line_instruments">
+                          Non-Line Instruments
+                        </SelectItem>
+                        <SelectItem value="pids">P&IDs</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block mb-2 text-sm font-medium">
+                      Task Type
+                    </label>
+                    <Select
+                      value={selectedProjectTaskType}
+                      onValueChange={setSelectedProjectTaskType}
+                      disabled={isLoading}
+                    >
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder="Choose task type..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="upv">UPV</SelectItem>
+                        <SelectItem value="qc">QC</SelectItem>
+                        <SelectItem value="redline">Redline</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {projectProgress.length === 0 ? (
+                  <p className="text-gray-500 text-center py-4">
+                    No project progress data available.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Project Name</TableHead>
+                        <TableHead>Completed Items</TableHead>
+                        <TableHead>Target Items</TableHead>
+                        <TableHead>Progress</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {projectProgress.map((project) => (
+                        <TableRow key={project.projectId}>
+                          <TableCell>{project.projectName}</TableCell>
+                          <TableCell>{project.completedItems}</TableCell>
+                          <TableCell>{project.targetItems}</TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            <Progress
+                              value={parseFloat(project.progress)}
+                              className="w-[200px]"
+                            />
+                            <span>{project.progress}%</span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 
-        {selectedTaskType && selectedItemType && (
-          <AssignedItemsModal
-            isOpen={modalIsOpen}
-            onClose={closeModal}
-            assignedItems={assignedItems}
-            loadingItems={loadingItems}
-            userName={
-              selectedUserId
-                ? users.find((user) => user.id === selectedUserId)?.name ||
-                  "Unknown User"
-                : ""
-            }
-            taskType={selectedTaskType}
-            itemType={selectedItemType}
-          />
-        )}
-
-        {/* Comments Modal */}
-        <Dialog
-          open={commentsModalIsOpen}
-          onOpenChange={setCommentsModalIsOpen}
+        <Modal
+          isOpen={modalIsOpen}
+          onRequestClose={closeModal}
+          className="bg-white p-6 rounded-lg shadow-xl max-w-3xl w-full mx-auto my-8 outline-none max-h-[80vh] overflow-y-auto"
+          overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
         >
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>
-                Comments for Task {selectedTask?.id || ""}
-              </DialogTitle>
-              <DialogDescription>
-                Task Type: {selectedTask?.type || "Unknown"} | Assignee:{" "}
-                {selectedTask?.assignee || "Unknown"}
-              </DialogDescription>
-            </DialogHeader>
-            <ScrollArea className="max-h-[300px] mt-4">
-              {selectedComments.length > 0 ? (
-                <div className="space-y-4">
-                  {selectedComments.map((comment) => (
-                    <div
-                      key={comment.id}
-                      className="border-b border-gray-200 pb-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">
-                          {comment.userName}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          ({comment.userRole})
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-700 mt-1">
-                        {comment.comment}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(comment.createdAt).toLocaleString("en-US", {
-                          month: "short",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          hour12: false,
-                        })}
+          <AssignedItemsModal
+            userId={selectedUserId || ""}
+            taskType={selectedTaskType as TaskType}
+            itemType={selectedItemType as ItemType}
+            assignedItems={assignedItems}
+            onClose={closeModal}
+            isLoading={loadingItems}
+          />
+        </Modal>
+
+        <Modal
+          isOpen={commentsModalIsOpen}
+          onRequestClose={closeCommentsModal}
+          className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full mx-auto my-8 outline-none max-h-[80vh] overflow-y-auto"
+          overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+        >
+          <h2 className="text-xl font-semibold mb-4">Comments</h2>
+          {selectedComments.length === 0 ? (
+            <p className="text-gray-500">No comments available.</p>
+          ) : (
+            <ul className="space-y-4">
+              {selectedComments.map((comment) => (
+                <li key={comment.id} className="border-b pb-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="font-medium">{comment.userName}</p>
+                      <p className="text-sm text-gray-500">
+                        {comment.userRole} •{" "}
+                        {new Date(comment.createdAt).toLocaleString()}
                       </p>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  No comments available for this task.
-                </p>
-              )}
-            </ScrollArea>
-          </DialogContent>
-        </Dialog>
+                  </div>
+                  <p className="mt-1">{comment.comment}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Button
+            variant="outline"
+            className="mt-4 w-full"
+            onClick={closeCommentsModal}
+          >
+            Close
+          </Button>
+        </Modal>
       </div>
     </div>
   );
