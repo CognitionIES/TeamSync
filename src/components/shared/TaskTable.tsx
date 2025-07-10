@@ -53,22 +53,23 @@ const getCurrentWork = (task: Task): string => {
   if (task.status === "Completed") return "Completed";
 
   const pidItem = task.items.find((item) => item.type === "PID");
-  if (pidItem) return `P&ID ${pidItem.name}`;
+  if (pidItem && pidItem.name) return `P&ID ${pidItem.name}`;
 
   const lineItem = task.items.find((item) => item.type === "Line");
-  if (lineItem) return `Line ${lineItem.name}`;
+  if (lineItem && lineItem.name) return `Line ${lineItem.name}`;
 
   const equipmentItem = task.items.find((item) => item.type === "Equipment");
-  if (equipmentItem) return `Equipment ${equipmentItem.name}`;
+  if (equipmentItem && equipmentItem.name)
+    return `Equipment ${equipmentItem.name}`;
 
   const instrumentItem = task.items.find(
     (item) => item.type === "NonInlineInstrument"
   );
-  if (instrumentItem) return `Instrument ${instrumentItem.name}`;
+  if (instrumentItem && instrumentItem.name)
+    return `Instrument ${instrumentItem.name}`;
 
-  return "No active items";
+  return "No active items"; // Fallback if no valid item is found
 };
-
 const formatDateTime = (dateStr: string | null, label: string): string => {
   if (!dateStr) return `Not ${label}`;
   try {
@@ -177,10 +178,15 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const completedTime = formatDateTime(task.completedAt, "Completed");
 
     const lineItems = task.items.filter((item) => item.type === "Line");
-    const completedLines = lineItems.filter((item) => item.completed).length;
+    const completedLines = lineItems.filter(
+      (item) => item.completed === true
+    ).length;
     const totalLines = lineItems.length;
 
-    const row = {
+    // Ensure comments is an array
+    const comments = Array.isArray(task.comments) ? task.comments : [];
+
+    return {
       id: task.id,
       type: task.type,
       assignee: task.assignee,
@@ -193,13 +199,11 @@ const TaskTable: React.FC<TaskTableProps> = ({
       completedTime: completedTime,
       updatedAt: updatedAt || completedAt || new Date(0),
       assigneeId: task.assigneeId,
-      comments: task.comments || [],
+      comments: comments,
       projectName: task.projectName || "Unknown",
       areaNumber: task.areaNumber || "N/A",
       pidNumber: task.pidNumber || "N/A",
     };
-    console.log("Task Row:", row); // Debug log
-    return row;
   });
 
   const sortedRows = [...rows].sort((a, b) => {
@@ -231,7 +235,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
 
   const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
   const startIndex = (currentPage - 1) * tasksPerPage;
-  const endIndex = startIndex + tasksPerPage;
+  let endIndex = startIndex + tasksPerPage;
   const paginatedRows = sortedRows.slice(startIndex, endIndex);
 
   const handleSort = (column: keyof (typeof rows)[0]) => {

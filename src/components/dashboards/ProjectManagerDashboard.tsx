@@ -179,40 +179,63 @@ const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
 });
 
 const transformTask = (apiTask: ApiTask): Task => {
-  console.log("Transforming Task:", apiTask.id, "Items:", apiTask.items);
+  console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
   const validTaskTypes = Object.values(TaskType);
   const taskType = validTaskTypes.includes(apiTask.type as TaskType)
     ? (apiTask.type as TaskType)
     : TaskType.UPV;
 
   const validItemTypes = Object.values(ItemType);
-  const items = apiTask.items.map((item, index) => {
+  const items = apiTask.items.map((item) => {
+    const rawCompleted = item.completed;
     const transformedItem = {
       id: item.id,
-      name: item.item_name,
+      name: item.item_name || `Unnamed-${item.id}`,
       type: validItemTypes.includes(item.item_type as ItemType)
         ? (item.item_type as ItemType)
         : ItemType.Line,
-      completed:
-        item.item_type === ItemType.Line ? index % 2 === 0 : item.completed,
+      completed: typeof item.completed === "boolean" ? item.completed : false,
     };
-    console.log("Transformed Item:", transformedItem);
+    console.log(
+      "Raw Completed:",
+      rawCompleted,
+      "Transformed Item:",
+      transformedItem
+    );
     return transformedItem;
   });
 
-  if (!items.some((item) => item.type === ItemType.Line)) {
-    items.push({
-      id: "dummy-line-1",
-      name: "L-Dummy-1",
-      type: ItemType.Line,
-      completed: false,
-    });
-    items.push({
-      id: "dummy-line-2",
-      name: "L-Dummy-2",
-      type: ItemType.Line,
-      completed: true,
-    });
+  console.log("Raw Comments:", apiTask.comments); // Log raw comments
+  const transformedComments = Array.isArray(apiTask.comments)
+    ? apiTask.comments.map((comment) => ({
+        id: comment.id,
+        userId: comment.user_id,
+        userName: comment.user_name,
+        userRole: comment.user_role as UserRole,
+        comment: comment.comment,
+        createdAt: comment.created_at,
+      }))
+    : [];
+  console.log("Transformed Comments:", transformedComments); // Log transformed comments
+
+  if (
+    !items.some((item) => item.type === ItemType.Line) &&
+    process.env.NODE_ENV === "development"
+  ) {
+    items.push(
+      {
+        id: "dummy-line-1",
+        name: "L-Dummy-1",
+        type: ItemType.Line,
+        completed: false,
+      },
+      {
+        id: "dummy-line-2",
+        name: "L-Dummy-2",
+        type: ItemType.Line,
+        completed: true,
+      }
+    );
   }
 
   return {
@@ -227,14 +250,7 @@ const transformTask = (apiTask: ApiTask): Task => {
     completedAt: apiTask.completed_at,
     progress: apiTask.progress,
     items,
-    comments: apiTask.comments.map((comment) => ({
-      id: comment.id,
-      userId: comment.user_id,
-      userName: comment.user_name,
-      userRole: comment.user_role as UserRole,
-      comment: comment.comment,
-      createdAt: comment.created_at,
-    })),
+    comments: transformedComments,
     projectId: "",
     pidNumber: "",
     projectName: "",
@@ -302,7 +318,7 @@ const ProjectManagerDashboard = () => {
         }
       );
 
-      console.log("API Response for Assigned Items:", response.data);
+      console.log("Raw API Response for Assigned Items:", response.data.data); // Debug raw structure
       return response.data.data;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -325,15 +341,12 @@ const ProjectManagerDashboard = () => {
       if (!task) {
         setSelectedTaskType("");
         setSelectedItemType("");
-        console.log(
-          "Task not found, setting taskType and itemType to empty strings"
-        );
+        console.log("Task not found");
         toast.error("Task not found. Cannot display assigned items.");
         return;
       }
 
       setSelectedTaskType(task.type);
-      console.log("Task Items:", task.items);
       let itemType: ItemType | null = null;
       if (task.items.length > 0) {
         itemType = task.items[0].type;
@@ -353,12 +366,6 @@ const ProjectManagerDashboard = () => {
       console.log("Determined Item Type:", itemType);
 
       if (!itemType) {
-        console.log(
-          "Task Type:",
-          task.type,
-          "Has Items:",
-          task.items.length > 0
-        );
         toast.error(
           `Unsupported task type: ${task.type}. Cannot display assigned items.`
         );
@@ -368,63 +375,66 @@ const ProjectManagerDashboard = () => {
       }
 
       setSelectedItemType(itemType);
-      console.log("Task Type:", task.type, "Item Type:", itemType);
 
       const items = await fetchAssignedItems(userId, taskId);
       console.log("Fetched Assigned Items:", items);
 
-      // Map fetched items to match AssignedItems type
+      // Map fetched items with fallbacks
       const mappedItems = {
-        ...items,
         upvLines: {
-          ...items.upvLines,
-          items: items.upvLines.items.map((item: any) => ({
-            area_number: item.area_number ?? "",
-            project_name: item.project_name ?? "",
-            id: item.id,
-            line_number: item.line_number,
-            project_id: item.project_id,
-          })),
+          count: items.upvLines?.count || 0,
+          items:
+            items.upvLines?.items.map((item: any) => ({
+              area_number: item.area_number || "",
+              project_name: item.project_name || "",
+              id: item.id,
+              line_number: item.line_number || "N/A",
+              project_id: item.project_id || "",
+            })) || [],
         },
         qcLines: {
-          ...items.qcLines,
-          items: items.qcLines.items.map((item: any) => ({
-            area_number: item.area_number ?? "",
-            project_name: item.project_name ?? "",
-            id: item.id,
-            line_number: item.line_number,
-            project_id: item.project_id,
-          })),
+          count: items.qcLines?.count || 0,
+          items:
+            items.qcLines?.items.map((item: any) => ({
+              area_number: item.area_number || "",
+              project_name: item.project_name || "",
+              id: item.id,
+              line_number: item.line_number || "N/A",
+              project_id: item.project_id || "",
+            })) || [],
         },
         redlinePIDs: {
-          ...items.redlinePIDs,
-          items: items.redlinePIDs.items.map((item: any) => ({
-            area_number: item.area_number ?? "",
-            project_name: item.project_name ?? "",
-            id: item.id,
-            pid_number: item.pid_number,
-            project_id: item.project_id,
-          })),
+          count: items.redlinePIDs?.count || 0,
+          items:
+            items.redlinePIDs?.items.map((item: any) => ({
+              area_number: item.area_number || "",
+              project_name: item.project_name || "",
+              id: item.id,
+              pid_number: item.pid_number || "N/A",
+              project_id: item.project_id || "",
+            })) || [],
         },
         upvEquipment: {
-          ...items.upvEquipment,
-          items: items.upvEquipment.items.map((item: any) => ({
-            area_number: item.area_number ?? "",
-            project_name: item.project_name ?? "",
-            id: item.id,
-            equipment_name: item.equipment_name,
-            project_id: item.project_id,
-          })),
+          count: items.upvEquipment?.count || 0,
+          items:
+            items.upvEquipment?.items.map((item: any) => ({
+              area_number: item.area_number || "",
+              project_name: item.project_name || "",
+              id: item.id,
+              equipment_name: item.equipment_name || "N/A",
+              project_id: item.project_id || "",
+            })) || [],
         },
         qcEquipment: {
-          ...items.qcEquipment,
-          items: items.qcEquipment.items.map((item: any) => ({
-            area_number: item.area_number ?? "",
-            project_name: item.project_name ?? "",
-            id: item.id,
-            equipment_name: item.equipment_name,
-            project_id: item.project_id,
-          })),
+          count: items.qcEquipment?.count || 0,
+          items:
+            items.qcEquipment?.items.map((item: any) => ({
+              area_number: item.area_number || "",
+              project_name: item.project_name || "",
+              id: item.id,
+              equipment_name: item.equipment_name || "N/A",
+              project_id: item.project_id || "",
+            })) || [],
         },
       };
 
@@ -440,7 +450,6 @@ const ProjectManagerDashboard = () => {
       setLoadingItems(false);
     }
   };
-
   const closeModal = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
@@ -450,8 +459,10 @@ const ProjectManagerDashboard = () => {
   };
 
   const handleViewComments = (taskId: string) => {
+    console.log("handleViewComments called for taskId:", taskId);
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
+      console.log("Found Task Comments:", task.comments);
       setSelectedTask(task);
       setSelectedComments(task.comments || []);
       setCommentsModalIsOpen(true);
@@ -1811,16 +1822,24 @@ const ProjectManagerDashboard = () => {
           className="bg-white p-6 rounded-lg shadow-xl max-w-3xl w-full mx-auto my-8 outline-none max-h-[80vh] overflow-y-auto"
           overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
         >
-          <AssignedItemsModal
-            userId={selectedUserId || ""}
-            taskType={selectedTaskType as TaskType}
-            itemType={selectedItemType as ItemType}
-            assignedItems={assignedItems}
-            onClose={closeModal}
-            isLoading={loadingItems}
-          />
+          {selectedUserId &&
+            selectedTaskType &&
+            selectedItemType &&
+            assignedItems && (
+              <AssignedItemsModal
+                isOpen={modalIsOpen}
+                onClose={closeModal}
+                assignedItems={assignedItems}
+                loadingItems={loadingItems}
+                userName={
+                  tasks.find((t) => t.assigneeId === selectedUserId)
+                    ?.assignee || "Unknown"
+                }
+                taskType={selectedTaskType}
+                itemType={selectedItemType}
+              />
+            )}
         </Modal>
-
         <Modal
           isOpen={commentsModalIsOpen}
           onRequestClose={closeCommentsModal}
@@ -1839,7 +1858,20 @@ const ProjectManagerDashboard = () => {
                       <p className="font-medium">{comment.userName}</p>
                       <p className="text-sm text-gray-500">
                         {comment.userRole} •{" "}
-                        {new Date(comment.createdAt).toLocaleString()}
+                        {comment.createdAt
+                          ? new Date(comment.createdAt).toLocaleString(
+                              "en-IN",
+                              {
+                                timeZone: "Asia/Kolkata",
+                                year: "numeric",
+                                month: "short",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: true,
+                              }
+                            )
+                          : "Unknown Date"}
                       </p>
                     </div>
                   </div>
