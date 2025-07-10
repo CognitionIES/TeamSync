@@ -49,23 +49,19 @@ import {
 } from "@/components/ui/dialog";
 import LoginAnimation from "../landing/LoginAnimation";
 
-// API URL - Keeping port 8080 based on logs, but adding debugging
+// API URL
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
 
-// Log the API_URL to debug environment variable issues
+// Log the API_URL for debugging
 console.log("VITE_API_URL from env:", import.meta.env.VITE_API_URL);
 console.log("Using API_URL:", API_URL);
 
-// Helper function to truncate text
+// Helper functions
 const truncateText = (text: string | undefined | null, maxLength: number) => {
-  if (!text) return ""; // Return empty string if text is undefined or null
-  if (text.length > maxLength) {
-    return text.substring(0, maxLength) + "...";
-  }
-  return text;
+  if (!text) return "";
+  return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 };
 
-// Format time in HH:MM 24-hour format
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleTimeString("en-IN", {
@@ -86,6 +82,8 @@ interface User {
   name: string;
   role: "Team Member" | "Team Lead";
   projectId?: string;
+  teamLead?: string; // Added for team assignment
+  password?: string; // Add password as optional
 }
 
 const AdminDashboard = () => {
@@ -107,8 +105,8 @@ const AdminDashboard = () => {
     { name: "Completed", value: 0, color: "#16A34A" },
   ]);
   const [auditLogs, setAuditLogs] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1); // Pagination: Current page
-  const [logsPerPage, setLogsPerPage] = useState(10); // Pagination: Logs per page
+  const [currentPage, setCurrentPage] = useState(1);
+  const [logsPerPage, setLogsPerPage] = useState(10);
 
   // User management state
   const [users, setUsers] = useState<User[]>([]);
@@ -124,17 +122,29 @@ const AdminDashboard = () => {
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // Team management state
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamLead, setNewTeamLead] = useState<string>("none");
+  const [isAddingTeam, setIsAddingTeam] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+
+  // Task type management state
+  const [newTaskType, setNewTaskType] = useState("");
+  const [isAddingTaskType, setIsAddingTaskType] = useState(false);
+  const [isTaskTypeModalOpen, setIsTaskTypeModalOpen] = useState(false);
+
+  // Team change state
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [newTeamForUser, setNewTeamForUser] = useState<string>("none");
+
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, token } = useAuth();
 
-  // Fetch all necessary data (projects, teams, stats, status, logs, users)
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      if (!token) {
-        throw new Error("Token missing during fetchData");
-      }
+      if (!token) throw new Error("Token missing during fetchData");
 
       const config = {
         headers: {
@@ -144,60 +154,11 @@ const AdminDashboard = () => {
       };
 
       const queryParams = new URLSearchParams();
-      if (selectedProject !== "all") {
+      if (selectedProject !== "all")
         queryParams.append("projectId", selectedProject);
-      }
-      if (selectedTeam !== "all") {
-        queryParams.append("teamLead", selectedTeam);
-      }
+      if (selectedTeam !== "all") queryParams.append("teamLead", selectedTeam);
       const queryString = queryParams.toString();
       const urlSuffix = queryString ? `?${queryString}` : "";
-
-      const projectsPromise = axios
-        .get(`${API_URL}/projects`, config)
-        .catch((error) => {
-          console.error("Error fetching projects:", error);
-          return { data: { data: [] } };
-        });
-
-      const teamsPromise = axios
-        .get(`${API_URL}/teams`, config)
-        .catch((error) => {
-          console.error("Error fetching teams:", error);
-          return { data: { data: [] } };
-        });
-
-      const statsPromise = axios
-        .get(`${API_URL}/project-stats${urlSuffix}`, config)
-        .catch((error) => {
-          console.error("Error fetching project stats:", error);
-          return {
-            data: { data: { pidCount: 0, lineCount: 0, equipmentCount: 0 } },
-          };
-        });
-
-      const statusPromise = axios
-        .get(`${API_URL}/task-status${urlSuffix}`, config)
-        .catch((error) => {
-          console.error("Error fetching task status:", error);
-          return {
-            data: { data: { assigned: 0, inProgress: 0, completed: 0 } },
-          };
-        });
-
-      const logsPromise = axios
-        .get(`${API_URL}/audit-logs${urlSuffix}`, config)
-        .catch((error) => {
-          console.error("Error fetching audit logs:", error);
-          return { data: { data: [] } };
-        });
-
-      const usersPromise = axios
-        .get(`${API_URL}/users`, config)
-        .catch((error) => {
-          console.error("Error fetching users:", error);
-          return { data: { data: [] } };
-        });
 
       const [
         projectsResponse,
@@ -207,32 +168,39 @@ const AdminDashboard = () => {
         logsResponse,
         usersResponse,
       ] = await Promise.all([
-        projectsPromise,
-        teamsPromise,
-        statsPromise,
-        statusPromise,
-        logsPromise,
-        usersPromise,
+        axios
+          .get(`${API_URL}/projects`, config)
+          .catch(() => ({ data: { data: [] } })),
+        axios
+          .get(`${API_URL}/teams`, config)
+          .catch(() => ({ data: { data: [] } })),
+        axios
+          .get(`${API_URL}/project-stats${urlSuffix}`, config)
+          .catch(() => ({
+            data: { data: { pidCount: 0, lineCount: 0, equipmentCount: 0 } },
+          })),
+        axios
+          .get(`${API_URL}/task-status${urlSuffix}`, config)
+          .catch(() => ({
+            data: { data: { assigned: 0, inProgress: 0, completed: 0 } },
+          })),
+        axios
+          .get(`${API_URL}/audit-logs${urlSuffix}`, config)
+          .catch(() => ({ data: { data: [] } })),
+        axios
+          .get(`${API_URL}/users`, config)
+          .catch(() => ({ data: { data: [] } })),
       ]);
 
-      console.log("Projects Response:", projectsResponse.data);
-      console.log("Teams Response:", teamsResponse.data);
-      console.log("Stats Response:", statsResponse.data);
-      console.log("Status Response:", statusResponse.data);
-      console.log("Logs Response:", logsResponse.data);
-      console.log("Users Response:", usersResponse.data);
-
       setProjects(
-        projectsResponse.data.data.map(
-          (project: { id: string; name: string }) => ({
-            id: project.id.toString(),
-            name: project.name,
-          })
-        ) || []
+        projectsResponse.data.data.map((p: { id: string; name: string }) => ({
+          id: p.id.toString(),
+          name: p.name,
+        })) || []
       );
       setTeams(
         teamsResponse.data.data.map(
-          (team: { team_lead: string }) => team.team_lead
+          (t: { team_lead: string }) => t.team_lead
         ) || []
       );
       setProjectStats(
@@ -261,11 +229,12 @@ const AdminDashboard = () => {
       ]);
       setAuditLogs(logsResponse.data.data || []);
       setUsers(
-        usersResponse.data.data.map((user: any) => ({
-          id: user.id.toString(),
-          name: user.name,
-          role: user.role,
-          projectId: user.projectId?.toString(),
+        usersResponse.data.data.map((u: any) => ({
+          id: u.id.toString(),
+          name: u.name,
+          role: u.role,
+          projectId: u.projectId?.toString(),
+          teamLead: u.team_lead?.toString(), // Assuming team_lead is in the response
         })) || []
       );
 
@@ -288,30 +257,26 @@ const AdminDashboard = () => {
     }
   };
 
-  // Fetch data on component mount if authenticated and when filters change
   useEffect(() => {
     if (location.pathname === "/login") {
       console.log("Already on login page, skipping redirect...");
       return;
     }
-
     if (isRedirecting) {
       console.log(
         "Redirect already in progress, skipping authentication check..."
       );
       return;
     }
-
     if (!isAuthenticated || !token) {
       console.log("Not authenticated or no token, redirecting to login...");
       setIsRedirecting(true);
       navigate("/login", { replace: true });
       return;
     }
-
     console.log("User is authenticated, fetching data...");
     setIsRedirecting(false);
-    setCurrentPage(1); // Reset page on filter change
+    setCurrentPage(1);
     fetchData();
   }, [
     isAuthenticated,
@@ -324,9 +289,7 @@ const AdminDashboard = () => {
 
   const handleRefresh = () => {
     fetchData()
-      .then(() => {
-        toast.success("Data refreshed");
-      })
+      .then(() => toast.success("Data refreshed"))
       .catch((error) => {
         console.error("Error refreshing data:", error);
         toast.error("Failed to refresh data");
@@ -335,7 +298,6 @@ const AdminDashboard = () => {
 
   const handleExport = async () => {
     setIsExporting(true);
-
     try {
       const headers = [
         "ID",
@@ -345,29 +307,18 @@ const AdminDashboard = () => {
         "Current Work",
         "Timestamp",
       ];
-      const rows = auditLogs.map(
-        (log: {
-          id: string;
-          type: string;
-          name: string;
-          createdBy: string;
-          currentWork: string;
-          timestamp: string;
-        }) => [
-          log.id,
-          log.type,
-          log.name,
-          log.createdBy,
-          log.currentWork,
-          formatTime(log.timestamp),
-        ]
-      );
-
+      const rows = auditLogs.map((log: any) => [
+        log.id,
+        log.type,
+        log.name,
+        log.createdBy,
+        log.currentWork,
+        formatTime(log.timestamp),
+      ]);
       const csvContent = [
         headers.join(","),
         ...rows.map((row: string[]) => row.join(",")),
       ].join("\n");
-
       const encodedUri =
         "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
       const link = document.createElement("a");
@@ -377,10 +328,8 @@ const AdminDashboard = () => {
         `project_audit_logs_${new Date().toISOString().split("T")[0]}.csv`
       );
       document.body.appendChild(link);
-
       link.click();
       document.body.removeChild(link);
-
       toast.success("CSV exported successfully");
     } catch (error) {
       toast.error("Failed to export CSV");
@@ -391,18 +340,14 @@ const AdminDashboard = () => {
   };
 
   const handleAddUser = async () => {
-    // Validate required fields
     if (!newUserName || !newUserRole) {
       toast.error("Please provide a name and role for the new user");
       return;
     }
-
-    // Validate passwords
     if (!newUserPassword || !confirmPassword) {
       toast.error("Please provide a password and confirm it");
       return;
     }
-
     if (newUserPassword !== confirmPassword) {
       toast.error("Passwords do not match");
       return;
@@ -416,31 +361,22 @@ const AdminDashboard = () => {
           "Content-Type": "application/json",
         },
       };
-
-      const userData: any = {
+      const userData = {
         name: newUserName,
         role: newUserRole,
         password: newUserPassword,
       };
-
-      if (newUserProject !== "none") {
-        userData.projectId = newUserProject;
-      }
-
-      // Log the request details for debugging
-      console.log("Posting to URL:", `${API_URL}/users`);
-      console.log("Request payload:", userData);
-      console.log("Request headers:", config.headers);
-
+      if (newUserProject !== "none") userData.projectId = newUserProject;
+      if (newTeamForUser !== "none") userData.teamLead = newTeamForUser; 
+      console.log(
+        "Posting to URL:",
+        `${API_URL}/users`,
+        "Request payload:",
+        userData
+      );
       const response = await axios.post(`${API_URL}/users`, userData, config);
-
-      // Log the response for debugging
       console.log("Add user response:", response.data);
-
-      // Refresh user list after adding
       await fetchData();
-
-      // Reset form and close modal
       setNewUserName("");
       setNewUserRole("");
       setNewUserProject("none");
@@ -449,15 +385,9 @@ const AdminDashboard = () => {
       setShowPassword(false);
       setShowConfirmPassword(false);
       setIsModalOpen(false);
-
       toast.success(`User ${newUserName} added successfully`);
     } catch (error) {
-      console.error("Error adding user:", {
-        message: error.message,
-        response: error.response,
-        status: error.response?.status,
-        data: error.response?.data,
-      });
+      console.error("Error adding user:", error);
       const errorMessage =
         error.response?.status === 404
           ? "User creation endpoint not found. Please check the backend API route (expected POST /api/users)."
@@ -468,26 +398,118 @@ const AdminDashboard = () => {
     }
   };
 
-  // Calculate paginated logs
+  const handleCreateTeam = async () => {
+    if (!newTeamName || newTeamLead === "none") {
+      toast.error("Please provide a team name and select a team lead");
+      return;
+    }
+
+    setIsAddingTeam(true);
+    try {
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+      const teamData = { name: newTeamName, team_lead: newTeamLead };
+      console.log("Creating team with:", teamData);
+      const response = await axios.post(`${API_URL}/teams`, teamData, config);
+      console.log("Team creation response:", response.data);
+      await fetchData();
+      setNewTeamName("");
+      setNewTeamLead("none");
+      setIsTeamModalOpen(false);
+      toast.success(`Team ${newTeamName} created successfully`);
+    } catch (error) {
+      console.error("Error creating team:", error);
+      toast.error(error.response?.data?.message || "Failed to create team");
+    } finally {
+      setIsAddingTeam(false);
+    }
+  };
+
+  const handleAddTaskType = async () => {
+    if (!newTaskType) {
+      toast.error("Please provide a task type");
+      return;
+    }
+
+    setIsAddingTaskType(true);
+    try {
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+      const taskTypeData = { type: newTaskType };
+      console.log("Adding task type with:", taskTypeData);
+      const response = await axios.post(
+        `${API_URL}/task-types`,
+        taskTypeData,
+        config
+      );
+      console.log("Task type creation response:", response.data);
+      await fetchData();
+      setNewTaskType("");
+      setIsTaskTypeModalOpen(false);
+      toast.success(`Task type ${newTaskType} added successfully`);
+    } catch (error) {
+      console.error("Error adding task type:", error);
+      toast.error(error.response?.data?.message || "Failed to add task type");
+    } finally {
+      setIsAddingTaskType(false);
+    }
+  };
+
+  const handleChangeTeam = async (userId: string, newTeam: string) => {
+    if (!userId || newTeam === "none") {
+      toast.error("Please select a user and a team");
+      return;
+    }
+
+    try {
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+      const updateData = { team_lead: newTeam };
+      console.log(`Updating user ${userId} to team ${newTeam}`);
+      const response = await axios.patch(
+        `${API_URL}/users/${userId}`,
+        updateData,
+        config
+      );
+      console.log("Team change response:", response.data);
+      await fetchData();
+      setSelectedUserId(null);
+      setNewTeamForUser("none");
+      toast.success("Team updated successfully");
+    } catch (error) {
+      console.error("Error changing team:", error);
+      toast.error(error.response?.data?.message || "Failed to change team");
+    }
+  };
+
   const indexOfLastLog = currentPage * logsPerPage;
   const indexOfFirstLog = indexOfLastLog - logsPerPage;
   const currentLogs = auditLogs.slice(indexOfFirstLog, indexOfLastLog);
   const totalPages = Math.ceil(auditLogs.length / logsPerPage);
 
-  if (!isAuthenticated && location.pathname !== "/login") {
+  if (!isAuthenticated && location.pathname !== "/login")
     return <div>Redirecting to login...</div>;
-  }
-
-  if (isLoading) {
+  if (isLoading)
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-gray-600">{getRandomMessage("loading")}</div>
       </div>
     );
-  }
 
   return (
-    <div className="min-h-screen ">
+    <div className="min-h-screen">
       <LoginAnimation />
       <Navbar onRefresh={handleRefresh} />
 
@@ -495,18 +517,39 @@ const AdminDashboard = () => {
         <header className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            <p className="text-gray-500">Project statistics and audit trails</p>
+            <p className="text-gray-500">
+              Project statistics and admin controls
+            </p>
           </div>
-          
-          <div className="mt-4 sm:mt-0">
+          <div className="mt-4 sm:mt-0 flex gap-2">
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => setIsModalOpen(true)}
+            >
+              <Plus size={16} /> Add Member
+            </Button>
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => setIsTeamModalOpen(true)}
+            >
+              <Plus size={16} /> Create Team
+            </Button>
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => setIsTaskTypeModalOpen(true)}
+            >
+              <Plus size={16} /> Add Task Type
+            </Button>
             <Button
               variant="outline"
               className="flex items-center gap-2"
               onClick={handleExport}
               disabled={isExporting}
             >
-              <Download size={16} />
-              Export Logs
+              <Download size={16} /> Export Logs
             </Button>
           </div>
         </header>
@@ -536,7 +579,6 @@ const AdminDashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="flex-1">
                 <label className="block text-sm font-medium mb-1">
                   Filter by Team
@@ -547,7 +589,7 @@ const AdminDashboard = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Teams</SelectItem>
-                    {teams.map((team: string) => (
+                    {teams.map((team) => (
                       <SelectItem key={team} value={team}>
                         {team}
                       </SelectItem>
@@ -637,7 +679,7 @@ const AdminDashboard = () => {
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
+              <DialogTitle>Add New Member</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -682,6 +724,27 @@ const AdminDashboard = () => {
                       {projects.map((project) => (
                         <SelectItem key={project.id} value={project.id}>
                           {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Team (Optional)
+                  </label>
+                  <Select
+                    value={newTeamForUser}
+                    onValueChange={setNewTeamForUser}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select team" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {teams.map((team) => (
+                        <SelectItem key={team} value={team}>
+                          {team}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -745,10 +808,10 @@ const AdminDashboard = () => {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // Reset form and close modal
                   setNewUserName("");
                   setNewUserRole("");
                   setNewUserProject("none");
+                  setNewTeamForUser("none");
                   setNewUserPassword("");
                   setConfirmPassword("");
                   setShowPassword(false);
@@ -763,11 +826,147 @@ const AdminDashboard = () => {
                 disabled={isAddingUser}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {isAddingUser ? "Adding..." : "Add User"}
+                {isAddingUser ? "Adding..." : "Add Member"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Create Team Modal */}
+        <Dialog open={isTeamModalOpen} onOpenChange={setIsTeamModalOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Create New Team</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Team Name
+                </label>
+                <Input
+                  value={newTeamName}
+                  onChange={(e) => setNewTeamName(e.target.value)}
+                  placeholder="Enter team name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Team Lead
+                </label>
+                <Select value={newTeamLead} onValueChange={setNewTeamLead}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select team lead" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {users
+                      .filter((u) => u.role === "Team Lead")
+                      .map((user) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setNewTeamName("");
+                  setNewTeamLead("none");
+                  setIsTeamModalOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateTeam}
+                disabled={isAddingTeam}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isAddingTeam ? "Creating..." : "Create Team"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Task Type Modal */}
+        <Dialog
+          open={isTaskTypeModalOpen}
+          onOpenChange={setIsTaskTypeModalOpen}
+        >
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Add New Task Type</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Task Type
+                </label>
+                <Input
+                  value={newTaskType}
+                  onChange={(e) => setNewTaskType(e.target.value)}
+                  placeholder="Enter task type (e.g., upv, qc)"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setNewTaskType("");
+                  setIsTaskTypeModalOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddTaskType}
+                disabled={isAddingTaskType}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isAddingTaskType ? "Adding..." : "Add Task Type"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manage User Teams */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Manage User Teams</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {users.map((user) => (
+                <div key={user.id} className="flex items-center gap-4">
+                  <span>
+                    {user.name} ({user.role})
+                  </span>
+                  <Select
+                    value={user.teamLead || "none"}
+                    onValueChange={(value) => handleChangeTeam(user.id, value)}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Select team" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {teams.map((team) => (
+                        <SelectItem key={team} value={team}>
+                          {team}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Audit Trails */}
         <Card>
@@ -788,43 +987,32 @@ const AdminDashboard = () => {
                 </TableHeader>
                 <TableBody>
                   {currentLogs.length > 0 ? (
-                    currentLogs.map(
-                      (log: {
-                        id: string;
-                        type: string;
-                        name: string;
-                        createdBy: string;
-                        currentWork: string;
-                        timestamp: string;
-                      }) => (
-                        <TableRow key={log.id}>
-                          <TableCell>{log.type}</TableCell>
-                          <TableCell>{log.name}</TableCell>
-                          <TableCell>{log.createdBy}</TableCell>
-                          <TableCell>
-                            <TooltipProvider>
-                              <UITooltip>
-                                <TooltipTrigger className="cursor-help text-left">
-                                  <span className="text-sm">
-                                    {truncateText(log.currentWork, 50)}
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>{log.currentWork}</p>
-                                </TooltipContent>
-                              </UITooltip>
-                            </TooltipProvider>
-                          </TableCell>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <div>
-                                Assigned at: {formatTime(log.timestamp)}
-                              </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    )
+                    currentLogs.map((log: any) => (
+                      <TableRow key={log.id}>
+                        <TableCell>{log.type}</TableCell>
+                        <TableCell>{log.name}</TableCell>
+                        <TableCell>{log.createdBy}</TableCell>
+                        <TableCell>
+                          <TooltipProvider>
+                            <UITooltip>
+                              <TooltipTrigger className="cursor-help text-left">
+                                <span className="text-sm">
+                                  {truncateText(log.currentWork, 50)}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{log.currentWork}</p>
+                              </TooltipContent>
+                            </UITooltip>
+                          </TooltipProvider>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <div>Assigned at: {formatTime(log.timestamp)}</div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
                   ) : (
                     <TableRow>
                       <TableCell colSpan={5} className="h-24 text-center">
@@ -836,16 +1024,14 @@ const AdminDashboard = () => {
               </Table>
             </div>
 
-            {/* Pagination Controls */}
             <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
-              {/* Logs per page dropdown */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-600">Logs per page:</span>
                 <Select
                   value={logsPerPage.toString()}
                   onValueChange={(value) => {
                     setLogsPerPage(Number(value));
-                    setCurrentPage(1); // Reset to page 1
+                    setCurrentPage(1);
                   }}
                 >
                   <SelectTrigger className="w-20">
@@ -859,8 +1045,6 @@ const AdminDashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
-
-              {/* Page navigation */}
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
