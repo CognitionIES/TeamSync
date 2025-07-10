@@ -1547,6 +1547,48 @@ const TeamLeadDashboard = () => {
                           No available lines
                         </p>
                       )}
+                      {assignmentType === "Line" && lines.length > 0 && (
+                        <div className="max-h-60 overflow-y-auto space-y-2">
+                          {Object.entries(
+                            lines.reduce((acc, line) => {
+                              const pid = pids.find((p) => p.id === line.pidId);
+                              const pidNumber = pid ? pid.name : "Unknown PID";
+                              if (!acc[pidNumber]) acc[pidNumber] = [];
+                              acc[pidNumber].push(line);
+                              return acc;
+                            }, {} as { [key: string]: Line[] })
+                          ).map(([pidNumber, pidLines], pidIndex) => (
+                            <div key={pidNumber + pidIndex}>
+                              <div className="border-t border-gray-300 my-4">
+                                <h4 className="text-sm font-semibold text-gray-700 mt-2">
+                                  Lines from PID {pidNumber}
+                                </h4>
+                              </div>
+                              {pidLines.map((line, index) => (
+                                <div
+                                  key={line.id}
+                                  className="flex items-center space-x-2"
+                                >
+                                  <Checkbox
+                                    id={line.id}
+                                    checked={selectedLines.includes(line.id)}
+                                    onCheckedChange={(checked) =>
+                                      handleLineCheckboxChange(
+                                        line.id,
+                                        index,
+                                        checked as boolean
+                                      )
+                                    }
+                                  />
+                                  <label htmlFor={line.id} className="text-sm">
+                                    {line.name}
+                                  </label>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}{" "}
                       {assignmentType === "Line" &&
                         lines.map((line, index) => (
                           <div
