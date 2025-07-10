@@ -259,7 +259,6 @@ const transformTask = (apiTask: ApiTask): Task => {
     lines: undefined,
   };
 };
-
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);

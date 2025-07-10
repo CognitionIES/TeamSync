@@ -1520,6 +1520,34 @@ const TeamLeadDashboard = () => {
                           No available P&IDs
                         </p>
                       )}
+                      {assignmentType === "PID" && pids.length > 0 && (
+                        <div className="max-h-60 overflow-y-auto space-y-2">
+                          {pids.map((pid, index) => (
+                            <div
+                              key={pid.id}
+                              className="flex items-center space-x-2"
+                            >
+                              <Checkbox
+                                id={pid.id}
+                                checked={selectedPIDs.includes(pid.id)}
+                                onCheckedChange={(checked) =>
+                                  handlePIDCheckboxChange(
+                                    pid.id,
+                                    index,
+                                    checked as boolean
+                                  )
+                                }
+                              />
+                              <label htmlFor={pid.id} className="text-sm">
+                                {pid.name}
+                              </label>
+                            </div>
+                          ))}
+                          <p className="text-sm text-gray-600 mt-2">
+                            Selected P&IDs: {selectedPIDs.length}
+                          </p>
+                        </div>
+                      )}
                       {assignmentType === "PID" &&
                         pids.map((pid, index) => (
                           <div

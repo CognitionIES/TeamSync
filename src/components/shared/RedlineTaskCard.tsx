@@ -1,4 +1,4 @@
- import { memo, useState } from "react";
+import { memo, useState } from "react";
 import { Task, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -39,16 +39,17 @@ const RedlineTaskCard = memo(
     onOpenComments,
   }: RedlineTaskCardProps) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [isOpenPID, setIsOpenPID] = useState(false); // New state for PID collapsible
     const [completedItems, setCompletedItems] = useState<string[]>(
       task.items.filter((item) => item.completed).map((item) => item.id)
     );
 
-    const pidItem = task.items.find((item) => item.type === "PID");
-    if (pidItem && !pidItem.id) {
-      console.warn("Invalid PID item in task:", task, pidItem);
+    const pidItems = task.items.filter((item) => item.type === "PID");
+    if (pidItems.some((item) => !item.id)) {
+      console.warn("Invalid PID item in task:", task, pidItems);
       return null;
     }
-    const pidCount = pidItem ? 1 : 0;
+    const pidCount = pidItems.length;
     const lineItems = task.lines || [];
     const lineCount = lineItems.length;
 
@@ -86,11 +87,11 @@ const RedlineTaskCard = memo(
         onItemToggle(task.id, itemId, checked);
       }
 
-      const totalItems = lineItems.length;
+      const totalItems = pidItems.length + lineItems.length;
       const newCompletedCount = updatedCompleted.length;
       if (newCompletedCount === totalItems) {
         toast.success(
-          "All lines checked! Task is ready to be marked as complete."
+          "All P&IDs and lines checked! Task is ready to be marked as complete."
         );
       }
     };
@@ -146,9 +147,9 @@ const RedlineTaskCard = memo(
               <p className="text-base font-medium text-blue-800">
                 P&ID: {pidCount}, Lines: {lineCount}
               </p>
-              {pidItem && (
+              {pidItems.length > 0 && (
                 <p className="text-sm text-blue-700 mt-1">
-                  P&ID Name: {pidItem.name || "Unknown"}
+                  P&ID Names: {pidItems.map((item) => item.name).join(", ")}
                 </p>
               )}
             </div>
@@ -172,31 +173,110 @@ const RedlineTaskCard = memo(
               </div>
             </div>
 
-            <Collapsible
-              open={isOpen}
-              onOpenChange={setIsOpen}
-              className="mt-4"
-            >
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex w-full justify-between p-0 h-8"
-                >
-                  <span className="font-medium">
-                    Line List ({lineItems.length})
-                  </span>
-                  {isOpen ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2">
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                  {lineItems.length > 0 ? (
-                    lineItems.map((item) => (
+            {pidItems.length > 0 && (
+              <Collapsible
+                open={isOpenPID}
+                onOpenChange={setIsOpenPID}
+                className="mt-4"
+              >
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex w-full justify-between p-0 h-8"
+                  >
+                    <span className="font-medium">
+                      P&ID List ({pidItems.length})
+                    </span>
+                    {isOpenPID ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    {pidItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center space-x-2 py-1 border-b border-gray-100 last:border-0"
+                      >
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center space-x-2 flex-grow">
+                                <Checkbox
+                                  id={`pid-${item.id}`}
+                                  checked={
+                                    completedItems.includes(item.id) ||
+                                    item.completed
+                                  }
+                                  onCheckedChange={(checked) =>
+                                    handleCheckItem(item.id, !!checked)
+                                  }
+                                  disabled={
+                                    isCompleted ||
+                                    completedItems.includes(item.id) ||
+                                    item.completed
+                                  }
+                                  className="data-[state=checked]:bg-green-500"
+                                />
+                                <label
+                                  htmlFor={`pid-${item.id}`}
+                                  className={`text-sm flex-1 cursor-pointer ${
+                                    completedItems.includes(item.id) ||
+                                    item.completed
+                                      ? "line-through text-gray-500"
+                                      : ""
+                                  }`}
+                                >
+                                  {item.name}
+                                </label>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {task.status !== "In Progress"
+                                ? "Start task to enable this checkbox"
+                                : completedItems.includes(item.id) ||
+                                  item.completed
+                                ? "This item cannot be unchecked"
+                                : "Mark as completed"}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+
+            {lineItems.length > 0 && (
+              <Collapsible
+                open={isOpen}
+                onOpenChange={setIsOpen}
+                className="mt-4"
+              >
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex w-full justify-between p-0 h-8"
+                  >
+                    <span className="font-medium">
+                      Line List ({lineItems.length})
+                    </span>
+                    {isOpen ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    {lineItems.map((item) => (
                       <div
                         key={item.id}
                         className="flex items-center space-x-2 py-1 border-b border-gray-100 last:border-0"
@@ -245,15 +325,11 @@ const RedlineTaskCard = memo(
                           </Tooltip>
                         </TooltipProvider>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-500">
-                      No lines available for this P&ID.
-                    </p>
-                  )}
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </CardContent>
         <CardContent className="pt-2 pb-4 flex justify-between">
@@ -284,7 +360,9 @@ const RedlineTaskCard = memo(
                 size="sm"
                 onClick={() => handleStatusChange("Completed")}
                 className="bg-green-500 text-white hover:bg-green-600"
-                disabled={completedItems.length !== lineItems.length}
+                disabled={
+                  completedItems.length !== pidItems.length + lineItems.length
+                }
               >
                 <CheckCircle className="mr-1 h-4 w-4" />
                 Complete Task

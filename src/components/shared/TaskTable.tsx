@@ -52,29 +52,89 @@ const truncateText = (text: string, maxLength: number = 20) => {
 const getCurrentWork = (task: Task): string => {
   if (task.status === "Completed") return "Completed";
 
-  const pidItem = task.items.find((item) => item.type === "PID");
-  if (pidItem && pidItem.name) return `P&ID ${pidItem.name}`;
+  const items = task.items || [];
+  const summaries = [];
 
-  const lineItem = task.items.find((item) => item.type === "Line");
-  if (lineItem && lineItem.name) return `Line ${lineItem.name}`;
+  // Lines
+  const lineItems = items.filter((item) => item.type === "Line");
+  if (lineItems.length > 0) {
+    const completedLines = lineItems.filter((item) => item.completed).length;
+    summaries.push(
+      `${lineItems.length} Line${lineItems.length > 1 ? "s" : ""} (${
+        completedLines === lineItems.length
+          ? "Completed"
+          : completedLines > 0
+          ? `${completedLines} Completed`
+          : "Assigned"
+      })`
+    );
+  }
 
-  const equipmentItem = task.items.find((item) => item.type === "Equipment");
-  if (equipmentItem && equipmentItem.name)
-    return `Equipment ${equipmentItem.name}`;
+  // Equipment
+  const equipmentItems = items.filter((item) => item.type === "Equipment");
+  if (equipmentItems.length > 0) {
+    const completedEquipment = equipmentItems.filter(
+      (item) => item.completed
+    ).length;
+    summaries.push(
+      `${equipmentItems.length} Equipment${
+        equipmentItems.length > 1 ? "s" : ""
+      } (${
+        completedEquipment === equipmentItems.length
+          ? "Completed"
+          : completedEquipment > 0
+          ? `${completedEquipment} Completed`
+          : "Assigned"
+      })`
+    );
+  }
 
-  const instrumentItem = task.items.find(
+  // P&IDs (Redlines)
+  const redlineItems = items.filter((item) => item.type === "PID");
+  if (redlineItems.length > 0) {
+    const completedRedlines = redlineItems.filter(
+      (item) => item.completed
+    ).length;
+    summaries.push(
+      `${redlineItems.length} P&ID${redlineItems.length > 1 ? "s" : ""} (${
+        completedRedlines === redlineItems.length
+          ? "Completed"
+          : completedRedlines > 0
+          ? `${completedRedlines} Completed`
+          : "Assigned"
+      })`
+    );
+  }
+
+  // Instruments
+  const instrumentItems = items.filter(
     (item) => item.type === "NonInlineInstrument"
   );
-  if (instrumentItem && instrumentItem.name)
-    return `Instrument ${instrumentItem.name}`;
+  if (instrumentItems.length > 0) {
+    const completedInstruments = instrumentItems.filter(
+      (item) => item.completed
+    ).length;
+    summaries.push(
+      `${instrumentItems.length} Instrument${
+        instrumentItems.length > 1 ? "s" : ""
+      } (${
+        completedInstruments === instrumentItems.length
+          ? "Completed"
+          : completedInstruments > 0
+          ? `${completedInstruments} Completed`
+          : "Assigned"
+      })`
+    );
+  }
 
-  return "No active items"; // Fallback if no valid item is found
+  return summaries.length > 0 ? summaries.join(", ") : "No active items";
 };
+
 const formatDateTime = (dateStr: string | null, label: string): string => {
   if (!dateStr) return `Not ${label}`;
   try {
     const date = parseISO(dateStr);
-    const offsetMinutes = 5 * 60 + 30;
+    const offsetMinutes = 5 * 60 + 30; // IST offset (UTC+5:30)
     const adjustedDate = new Date(date.getTime() + offsetMinutes * 60 * 1000);
     return (
       adjustedDate.toLocaleString("en-US", {
@@ -178,9 +238,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const completedTime = formatDateTime(task.completedAt, "Completed");
 
     const lineItems = task.items.filter((item) => item.type === "Line");
-    const completedLines = lineItems.filter(
-      (item) => item.completed === true
-    ).length;
+    const completedLines = lineItems.filter((item) => item.completed).length;
     const totalLines = lineItems.length;
 
     // Ensure comments is an array
