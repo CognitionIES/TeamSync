@@ -46,7 +46,10 @@ interface TeamLead {
 interface TeamPerformanceProps {
   tasks: Task[];
   teamLeads: TeamLead[];
+  onViewCurrentWork: (taskId: string, userId: string) => Promise<void>;
+  onViewComments: (taskId: string) => void;
 }
+
 
 interface TeamPerformanceData {
   team: string;

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
 import {
   Card,
@@ -20,6 +21,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import axios from "axios";
+
+// Use Vite's environment variable or fallback
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 interface TaskCardProps {
   task: Task;
@@ -40,7 +45,6 @@ const TaskCard = ({
   const [isUpdating, setIsUpdating] = useState(false);
   const allCompleted = task.items.every((item) => item.completed);
 
-  // Format time in HH:MM 24-hour format
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString("en-IN", {
@@ -51,7 +55,6 @@ const TaskCard = ({
     });
   };
 
-  // Format date as "MMM DD, YYYY"
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -93,26 +96,48 @@ const TaskCard = ({
   const handleItemToggle = async (item: TaskItem, isChecked: boolean) => {
     if (!onItemToggle) return;
 
-    // Check if task is in progress
     if (task.status !== "In Progress" && isChecked) {
       toast.error("You must start the task before marking items as completed");
-      return;
+      return Promise.reject("Task not started");
     }
 
-    // Cannot uncheck items once checked
     if (!isChecked && item.completed) {
       toast.error("Items cannot be unchecked once completed");
-      return;
+      return Promise.reject("Item cannot be unchecked");
     }
 
     try {
       await onItemToggle(task.id, item.id, isChecked);
+      const token = localStorage.getItem("teamsync_token");
+      if (token && isChecked) {
+        try {
+          const response = await axios.post(
+            `${API_URL}/metrics/individual/lines/daily`,
+            { userId: task.assigneeId, taskId: task.id, itemId: item.id },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          console.log("Metrics update response:", response.data);
+          toast.success("Line count updated successfully");
+        } catch (metricsError) {
+          const axiosError = metricsError as any;
+          console.error("Metrics update failed:", {
+            message: axiosError.message,
+            status: axiosError.response?.status,
+            data: axiosError.response?.data,
+            taskId: task.id,
+            itemId: item.id,
+          });
+          toast.error(
+            `Failed to update line count metric: ${axiosError.message}`
+          );
+        }
+      }
     } catch (error) {
       toast.error(`Failed to update ${item.type} status`);
+      throw error;
     }
   };
 
-  // Check if the task involves lines (e.g., Redline tasks) and has a P&ID
   const isLineTask = task.type === "Redline";
   const pidItem = task.items.find((item) => item.type === "PID");
 
@@ -147,7 +172,6 @@ const TaskCard = ({
           />
         </div>
         <div className="mt-2 space-y-2">
-          
           <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
             <p className="text-base font-medium text-blue-800">
               Project: {task.projectName || "Unknown"}

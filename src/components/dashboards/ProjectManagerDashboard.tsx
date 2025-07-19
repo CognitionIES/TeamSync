@@ -259,6 +259,7 @@ const transformTask = (apiTask: ApiTask): Task => {
     lines: undefined,
   };
 };
+
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
@@ -378,61 +379,64 @@ const ProjectManagerDashboard = () => {
       const items = await fetchAssignedItems(userId, taskId);
       console.log("Fetched Assigned Items:", items);
 
-      // Map fetched items with fallbacks
-      const mappedItems = {
+      // Map fetched items with fallbacks and ensure all required properties exist
+      const mappedItems: FetchedAssignedItems = {
+        pids: items.pids ?? [],
+        lines: items.lines ?? [],
+        equipment: items.equipment ?? [],
         upvLines: {
           count: items.upvLines?.count || 0,
           items:
             items.upvLines?.items.map((item: any) => ({
-              area_number: item.area_number || "",
-              project_name: item.project_name || "",
+              area_number: item.area_number ?? "",
+              project_name: item.project_name ?? "",
               id: item.id,
-              line_number: item.line_number || "N/A",
-              project_id: item.project_id || "",
+              line_number: item.line_number ?? "N/A",
+              project_id: item.project_id ?? "",
             })) || [],
         },
         qcLines: {
           count: items.qcLines?.count || 0,
           items:
             items.qcLines?.items.map((item: any) => ({
-              area_number: item.area_number || "",
-              project_name: item.project_name || "",
+              area_number: item.area_number ?? "",
+              project_name: item.project_name ?? "",
               id: item.id,
-              line_number: item.line_number || "N/A",
-              project_id: item.project_id || "",
+              line_number: item.line_number ?? "N/A",
+              project_id: item.project_id ?? "",
             })) || [],
         },
         redlinePIDs: {
           count: items.redlinePIDs?.count || 0,
           items:
             items.redlinePIDs?.items.map((item: any) => ({
-              area_number: item.area_number || "",
-              project_name: item.project_name || "",
+              area_number: item.area_number ?? "",
+              project_name: item.project_name ?? "",
               id: item.id,
-              pid_number: item.pid_number || "N/A",
-              project_id: item.project_id || "",
+              pid_number: item.pid_number ?? "N/A",
+              project_id: item.project_id ?? "",
             })) || [],
         },
         upvEquipment: {
           count: items.upvEquipment?.count || 0,
           items:
             items.upvEquipment?.items.map((item: any) => ({
-              area_number: item.area_number || "",
-              project_name: item.project_name || "",
+              area_number: item.area_number ?? "",
+              project_name: item.project_name ?? "",
               id: item.id,
-              equipment_name: item.equipment_name || "N/A",
-              project_id: item.project_id || "",
+              equipment_name: item.equipment_name ?? "N/A",
+              project_id: item.project_id ?? "",
             })) || [],
         },
         qcEquipment: {
           count: items.qcEquipment?.count || 0,
           items:
             items.qcEquipment?.items.map((item: any) => ({
-              area_number: item.area_number || "",
-              project_name: item.project_name || "",
+              area_number: item.area_number ?? "",
+              project_name: item.project_name ?? "",
               id: item.id,
-              equipment_name: item.equipment_name || "N/A",
-              project_id: item.project_id || "",
+              equipment_name: item.equipment_name ?? "N/A",
+              project_id: item.project_id ?? "",
             })) || [],
         },
       };
@@ -490,25 +494,27 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-
-      setIndividualMetrics((prev) => ({
-        ...prev,
-        daily: response.data.daily_lines, // Update daily with new structure
-        weekly: [], // Clear or fetch separately if needed
-        monthly: [], // Clear or fetch separately if needed
-      }));
+      const data = response.data || { daily: [{ counts: { lines: 0 } }] };
+      setIndividualMetrics({
+        daily: data.daily,
+        weekly: [],
+        monthly: [],
+      });
       setIndividualMetricsError(null);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching individual metrics:", axiosError);
-      const errorMessage =
-        axiosError.response?.data?.message ||
-        "Failed to fetch individual metrics";
-      setIndividualMetricsError(errorMessage);
+      setIndividualMetricsError(
+        axiosError.response?.data?.message || "Failed to fetch"
+      );
       setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
-      toast.error(errorMessage);
+      toast.error(
+        axiosError.response?.data?.message ||
+          "Failed to fetch individual metrics"
+      );
     }
   };
+
   const fetchTeamMetrics = async (teamId: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -523,19 +529,29 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-
-      setTeamMetrics(response.data);
+      const data = response.data || { daily: [] };
+      setTeamMetrics({
+        daily: data.daily.map((m: MetricEntry) => ({
+          date: m.date,
+          counts: m.counts || { lines: {}, equipment: {}, pids: {} },
+        })),
+        weekly: [], // Placeholder, update backend for weekly/monthly if needed
+        monthly: [], // Placeholder, update backend for weekly/monthly if needed
+      });
       setTeamMetricsError(null);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching team metrics:", axiosError);
-      const errorMessage =
-        axiosError.response?.data?.message || "Failed to fetch team metrics";
-      setTeamMetricsError(errorMessage);
+      setTeamMetricsError(
+        axiosError.response?.data?.message || "Failed to fetch"
+      );
       setTeamMetrics({ daily: [], weekly: [], monthly: [] });
-      toast.error(errorMessage);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch team metrics"
+      );
     }
   };
+
   const fetchProjectProgress = async (itemType: string, taskType: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -718,6 +734,7 @@ const ProjectManagerDashboard = () => {
   }, []);
 
   useEffect(() => {
+    console.log("Selected Metrics User:", selectedMetricsUser);
     if (selectedMetricsUser) {
       fetchIndividualMetrics(selectedMetricsUser);
     }
@@ -969,6 +986,7 @@ const ProjectManagerDashboard = () => {
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
+            <TabsTrigger value="data">Data</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
@@ -1232,9 +1250,9 @@ const ProjectManagerDashboard = () => {
           <TabsContent value="performance" className="animate-fade-in">
             <TeamPerformanceView
               teamLeads={teamLeads}
-              isLoading={isLoading}
               onViewCurrentWork={handleViewCurrentWork}
               onViewComments={handleViewComments}
+              tasks={[]}
             />
           </TabsContent>
 
@@ -1245,7 +1263,7 @@ const ProjectManagerDashboard = () => {
                   Individual Metrics
                 </CardTitle>
                 <CardDescription>
-                  Metrics for an individual daily, weekly, and monthly
+                  Metrics for individuals daily by item and task type
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
@@ -1292,55 +1310,50 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Name</TableHead>
                           <TableHead>Team Name</TableHead>
                           <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
-                          <TableHead>P&IDs</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {individualMetrics.daily.map((metric, index) => {
-                          console.log("Daily Metric:", metric);
-                          const user = users.find(
-                            (u) => u.id === selectedMetricsUser
-                          );
-                          const userTeam = teamLeads.find((team) =>
-                            team.team.includes(user?.name || "")
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{user?.name || "Unknown"}</TableCell>
-                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.upv || 0) +
-                                  (metric.counts?.lines?.qc || 0) +
-                                  (metric.counts?.lines?.redline || 0) +
-                                  (metric.counts?.lines?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.equipment?.upv || 0) +
-                                  (metric.counts?.equipment?.qc || 0) +
-                                  (metric.counts?.equipment?.redline || 0) +
-                                  (metric.counts?.equipment?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.non_line_instruments?.upv ||
-                                  0) +
-                                  (metric.counts?.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts?.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts?.non_line_instruments?.misc ||
-                                    0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.pids?.upv || 0) +
-                                  (metric.counts?.pids?.qc || 0) +
-                                  (metric.counts?.pids?.redline || 0) +
-                                  (metric.counts?.pids?.misc || 0)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : individualMetrics.daily &&
+                          individualMetrics.daily.length > 0 ? (
+                          <TableRow>
+                            <TableCell>
+                              {users.find((u) => u.id === selectedMetricsUser)
+                                ?.name || "Unknown"}
+                            </TableCell>
+                            <TableCell>
+                              {teamLeads.find((team) =>
+                                team.team.includes(
+                                  users.find(
+                                    (u) => u.id === selectedMetricsUser
+                                  )?.name || ""
+                                )
+                              )?.name || "N/A"}
+                            </TableCell>
+                            <TableCell>
+                              {individualMetrics.daily.length > 0
+                                ? individualMetrics.daily[0].counts.lines || 0
+                                : 0}
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="text-center text-gray-500"
+                            >
+                              No daily data available
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
                   </TabsContent>
@@ -1352,53 +1365,63 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Team Name</TableHead>
                           <TableHead>Lines</TableHead>
                           <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
                           <TableHead>P&IDs</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {individualMetrics.weekly.map((metric, index) => {
-                          const user = users.find(
-                            (u) => u.id === selectedMetricsUser
-                          );
-                          const userTeam = teamLeads.find((team) =>
-                            team.team.includes(user?.name || "")
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{user?.name || "Unknown"}</TableCell>
-                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.upv || 0) +
-                                  (metric.counts?.lines?.qc || 0) +
-                                  (metric.counts?.lines?.redline || 0) +
-                                  (metric.counts?.lines?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.equipment?.upv || 0) +
-                                  (metric.counts?.equipment?.qc || 0) +
-                                  (metric.counts?.equipment?.redline || 0) +
-                                  (metric.counts?.equipment?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.non_line_instruments?.upv ||
-                                  0) +
-                                  (metric.counts?.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts?.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts?.non_line_instruments?.misc ||
-                                    0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.pids?.upv || 0) +
-                                  (metric.counts?.pids?.qc || 0) +
-                                  (metric.counts?.pids?.redline || 0) +
-                                  (metric.counts?.pids?.misc || 0)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={5}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : individualMetrics.weekly &&
+                          individualMetrics.weekly.length > 0 ? (
+                          individualMetrics.weekly.map((metric, index) => {
+                            const user = users.find(
+                              (u) => u.id === selectedMetricsUser
+                            );
+                            const userTeam = teamLeads.find((team) =>
+                              team.team.includes(user?.name || "")
+                            );
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>{user?.name || "Unknown"}</TableCell>
+                                <TableCell>{userTeam?.name || "N/A"}</TableCell>
+                                <TableCell>
+                                  {(metric.counts?.lines?.upv || 0) +
+                                    (metric.counts?.lines?.qc || 0) +
+                                    (metric.counts?.lines?.redline || 0) +
+                                    (metric.counts?.lines?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.equipment?.upv || 0) +
+                                    (metric.counts?.equipment?.qc || 0) +
+                                    (metric.counts?.equipment?.redline || 0) +
+                                    (metric.counts?.equipment?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.pids?.upv || 0) +
+                                    (metric.counts?.pids?.qc || 0) +
+                                    (metric.counts?.pids?.redline || 0) +
+                                    (metric.counts?.pids?.misc || 0)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell
+                              colSpan={5}
+                              className="text-center text-gray-500"
+                            >
+                              No weekly data available
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
                   </TabsContent>
@@ -1410,56 +1433,66 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Team Name</TableHead>
                           <TableHead>Lines</TableHead>
                           <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
                           <TableHead>P&IDs</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {individualMetrics.monthly.map((metric, index) => {
-                          const user = users.find(
-                            (u) => u.id === selectedMetricsUser
-                          );
-                          const userTeam = teamLeads.find((team) =>
-                            team.team.includes(user?.name || "")
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{user?.name || "Unknown"}</TableCell>
-                              <TableCell>{userTeam?.name || "N/A"}</TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.upv || 0) +
-                                  (metric.counts?.lines?.qc || 0) +
-                                  (metric.counts?.lines?.redline || 0) +
-                                  (metric.counts?.lines?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.equipment?.upv || 0) +
-                                  (metric.counts?.equipment?.qc || 0) +
-                                  (metric.counts?.equipment?.redline || 0) +
-                                  (metric.counts?.equipment?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.non_line_instruments?.upv ||
-                                  0) +
-                                  (metric.counts?.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts?.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts?.non_line_instruments?.misc ||
-                                    0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.pids?.upv || 0) +
-                                  (metric.counts?.pids?.qc || 0) +
-                                  (metric.counts?.pids?.redline || 0) +
-                                  (metric.counts?.pids?.misc || 0)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={5}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : individualMetrics.monthly &&
+                          individualMetrics.monthly.length > 0 ? (
+                          individualMetrics.monthly.map((metric, index) => {
+                            const user = users.find(
+                              (u) => u.id === selectedMetricsUser
+                            );
+                            const userTeam = teamLeads.find((team) =>
+                              team.team.includes(user?.name || "")
+                            );
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>{user?.name || "Unknown"}</TableCell>
+                                <TableCell>{userTeam?.name || "N/A"}</TableCell>
+                                <TableCell>
+                                  {(metric.counts?.lines?.upv || 0) +
+                                    (metric.counts?.lines?.qc || 0) +
+                                    (metric.counts?.lines?.redline || 0) +
+                                    (metric.counts?.lines?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.equipment?.upv || 0) +
+                                    (metric.counts?.equipment?.qc || 0) +
+                                    (metric.counts?.equipment?.redline || 0) +
+                                    (metric.counts?.equipment?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.pids?.upv || 0) +
+                                    (metric.counts?.pids?.qc || 0) +
+                                    (metric.counts?.pids?.redline || 0) +
+                                    (metric.counts?.pids?.misc || 0)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell
+                              colSpan={5}
+                              className="text-center text-gray-500"
+                            >
+                              No monthly data available
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </TableBody>
                     </Table>
-                  </TabsContent>{" "}
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
@@ -1470,7 +1503,7 @@ const ProjectManagerDashboard = () => {
                   Team Metrics
                 </CardTitle>
                 <CardDescription>
-                  Metrics for a team daily, weekly, and monthly
+                  Metrics for teams daily by item and task type
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
@@ -1516,67 +1549,150 @@ const ProjectManagerDashboard = () => {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
-                          <TableHead>P&IDs</TableHead>
-                          <TableHead>UPV</TableHead>
-                          <TableHead>QC</TableHead>
-                          <TableHead>Redline</TableHead>
-                          <TableHead>Misc</TableHead>
+                          <TableHead>Lines (UPV)</TableHead>
+                          <TableHead>Lines (QC)</TableHead>
+                          <TableHead>Lines (Redline)</TableHead>
+                          <TableHead>Equipment (UPV)</TableHead>
+                          <TableHead>Equipment (QC)</TableHead>
+                          <TableHead>Equipment (Redline)</TableHead>
+                          <TableHead>P&IDs (Redline)</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {teamMetrics.daily.map((metric, index) => {
-                          const team = teamLeads.find(
-                            (t) => t.id === selectedMetricsTeam
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{team?.name || "Unknown"}</TableCell>
-                              <TableCell>
-                                {(metric.counts.lines?.upv || 0) +
-                                  (metric.counts.lines?.qc || 0) +
-                                  (metric.counts.lines?.redline || 0) +
-                                  (metric.counts.lines?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts.equipment?.upv || 0) +
-                                  (metric.counts.equipment?.qc || 0) +
-                                  (metric.counts.equipment?.redline || 0) +
-                                  (metric.counts.equipment?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts.non_line_instruments?.upv ||
-                                  0) +
-                                  (metric.counts.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts.non_line_instruments?.misc ||
-                                    0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts.pids?.upv || 0) +
-                                  (metric.counts.pids?.qc || 0) +
-                                  (metric.counts.pids?.redline || 0) +
-                                  (metric.counts.pids?.misc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts.lines?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts.lines?.qc || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts.lines?.redline || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts.lines?.misc || 0}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={8}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          teamLeads
+                            .filter((team) => team.id === selectedMetricsTeam)
+                            .map((team) => {
+                              const teamMembers = team.team
+                                .map((member) =>
+                                  users.find((u) => u.name === member)
+                                )
+                                .filter(Boolean);
+                              const memberIds = teamMembers.map((m) => m.id);
+                              const teamTasks = tasks.filter((task) =>
+                                memberIds.includes(task.assigneeId)
+                              );
+                              const taskItemIds = teamTasks.map(
+                                (task) => task.id
+                              );
+                              // The original logic is incorrect because taskItemIds is an array of strings (IDs), not objects.
+                              // If you want to get items from tasks, you need to flatten the items from teamTasks.
+                              const items =
+                                teamTasks.flatMap((task) =>
+                                  task.items.map((item) => ({
+                                    ...item,
+                                    task_id: task.id,
+                                    completed_at: task.completedAt,
+                                    item_type: item.type,
+                                  }))
+                                ) || [];
+                              const itemsCompletedToday = items.filter(
+                                (item) =>
+                                  item.completed_at &&
+                                  new Date(item.completed_at).setHours(
+                                    0,
+                                    0,
+                                    0,
+                                    0
+                                  ) ===
+                                    new Date("2025-07-10").setHours(0, 0, 0, 0)
+                              );
+                              const linesUpv = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "Line" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "UPV"
+                                  )
+                              ).length;
+                              const linesQc = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "Line" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "QC"
+                                  )
+                              ).length;
+                              const linesRedline = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "Line" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "Redline"
+                                  )
+                              ).length;
+                              const equipmentUpv = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "Equipment" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "UPV"
+                                  )
+                              ).length;
+                              const equipmentQc = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "Equipment" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "QC"
+                                  )
+                              ).length;
+                              const equipmentRedline =
+                                itemsCompletedToday.filter(
+                                  (item) =>
+                                    item.item_type === "Equipment" &&
+                                    teamTasks.find(
+                                      (task) =>
+                                        task.id === item.task_id &&
+                                        task.type === "Redline"
+                                    )
+                                ).length;
+                              const pidsRedline = itemsCompletedToday.filter(
+                                (item) =>
+                                  item.item_type === "PID" &&
+                                  teamTasks.find(
+                                    (task) =>
+                                      task.id === item.task_id &&
+                                      task.type === "Redline"
+                                  )
+                              ).length;
+                              return (
+                                linesUpv +
+                                  linesQc +
+                                  linesRedline +
+                                  equipmentUpv +
+                                  equipmentQc +
+                                  equipmentRedline +
+                                  pidsRedline >
+                                  0 && (
+                                  <TableRow key={team.id}>
+                                    <TableCell>{team.name}</TableCell>
+                                    <TableCell>{linesUpv}</TableCell>
+                                    <TableCell>{linesQc}</TableCell>
+                                    <TableCell>{linesRedline}</TableCell>
+                                    <TableCell>{equipmentUpv}</TableCell>
+                                    <TableCell>{equipmentQc}</TableCell>
+                                    <TableCell>{equipmentRedline}</TableCell>
+                                    <TableCell>{pidsRedline}</TableCell>
+                                  </TableRow>
+                                )
+                              );
+                            })
+                        )}
                       </TableBody>
                     </Table>
                   </TabsContent>
@@ -1587,69 +1703,52 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Team Name</TableHead>
                           <TableHead>Lines</TableHead>
                           <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
                           <TableHead>P&IDs</TableHead>
-                          <TableHead>UPV</TableHead>
-                          <TableHead>QC</TableHead>
-                          <TableHead>Redline</TableHead>
-                          <TableHead>Misc</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {teamMetrics.weekly.map((metric, index) => {
-                          const team = teamLeads.find(
-                            (t) => t.id === selectedMetricsTeam
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{team?.name || "Unknown"}</TableCell>
-                              <TableCell>
-                                {metric.counts?.lines?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.equipment?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.non_line_instruments?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.pids?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.upv || 0) +
-                                  (metric.counts?.equipment?.upv || 0) +
-                                  (metric.counts?.non_line_instruments?.upv ||
-                                    0) +
-                                  (metric.counts?.pids?.upv || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.qc || 0) +
-                                  (metric.counts?.equipment?.qc || 0) +
-                                  (metric.counts?.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts?.pids?.qc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.redline || 0) +
-                                  (metric.counts?.equipment?.redline || 0) +
-                                  (metric.counts?.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts?.pids?.redline || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.misc || 0) +
-                                  (metric.counts?.equipment?.misc || 0) +
-                                  (metric.counts?.non_line_instruments?.misc ||
-                                    0) +
-                                  (metric.counts?.pids?.misc || 0)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          teamMetrics.weekly.map((metric, index) => {
+                            const team = teamLeads.find(
+                              (t) => t.id === selectedMetricsTeam
+                            );
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>{team?.name || "Unknown"}</TableCell>
+                                <TableCell>
+                                  {(metric.counts?.lines?.upv || 0) +
+                                    (metric.counts?.lines?.qc || 0) +
+                                    (metric.counts?.lines?.redline || 0) +
+                                    (metric.counts?.lines?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.equipment?.upv || 0) +
+                                    (metric.counts?.equipment?.qc || 0) +
+                                    (metric.counts?.equipment?.redline || 0) +
+                                    (metric.counts?.equipment?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.pids?.upv || 0) +
+                                    (metric.counts?.pids?.qc || 0) +
+                                    (metric.counts?.pids?.redline || 0) +
+                                    (metric.counts?.pids?.misc || 0)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
                       </TableBody>
                     </Table>
                   </TabsContent>
-
                   <TabsContent value="monthly">
                     <Table>
                       <TableHeader>
@@ -1657,65 +1756,49 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Team Name</TableHead>
                           <TableHead>Lines</TableHead>
                           <TableHead>Equipment</TableHead>
-                          <TableHead>Non-Line Instruments</TableHead>
                           <TableHead>P&IDs</TableHead>
-                          <TableHead>UPV</TableHead>
-                          <TableHead>QC</TableHead>
-                          <TableHead>Redline</TableHead>
-                          <TableHead>Misc</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {teamMetrics.monthly.map((metric, index) => {
-                          const team = teamLeads.find(
-                            (t) => t.id === selectedMetricsTeam
-                          );
-                          return (
-                            <TableRow key={index}>
-                              <TableCell>{team?.name || "Unknown"}</TableCell>
-                              <TableCell>
-                                {metric.counts?.lines?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.equipment?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.non_line_instruments?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {metric.counts?.pids?.upv || 0}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.upv || 0) +
-                                  (metric.counts?.equipment?.upv || 0) +
-                                  (metric.counts?.non_line_instruments?.upv ||
-                                    0) +
-                                  (metric.counts?.pids?.upv || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.qc || 0) +
-                                  (metric.counts?.equipment?.qc || 0) +
-                                  (metric.counts?.non_line_instruments?.qc ||
-                                    0) +
-                                  (metric.counts?.pids?.qc || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.redline || 0) +
-                                  (metric.counts?.equipment?.redline || 0) +
-                                  (metric.counts?.non_line_instruments
-                                    ?.redline || 0) +
-                                  (metric.counts?.pids?.redline || 0)}
-                              </TableCell>
-                              <TableCell>
-                                {(metric.counts?.lines?.misc || 0) +
-                                  (metric.counts?.equipment?.misc || 0) +
-                                  (metric.counts?.non_line_instruments?.misc ||
-                                    0) +
-                                  (metric.counts?.pids?.misc || 0)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
+                        {isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className="text-center text-gray-500"
+                            >
+                              Loading...
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          teamMetrics.monthly.map((metric, index) => {
+                            const team = teamLeads.find(
+                              (t) => t.id === selectedMetricsTeam
+                            );
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>{team?.name || "Unknown"}</TableCell>
+                                <TableCell>
+                                  {(metric.counts?.lines?.upv || 0) +
+                                    (metric.counts?.lines?.qc || 0) +
+                                    (metric.counts?.lines?.redline || 0) +
+                                    (metric.counts?.lines?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.equipment?.upv || 0) +
+                                    (metric.counts?.equipment?.qc || 0) +
+                                    (metric.counts?.equipment?.redline || 0) +
+                                    (metric.counts?.equipment?.misc || 0)}
+                                </TableCell>
+                                <TableCell>
+                                  {(metric.counts?.pids?.upv || 0) +
+                                    (metric.counts?.pids?.qc || 0) +
+                                    (metric.counts?.pids?.redline || 0) +
+                                    (metric.counts?.pids?.misc || 0)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
                       </TableBody>
                     </Table>
                   </TabsContent>
@@ -1809,6 +1892,199 @@ const ProjectManagerDashboard = () => {
                       ))}
                     </TableBody>
                   </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="data" className="space-y-6 animate-fade-in">
+            <Card className="shadow-md hover:shadow-lg transition-shadow">
+              <CardHeader className="pb-2 bg-gradient-to-r from-purple-50 to-transparent border-b">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-100 rounded-lg">
+                    <Users size={18} className="text-purple-600" />
+                  </div>
+                  <CardTitle className="text-lg">Daily Work Summary</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6">
+                <h4 className="text-sm font-medium mb-2">Team Total</h4>
+                {isLoading ? (
+                  <p className="text-gray-500">Loading...</p>
+                ) : (
+                  <>
+                    <p className="text-xl font-bold text-purple-600">
+                      Lines:{" "}
+                      {tasks
+                        .filter(
+                          (task) =>
+                            task.completedAt &&
+                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                              new Date().setHours(0, 0, 0, 0)
+                        )
+                        .reduce(
+                          (sum, task) =>
+                            sum +
+                            task.items.filter(
+                              (item) =>
+                                item.type === ItemType.Line && item.completed
+                            ).length,
+                          0
+                        )}
+                    </p>
+                    <p className="text-xl font-bold text-purple-600">
+                      Equipment:{" "}
+                      {tasks
+                        .filter(
+                          (task) =>
+                            task.completedAt &&
+                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                              new Date().setHours(0, 0, 0, 0)
+                        )
+                        .reduce(
+                          (sum, task) =>
+                            sum +
+                            task.items.filter(
+                              (item) =>
+                                item.type === ItemType.Equipment &&
+                                item.completed
+                            ).length,
+                          0
+                        )}
+                    </p>
+                    <p className="text-xl font-bold text-purple-600">
+                      P&IDs:{" "}
+                      {tasks
+                        .filter(
+                          (task) =>
+                            task.completedAt &&
+                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                              new Date().setHours(0, 0, 0, 0) &&
+                            task.type === TaskType.Redline
+                        )
+                        .reduce(
+                          (sum, task) =>
+                            sum +
+                            task.items.filter(
+                              (item) =>
+                                item.type === ItemType.PID && item.completed
+                            ).length,
+                          0
+                        )}
+                    </p>
+                    <p className="text-xl font-bold text-purple-600">
+                      Redlines:{" "}
+                      {
+                        tasks.filter(
+                          (task) =>
+                            task.completedAt &&
+                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                              new Date().setHours(0, 0, 0, 0) &&
+                            task.type === TaskType.Redline
+                        ).length
+                      }
+                    </p>
+                  </>
+                )}
+                <h4 className="text-sm font-medium mt-4 mb-2">By Team Lead</h4>
+                {isLoading ? (
+                  <p className="text-gray-500">Loading...</p>
+                ) : (
+                  teamLeads.map((lead) => {
+                    const leadMembers = lead.team;
+                    const leadTotal = {
+                      Lines: 0,
+                      Equipment: 0,
+                      PIDs: 0,
+                    };
+                    leadMembers.forEach((member) => {
+                      const memberTasks = tasks.filter(
+                        (task) =>
+                          task.assignee === member &&
+                          task.completedAt &&
+                          new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                            new Date().setHours(0, 0, 0, 0)
+                      );
+                      leadTotal.Lines += memberTasks.reduce(
+                        (sum, task) =>
+                          sum +
+                          task.items.filter(
+                            (item) =>
+                              item.type === ItemType.Line && item.completed
+                          ).length,
+                        0
+                      );
+                      leadTotal.Equipment += memberTasks.reduce(
+                        (sum, task) =>
+                          sum +
+                          task.items.filter(
+                            (item) =>
+                              item.type === ItemType.Equipment && item.completed
+                          ).length,
+                        0
+                      );
+                      leadTotal.PIDs += memberTasks.reduce(
+                        (sum, task) =>
+                          sum +
+                          task.items.filter(
+                            (item) =>
+                              item.type === ItemType.PID &&
+                              task.type === TaskType.Redline &&
+                              item.completed
+                          ).length,
+                        0
+                      );
+                    });
+                    return leadTotal.Lines +
+                      leadTotal.Equipment +
+                      leadTotal.PIDs >
+                      0 ? (
+                      <p key={lead.id} className="text-sm text-gray-700">
+                        {lead.name}: {leadTotal.Lines} Lines,{" "}
+                        {leadTotal.Equipment} Equipment, {leadTotal.PIDs} P&IDs
+                      </p>
+                    ) : null;
+                  })
+                )}
+                <h4 className="text-sm font-medium mt-4 mb-2">
+                  By User/Team Member
+                </h4>
+                {isLoading ? (
+                  <p className="text-gray-500">Loading...</p>
+                ) : (
+                  Object.entries(
+                    tasks
+                      .filter(
+                        (task) =>
+                          task.completedAt &&
+                          new Date(task.completedAt).setHours(0, 0, 0, 0) ===
+                            new Date().setHours(0, 0, 0, 0)
+                      )
+                      .reduce((acc, task) => {
+                        const assignee = task.assignee;
+                        if (!acc[assignee])
+                          acc[assignee] = { Lines: 0, Equipment: 0, PIDs: 0 };
+                        task.items.forEach((item) => {
+                          if (item.completed) {
+                            if (item.type === ItemType.Line)
+                              acc[assignee].Lines += 1;
+                            if (item.type === ItemType.Equipment)
+                              acc[assignee].Equipment += 1;
+                            if (
+                              item.type === ItemType.PID &&
+                              task.type === TaskType.Redline
+                            )
+                              acc[assignee].PIDs += 1;
+                          }
+                        });
+                        return acc;
+                      }, {} as Record<string, { Lines: number; Equipment: number; PIDs: number }>)
+                  ).map(([assignee, counts]) => (
+                    <p key={assignee} className="text-sm text-gray-700">
+                      {assignee}: {counts.Lines} Lines, {counts.Equipment}{" "}
+                      Equipment, {counts.PIDs} P&IDs
+                    </p>
+                  ))
                 )}
               </CardContent>
             </Card>
