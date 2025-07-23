@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
 import {
   Card,
@@ -10,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import StatusBadge from "./StatusBadge";
-import { Task, TaskItem, TaskStatus } from "@/types";
+import { Task, TaskItem, TaskStatus, TaskType } from "@/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import TaskTypeIndicator from "./TaskTypeIndicator";
@@ -23,7 +22,6 @@ import {
 } from "@/components/ui/tooltip";
 import axios from "axios";
 
-// Use Vite's environment variable or fallback
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 interface TaskCardProps {
@@ -32,7 +30,12 @@ interface TaskCardProps {
     taskId: string,
     newStatus: "Assigned" | "In Progress" | "Completed"
   ) => void;
-  onItemToggle?: (taskId: string, itemId: string, isCompleted: boolean) => void;
+  onItemToggle?: (
+    taskId: string,
+    itemId: string,
+    isCompleted: boolean,
+    category: string
+  ) => void;
   onOpenComments?: (task: Task) => void;
 }
 
@@ -93,6 +96,32 @@ const TaskCard = ({
     }
   };
 
+  const getCategory = (itemType: string, taskType: TaskType) => {
+    const mappings = {
+      Line: {
+        UPV: "UPV Lines",
+        QC: "UPV Lines QC",
+        Redline: "Redline Lines",
+      },
+      Equipment: {
+        UPV: "UPV Equipments",
+        QC: "UPV Equipments QC",
+        Redline: "Redline Equipments",
+      },
+      PID: {
+        Redline: "Redline PIDs",
+        QC: "UPV PIDs QC",
+        UPV: "UPV PIDs",
+      },
+      NonLineInstrument: {
+        UPV: "UPV Non Inline",
+        QC: "UPV Non Inline QC",
+        Redline: "Redline Non Inline",
+      },
+    };
+    return mappings[itemType]?.[taskType] || "Unknown";
+  };
+
   const handleItemToggle = async (item: TaskItem, isChecked: boolean) => {
     if (!onItemToggle) return;
 
@@ -106,30 +135,41 @@ const TaskCard = ({
       return Promise.reject("Item cannot be unchecked");
     }
 
+    const category = getCategory(item.type, task.type);
+    console.log("Toggle payload:", {
+      userId: task.assigneeId,
+      taskId: task.id,
+      itemId: item.id,
+      itemType: item.type,
+      taskType: task.type,
+      category,
+      action: "increment",
+    });
     try {
-      await onItemToggle(task.id, item.id, isChecked);
+      await onItemToggle(task.id, item.id, isChecked, category);
       const token = localStorage.getItem("teamsync_token");
       if (token && isChecked) {
         try {
-          const response = await axios.post(
-            `${API_URL}/metrics/individual/lines/daily`,
-            { userId: task.assigneeId, taskId: task.id, itemId: item.id },
+          await axios.post(
+            `${API_URL}/metrics/individual/update`,
+            {
+              userId: task.assigneeId,
+              taskId: task.id,
+              itemId: item.id,
+              itemType: item.type,
+              taskType: task.type,
+              category,
+              action: "increment",
+            },
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          console.log("Metrics update response:", response.data);
-          toast.success("Line count updated successfully");
-        } catch (metricsError) {
-          const axiosError = metricsError as any;
-          console.error("Metrics update failed:", {
-            message: axiosError.message,
-            status: axiosError.response?.status,
-            data: axiosError.response?.data,
-            taskId: task.id,
-            itemId: item.id,
-          });
-          toast.error(
-            `Failed to update line count metric: ${axiosError.message}`
+          toast.success(`${category} count updated successfully`);
+        } catch (axiosError) {
+          console.error(
+            "Axios error:",
+            axiosError.response ? axiosError.response.data : axiosError.message
           );
+          toast.error(`Failed to update metric count: ${axiosError.message}`);
         }
       }
     } catch (error) {

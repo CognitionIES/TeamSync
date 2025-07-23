@@ -19,6 +19,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 interface RedlineTaskCardProps {
   task: Task;
@@ -26,7 +29,8 @@ interface RedlineTaskCardProps {
   onItemToggle?: (
     taskId: string,
     itemId: string,
-    isCompleted: boolean
+    isCompleted: boolean,
+    category: string
   ) => Promise<void>;
   onOpenComments?: (task: Task) => void;
 }
@@ -39,18 +43,14 @@ const RedlineTaskCard = memo(
     onOpenComments,
   }: RedlineTaskCardProps) => {
     const [isOpen, setIsOpen] = useState(false);
-    const [isOpenPID, setIsOpenPID] = useState(false); // New state for PID collapsible
+    const [isOpenPID, setIsOpenPID] = useState(false);
     const [completedItems, setCompletedItems] = useState<string[]>(
       task.items.filter((item) => item.completed).map((item) => item.id)
     );
 
     const pidItems = task.items.filter((item) => item.type === "PID");
-    if (pidItems.some((item) => !item.id)) {
-      console.warn("Invalid PID item in task:", task, pidItems);
-      return null;
-    }
-    const pidCount = pidItems.length;
     const lineItems = task.lines || [];
+    const pidCount = pidItems.length;
     const lineCount = lineItems.length;
 
     const formatTime = (dateString: string) => {
@@ -63,7 +63,35 @@ const RedlineTaskCard = memo(
       });
     };
 
-    const handleCheckItem = (itemId: string, checked: boolean) => {
+    const getCategory = (itemType: string, taskType: string) => {
+      const mappings = {
+        Line: {
+          UPV: "UPV Lines",
+          QC: "UPV Lines QC",
+          Redline: "Redline Lines",
+        },
+        Equipment: {
+          UPV: "UPV Equipments",
+          QC: "UPV Equipments QC",
+          Redline: "Redline Equipments",
+        },
+        PID: {
+          Redline: "Redline PIDs",
+          QC: "UPV PIDs QC",
+          UPV: "UPV PIDs",
+        },
+        NonLineInstrument: {
+          UPV: "UPV Non Inline",
+          QC: "UPV Non Inline QC",
+          Redline: "Redline Non Inline",
+        },
+      };
+      return mappings[itemType]?.[taskType] || "Unknown";
+    };
+
+    const handleCheckItem = async (itemId: string, checked: boolean) => {
+      if (!onItemToggle) return;
+
       if (task.status !== "In Progress" && checked) {
         toast.error(
           "You must start the task before marking items as completed"
@@ -76,15 +104,37 @@ const RedlineTaskCard = memo(
         return;
       }
 
-      const updatedCompleted = [...completedItems];
-      if (checked) {
-        updatedCompleted.push(itemId);
-      }
+      const item = [...pidItems, ...lineItems].find((i) => i.id === itemId);
+      if (!item) return;
 
+      const category = getCategory(item.type, task.type);
+      const updatedCompleted = checked
+        ? [...completedItems, itemId]
+        : completedItems.filter((id) => id !== itemId);
       setCompletedItems(updatedCompleted);
 
-      if (onItemToggle) {
-        onItemToggle(task.id, itemId, checked);
+      try {
+        await onItemToggle(task.id, itemId, checked, category);
+        const token = localStorage.getItem("teamsync_token");
+        if (token && checked) {
+          await axios.post(
+            `${API_URL}/metrics/individual/update`,
+            {
+              userId: task.assigneeId,
+              taskId: task.id,
+              itemId: itemId,
+              itemType: item.type,
+              taskType: task.type,
+              category,
+              action: checked ? "increment" : "decrement",
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          toast.success(`${category} count updated successfully`);
+        }
+      } catch (error) {
+        toast.error(`Failed to update ${item.type} status`);
+        throw error;
       }
 
       const totalItems = pidItems.length + lineItems.length;
@@ -106,7 +156,7 @@ const RedlineTaskCard = memo(
     const isCompleted = task.status === "Completed";
 
     if (task.type !== "Redline") {
-      return null; // Or render a different component if needed
+      return null;
     }
 
     return (

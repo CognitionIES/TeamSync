@@ -92,7 +92,7 @@ interface ApiTeamLead {
   team_lead: string;
   team_members: Array<{
     id: string;
-    member_id: string; // This suggests the column is `member_id`, not `user_id`
+    member_id: string;
     member_name: string;
   }>;
   tasks: Array<{
@@ -109,6 +109,7 @@ interface ApiTeamLead {
     }>;
   }>;
 }
+
 interface ApiUser {
   id: string;
   name: string;
@@ -148,13 +149,14 @@ interface TeamLead {
 }
 
 interface MetricEntry {
+  count: number;
+  category: any;
+  userId: string;
   date?: string;
   week_start?: string;
   month_start?: string;
   counts: {
-    [itemType: string]: {
-      [taskType: string]: number;
-    };
+    [category: string]: number;
   };
 }
 
@@ -205,7 +207,7 @@ const transformTask = (apiTask: ApiTask): Task => {
     return transformedItem;
   });
 
-  console.log("Raw Comments:", apiTask.comments); // Log raw comments
+  console.log("Raw Comments:", apiTask.comments);
   const transformedComments = Array.isArray(apiTask.comments)
     ? apiTask.comments.map((comment) => ({
         id: comment.id,
@@ -216,7 +218,7 @@ const transformTask = (apiTask: ApiTask): Task => {
         createdAt: comment.created_at,
       }))
     : [];
-  console.log("Transformed Comments:", transformedComments); // Log transformed comments
+  console.log("Transformed Comments:", transformedComments);
 
   if (
     !items.some((item) => item.type === ItemType.Line) &&
@@ -256,7 +258,15 @@ const transformTask = (apiTask: ApiTask): Task => {
     projectName: "",
     areaNumber: "",
     description: "",
-    lines: undefined,
+    lines:
+      apiTask.items
+        .filter((item) => item.item_type === "Line")
+        .map((item) => ({
+          id: item.id,
+          name: item.item_name,
+          type: item.item_type,
+          completed: item.completed,
+        })) || undefined,
   };
 };
 
@@ -301,6 +311,7 @@ const ProjectManagerDashboard = () => {
   const [individualMetricsError, setIndividualMetricsError] = useState<
     string | null
   >(null);
+
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -318,7 +329,7 @@ const ProjectManagerDashboard = () => {
         }
       );
 
-      console.log("Raw API Response for Assigned Items:", response.data.data); // Debug raw structure
+      console.log("Raw API Response for Assigned Items:", response.data.data);
       return response.data.data;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -379,7 +390,6 @@ const ProjectManagerDashboard = () => {
       const items = await fetchAssignedItems(userId, taskId);
       console.log("Fetched Assigned Items:", items);
 
-      // Map fetched items with fallbacks and ensure all required properties exist
       const mappedItems: FetchedAssignedItems = {
         pids: items.pids ?? [],
         lines: items.lines ?? [],
@@ -453,6 +463,7 @@ const ProjectManagerDashboard = () => {
       setLoadingItems(false);
     }
   };
+
   const closeModal = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
@@ -480,13 +491,26 @@ const ProjectManagerDashboard = () => {
     setSelectedTask(null);
   };
 
-  const fetchIndividualMetrics = async (userId: string) => {
+  const updateTaskItemCompletion = async (
+    taskId: string,
+    itemId: string,
+    completed: boolean
+  ) => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
 
-      const response = await axios.get(
-        `${API_URL}/metrics/individual/lines/daily?userId=${userId}`,
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) throw new Error("Task not found");
+
+      const updatedItems = task.items.map((item) =>
+        item.id === itemId ? { ...item, completed } : item
+      );
+      const updatedTask = { ...task, items: updatedItems };
+
+      await axios.put(
+        `${API_URL}/tasks/${taskId}`,
+        { items: updatedItems },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -494,34 +518,52 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-      const data = response.data || { daily: [{ counts: { lines: 0 } }] };
-      setIndividualMetrics({
-        daily: data.daily,
-        weekly: [],
-        monthly: [],
-      });
-      setIndividualMetricsError(null);
+
+      setTasks((prevTasks) =>
+        prevTasks.map((t) => (t.id === taskId ? updatedTask : t))
+      );
+      toast.success("Task item updated successfully");
+
+      if (completed) {
+        const userId = task.assigneeId;
+        const itemType =
+          updatedItems.find((item) => item.id === itemId)?.type || "Line";
+        const taskType = task.type;
+        const category = `${itemType} ${taskType === "QC" ? "QC" : taskType}`;
+        await axios.post(
+          `${API_URL}/metrics/individual/update`,
+          {
+            userId,
+            taskId,
+            itemId,
+            itemType,
+            taskType,
+            category,
+            action: "increment",
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Cache-Control": "no-cache",
+            },
+          }
+        );
+        await fetchIndividualMetrics(); // Refresh metrics
+      }
     } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching individual metrics:", axiosError);
-      setIndividualMetricsError(
-        axiosError.response?.data?.message || "Failed to fetch"
-      );
-      setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
-      toast.error(
-        axiosError.response?.data?.message ||
-          "Failed to fetch individual metrics"
-      );
+      console.error("Error updating task item:", error);
+      toast.error("Failed to update task item");
     }
   };
 
-  const fetchTeamMetrics = async (teamId: string) => {
+  const fetchIndividualMetrics = async () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
 
-      const response = await axios.get(
-        `${API_URL}/metrics/team/lines?teamId=${teamId}`,
+      console.log("Fetching individual metrics for all users - Start");
+      const response = await axios.get<MetricsData>(
+        `${API_URL}/metrics/individual/lines`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -529,27 +571,86 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-      const data = response.data || { daily: [] };
-      setTeamMetrics({
-        daily: data.daily.map((m: MetricEntry) => ({
-          date: m.date,
-          counts: m.counts || { lines: {}, equipment: {}, pids: {} },
-        })),
-        weekly: [], // Placeholder, update backend for weekly/monthly if needed
-        monthly: [], // Placeholder, update backend for weekly/monthly if needed
-      });
-      setTeamMetricsError(null);
+      console.log("Fetched Individual Metrics Response (Raw):", response.data);
+      response.data.daily.forEach((metric, index) =>
+        console.log(`Daily Entry ${index}:`, {
+          userId: metric.userId,
+          date: metric.date,
+          counts: metric.counts,
+        })
+      );
+
+      const today = new Date().toDateString(); // e.g., "Wed Jul 23 2025" (IST)
+      console.log("Current Date (Client IST):", today);
+      const filteredMetrics = {
+        daily: response.data.daily.filter((m) => {
+          const metricDate = new Date(m.date).toDateString(); // Normalize to local date
+          console.log(
+            `Filtering date ${
+              m.date
+            } -> ${metricDate}, Today: ${today}, Match: ${metricDate === today}`
+          );
+          return metricDate === today;
+        }),
+        weekly: response.data.weekly,
+        monthly: response.data.monthly,
+      };
+      console.log("Filtered Metrics:", filteredMetrics);
+
+      setIndividualMetrics(filteredMetrics);
+      console.log("Individual Metrics State Updated:", filteredMetrics);
+      setIndividualMetricsError(null);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching team metrics:", axiosError);
-      setTeamMetricsError(
-        axiosError.response?.data?.message || "Failed to fetch"
+      console.error("Error fetching individual metrics:", {
+        message: axiosError.message,
+        response: axiosError.response?.data,
+        stack: axiosError.stack,
+      });
+      setIndividualMetricsError(
+        axiosError.response?.data?.message ||
+          "Failed to fetch individual metrics"
       );
-      setTeamMetrics({ daily: [], weekly: [], monthly: [] });
-      toast.error(
-        axiosError.response?.data?.message || "Failed to fetch team metrics"
-      );
+      setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
     }
+  };
+
+  // Add useEffect to monitor state changes
+  useEffect(() => {
+    console.log("Individual Metrics State Updated:", individualMetrics);
+  }, [individualMetrics]);
+  const calculateTeamMetrics = () => {
+    const today = new Date("2025-07-22T00:00:00+05:30").setHours(0, 0, 0, 0);
+    const metrics: MetricEntry[] = teamLeads.map((team) => {
+      const memberIds = team.team
+        .map((memberName) => users.find((u) => u.name === memberName)?.id || "")
+        .filter(Boolean);
+      const teamTasks = tasks.filter(
+        (task) =>
+          memberIds.includes(task.assigneeId) &&
+          task.completedAt &&
+          new Date(task.completedAt).setHours(0, 0, 0, 0) === today
+      );
+      const counts: { [itemType: string]: { [taskType: string]: number } } = {
+        [ItemType.Line]: { UPV: 0, QC: 0, Redline: 0 },
+        [ItemType.Equipment]: { UPV: 0, QC: 0, Redline: 0 },
+        [ItemType.PID]: { Redline: 0 },
+        [ItemType.NonInlineInstrument]: { UPV: 0, QC: 0, Redline: 0 },
+      };
+
+      teamTasks.forEach((task) => {
+        task.items.forEach((item) => {
+          if (item.completed) {
+            counts[item.type][task.type] =
+              (counts[item.type][task.type] || 0) + 1;
+          }
+        });
+      });
+
+      return { userId: team.id, counts };
+    });
+    setTeamMetrics({ daily: metrics, weekly: [], monthly: [] });
+    setTeamMetricsError(null);
   };
 
   const fetchProjectProgress = async (itemType: string, taskType: string) => {
@@ -588,193 +689,114 @@ const ProjectManagerDashboard = () => {
         throw new Error("No authentication token found");
       }
 
-      const tasksResponse = await fetch(`${API_URL}/tasks`, {
+      const usersResponse = await fetch(`${API_URL}/users`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Cache-Control": "no-cache",
         },
       });
+      const usersText = await usersResponse.text();
+      if (!usersResponse.ok) {
+        throw new Error(
+          `Users API error: ${usersResponse.status} ${
+            usersResponse.statusText
+          } - ${usersText.substring(0, 100)}`
+        );
+      }
+      const usersDataResponse = JSON.parse(usersText);
+      const usersData = usersDataResponse.data || [];
+      setUsers(usersData); // Ensure users includes id and name mapping
+      console.log("Fetched users:", usersData);
 
+      const [tasksResponse, teamsResponse] = await Promise.all([
+        fetch(`${API_URL}/tasks`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }),
+        fetch(`${API_URL}/teams`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }),
+      ]);
       if (!tasksResponse.ok) {
-        let errorMessage = `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`;
-        const contentType = tasksResponse.headers.get("content-type");
-        const tasksText = await tasksResponse.text();
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = JSON.parse(tasksText);
-          errorMessage += ` - ${errorData.message || "Unknown error"}`;
-          if (errorData.error) {
-            errorMessage += `: ${errorData.error}`;
-          }
-        } else {
-          errorMessage += ` - ${tasksText.substring(0, 100)}`;
-        }
-        throw new Error(errorMessage);
+        throw new Error(
+          `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`
+        );
       }
-
+      if (!teamsResponse.ok) {
+        throw new Error(
+          `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`
+        );
+      }
       const tasksData = await tasksResponse.json();
-      if (!tasksData.data) {
-        throw new Error("Tasks API response missing 'data' field");
-      }
-      const transformedTasks = tasksData.data.map(transformTask);
-      setTasks(transformedTasks);
+      const teamsData = await teamsResponse.json();
+      setTasks(tasksData.data ? tasksData.data.map(transformTask) : []);
+      setTeamLeads(teamsData.data ? teamsData.data.map(transformTeamLead) : []);
 
-      let teamLeadsData = [];
-      try {
-        const teamsResponse = await fetch(`${API_URL}/teams`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache",
-          },
-        });
+      if (usersData.length > 0) setSelectedMetricsUser("all");
+      else console.warn("No users found, skipping selectedMetricsUser set");
+      if (teamsData.data && teamsData.data.length > 0)
+        setSelectedMetricsTeam(teamsData.data[0].id);
+      else
+        console.warn("No team leads found, skipping selectedMetricsTeam set");
 
-        if (!teamsResponse.ok) {
-          let errorMessage = `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`;
-          const contentType = teamsResponse.headers.get("content-type");
-          const teamsText = await teamsResponse.text();
-          if (contentType && contentType.includes("application/json")) {
-            const errorData = JSON.parse(teamsText);
-            errorMessage += ` - ${errorData.message || "Unknown error"}`;
-            if (errorData.error) {
-              errorMessage += `: ${errorData.error}`;
-            }
-          } else {
-            errorMessage += ` - ${teamsText.substring(0, 100)}`;
-          }
-          console.warn(errorMessage);
-          throw new Error(errorMessage);
-        }
-
-        const teamsData = await teamsResponse.json();
-        if (
-          !teamsData ||
-          typeof teamsData !== "object" ||
-          !("data" in teamsData)
-        ) {
-          throw new Error("Teams API response missing or invalid 'data' field");
-        }
-
-        if (!Array.isArray(teamsData.data)) {
-          throw new Error("Teams API 'data' field is not an array");
-        }
-
-        teamLeadsData = teamsData.data.map(transformTeamLead);
-      } catch (teamError) {
-        console.error("Error fetching teams:", teamError.message);
-        toast.error("Failed to fetch teams data");
-      }
-      setTeamLeads(teamLeadsData);
-
-      let usersData = [];
-      try {
-        const usersResponse = await fetch(`${API_URL}/users`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache",
-          },
-        });
-
-        const usersText = await usersResponse.text();
-        if (!usersResponse.ok) {
-          let errorMessage = `Users API error: ${usersResponse.status} ${usersResponse.statusText}`;
-          const contentType = usersResponse.headers.get("content-type");
-          if (contentType && contentType.includes("application/json")) {
-            const errorData = JSON.parse(usersText);
-            errorMessage += ` - ${errorData.message || "Unknown error"}`;
-            if (errorData.error) {
-              errorMessage += `: ${errorData.error}`;
-            }
-          } else {
-            errorMessage += ` - ${usersText.substring(0, 100)}`;
-          }
-          console.warn(errorMessage);
-          toast.error("Failed to fetch users data");
-        } else {
-          const usersDataResponse = JSON.parse(usersText);
-          if (!usersDataResponse.data) {
-            throw new Error("Users API response missing 'data' field");
-          }
-          usersData = usersDataResponse.data;
-        }
-      } catch (error) {
-        console.error("Error fetching users:", error.message);
-        toast.error("Failed to fetch users data");
-      }
-      setUsers(usersData);
-
-      if (usersData.length > 0) {
-        setSelectedMetricsUser(usersData[0].id);
-        await fetchIndividualMetrics(usersData[0].id);
-      }
-      if (teamLeadsData.length > 0) {
-        const teamId = teamLeadsData[0].id;
-        setSelectedMetricsTeam(teamId);
-        await fetchTeamMetrics(teamId);
-      }
       await fetchProjectProgress(
         selectedProjectItemType,
         selectedProjectTaskType
       );
+      if (usersData.length > 0) await fetchIndividualMetrics();
+      calculateTeamMetrics();
 
       toast.success("Data refreshed");
     } catch (error) {
-      console.error("Fetch error:", error.message);
-      const errorMessage =
-        error.message === "Failed to fetch"
-          ? "Unable to connect to the server. Please ensure the backend is running on localhost:3000."
-          : error.message || "Failed to fetch data";
-      setError(errorMessage);
-      toast.error(errorMessage);
+      console.error("Fetch error:", error.message, error.stack);
+      setError(error.message || "Failed to fetch data");
+      toast.error(error.message || "Failed to fetch data");
     } finally {
       setIsLoading(false);
     }
   };
-
   useEffect(() => {
     fetchData();
   }, []);
 
   useEffect(() => {
-    console.log("Selected Metrics User:", selectedMetricsUser);
-    if (selectedMetricsUser) {
-      fetchIndividualMetrics(selectedMetricsUser);
-    }
-  }, [selectedMetricsUser]);
+    fetchIndividualMetrics();
+  }, []);
 
   useEffect(() => {
-    if (selectedMetricsTeam) {
-      fetchTeamMetrics(selectedMetricsTeam);
-    }
-  }, [selectedMetricsTeam]);
+    calculateTeamMetrics();
+  }, [tasks, teamLeads, selectedMetricsTeam]);
 
   useEffect(() => {
     fetchProjectProgress(selectedProjectItemType, selectedProjectTaskType);
   }, [selectedProjectItemType, selectedProjectTaskType]);
 
   const teamMembers = Array.from(new Set(users.map((user) => user.name)));
-
   const teamLeadMembers = new Set(teamLeads.flatMap((lead) => lead.team));
   const usersNotInTeams = users.filter(
     (user) => !teamLeadMembers.has(user.name)
   );
 
-  const today = new Date().setHours(0, 0, 0, 0);
+  const today = new Date("2025-07-22T00:00:00+05:30").setHours(0, 0, 0, 0);
   const assignedToday = tasks.filter(
     (task) => new Date(task.createdAt).setHours(0, 0, 0, 0) === today
   ).length;
-
   const startedToday = tasks.filter(
     (task) =>
       task.status === "In Progress" &&
       new Date(task.updatedAt).setHours(0, 0, 0, 0) === today
   ).length;
-
   const completedToday = tasks.filter(
     (task) =>
       task.status === "Completed" &&
       task.completedAt &&
       new Date(task.completedAt).setHours(0, 0, 0, 0) === today
   ).length;
-
   const totalTasks = tasks.length;
   const completedCount = tasks.filter(
     (task) => task.status === "Completed"
@@ -795,7 +817,6 @@ const ProjectManagerDashboard = () => {
 
   const handleExport = async () => {
     setIsExporting(true);
-
     try {
       const headers = [
         "Type",
@@ -814,16 +835,13 @@ const ProjectManagerDashboard = () => {
         } else {
           const pidItem = task.items.find((item) => item.type === "PID");
           if (pidItem) currentWork = `P&ID ${pidItem.name}`;
-
           const lineItem = task.items.find((item) => item.type === "Line");
           if (lineItem) currentWork = `Line ${lineItem.name}`;
-
           const equipmentItem = task.items.find(
             (item) => item.type === "Equipment"
           );
           if (equipmentItem) currentWork = `Equipment ${equipmentItem.name}`;
         }
-
         return [
           task.type,
           task.assignee,
@@ -835,12 +853,10 @@ const ProjectManagerDashboard = () => {
           currentWork,
         ];
       });
-
       const csvContent = [
         headers.join(","),
         ...rows.map((row) => row.join(",")),
       ].join("\n");
-
       const encodedUri =
         "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
       const link = document.createElement("a");
@@ -850,10 +866,8 @@ const ProjectManagerDashboard = () => {
         `teamsync_tasks_${new Date().toISOString().split("T")[0]}.csv`
       );
       document.body.appendChild(link);
-
       link.click();
       document.body.removeChild(link);
-
       toast.success("CSV exported successfully");
     } catch (error) {
       toast.error("Failed to export CSV");
@@ -942,14 +956,13 @@ const ProjectManagerDashboard = () => {
         <header className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-3xl  font-semibold text-gray-800">
+              <h1 className="text-3xl font-semibold text-gray-800">
                 Project Manager Dashboard
               </h1>
               <p className="text-gray-600 mt-1">
                 Track project progress and team performance
               </p>
             </div>
-
             <div className="mt-4 sm:mt-0 flex gap-3">
               <Button
                 variant="outline"
@@ -986,7 +999,6 @@ const ProjectManagerDashboard = () => {
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
-            <TabsTrigger value="data">Data</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
@@ -1089,6 +1101,7 @@ const ProjectManagerDashboard = () => {
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
                   onViewComments={handleViewComments}
+                  onUpdateItemCompletion={updateTaskItemCompletion}
                 />
               </CardContent>
             </Card>
@@ -1242,6 +1255,7 @@ const ProjectManagerDashboard = () => {
                   loading={isLoading}
                   onViewCurrentWork={handleViewCurrentWork}
                   onViewComments={handleViewComments}
+                  onUpdateItemCompletion={updateTaskItemCompletion}
                 />
               </CardContent>
             </Card>
@@ -1252,7 +1266,7 @@ const ProjectManagerDashboard = () => {
               teamLeads={teamLeads}
               onViewCurrentWork={handleViewCurrentWork}
               onViewComments={handleViewComments}
-              tasks={[]}
+              tasks={tasks}
             />
           </TabsContent>
 
@@ -1263,34 +1277,10 @@ const ProjectManagerDashboard = () => {
                   Individual Metrics
                 </CardTitle>
                 <CardDescription>
-                  Metrics for individuals daily by item and task type
+                  Metrics for all individuals by item and task type
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
-                <div className="mb-4 flex gap-4">
-                  <div>
-                    <label className="block mb-2 text-sm font-medium">
-                      Select User
-                    </label>
-                    <Select
-                      value={selectedMetricsUser}
-                      onValueChange={setSelectedMetricsUser}
-                      disabled={isLoading}
-                    >
-                      <SelectTrigger className="w-full max-w-xs">
-                        <SelectValue placeholder="Choose user..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {users.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
                 {individualMetricsError && (
                   <p className="text-red-600 text-center py-4">
                     {individualMetricsError}
@@ -1303,200 +1293,115 @@ const ProjectManagerDashboard = () => {
                     <TabsTrigger value="weekly">Weekly</TabsTrigger>
                     <TabsTrigger value="monthly">Monthly</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="daily">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {isLoading ? (
+                  {["daily", "weekly", "monthly"].map((period) => (
+                    <TabsContent key={period} value={period}>
+                      <Table>
+                        <TableHeader>
                           <TableRow>
-                            <TableCell
-                              colSpan={3}
-                              className="text-center text-gray-500"
-                            >
-                              Loading...
-                            </TableCell>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Redline PIDs</TableHead>
+                            <TableHead>UPV Equipments</TableHead>
+                            <TableHead>UPV Equipments QC</TableHead>
+                            <TableHead>UPV Lines</TableHead>
+                            <TableHead>UPV Lines QC</TableHead>
+                            <TableHead>UPV Non Inline</TableHead>
+                            <TableHead>UPV Non Inline QC</TableHead>
                           </TableRow>
-                        ) : individualMetrics.daily &&
-                          individualMetrics.daily.length > 0 ? (
-                          <TableRow>
-                            <TableCell>
-                              {users.find((u) => u.id === selectedMetricsUser)
-                                ?.name || "Unknown"}
-                            </TableCell>
-                            <TableCell>
-                              {teamLeads.find((team) =>
-                                team.team.includes(
-                                  users.find(
-                                    (u) => u.id === selectedMetricsUser
-                                  )?.name || ""
-                                )
-                              )?.name || "N/A"}
-                            </TableCell>
-                            <TableCell>
-                              {individualMetrics.daily.length > 0
-                                ? individualMetrics.daily[0].counts.lines || 0
-                                : 0}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={3}
-                              className="text-center text-gray-500"
-                            >
-                              No daily data available
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
-                  <TabsContent value="weekly">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>P&IDs</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center text-gray-500"
-                            >
-                              Loading...
-                            </TableCell>
-                          </TableRow>
-                        ) : individualMetrics.weekly &&
-                          individualMetrics.weekly.length > 0 ? (
-                          individualMetrics.weekly.map((metric, index) => {
-                            const user = users.find(
-                              (u) => u.id === selectedMetricsUser
-                            );
-                            const userTeam = teamLeads.find((team) =>
-                              team.team.includes(user?.name || "")
-                            );
-                            return (
-                              <TableRow key={index}>
-                                <TableCell>{user?.name || "Unknown"}</TableCell>
-                                <TableCell>{userTeam?.name || "N/A"}</TableCell>
-                                <TableCell>
-                                  {(metric.counts?.lines?.upv || 0) +
-                                    (metric.counts?.lines?.qc || 0) +
-                                    (metric.counts?.lines?.redline || 0) +
-                                    (metric.counts?.lines?.misc || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.equipment?.upv || 0) +
-                                    (metric.counts?.equipment?.qc || 0) +
-                                    (metric.counts?.equipment?.redline || 0) +
-                                    (metric.counts?.equipment?.misc || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.pids?.upv || 0) +
-                                    (metric.counts?.pids?.qc || 0) +
-                                    (metric.counts?.pids?.redline || 0) +
-                                    (metric.counts?.pids?.misc || 0)}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center text-gray-500"
-                            >
-                              No weekly data available
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
-                  <TabsContent value="monthly">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>P&IDs</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center text-gray-500"
-                            >
-                              Loading...
-                            </TableCell>
-                          </TableRow>
-                        ) : individualMetrics.monthly &&
-                          individualMetrics.monthly.length > 0 ? (
-                          individualMetrics.monthly.map((metric, index) => {
-                            const user = users.find(
-                              (u) => u.id === selectedMetricsUser
-                            );
-                            const userTeam = teamLeads.find((team) =>
-                              team.team.includes(user?.name || "")
-                            );
-                            return (
-                              <TableRow key={index}>
-                                <TableCell>{user?.name || "Unknown"}</TableCell>
-                                <TableCell>{userTeam?.name || "N/A"}</TableCell>
-                                <TableCell>
-                                  {(metric.counts?.lines?.upv || 0) +
-                                    (metric.counts?.lines?.qc || 0) +
-                                    (metric.counts?.lines?.redline || 0) +
-                                    (metric.counts?.lines?.misc || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.equipment?.upv || 0) +
-                                    (metric.counts?.equipment?.qc || 0) +
-                                    (metric.counts?.equipment?.redline || 0) +
-                                    (metric.counts?.equipment?.misc || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.pids?.upv || 0) +
-                                    (metric.counts?.pids?.qc || 0) +
-                                    (metric.counts?.pids?.redline || 0) +
-                                    (metric.counts?.pids?.misc || 0)}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center text-gray-500"
-                            >
-                              No monthly data available
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </TabsContent>
+                        </TableHeader>
+                        <TableBody>
+                          {isLoading ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={9}
+                                className="text-center text-gray-500"
+                              >
+                                Loading...
+                              </TableCell>
+                            </TableRow>
+                          ) : individualMetricsError ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={9}
+                                className="text-center text-red-500"
+                              >
+                                {individualMetricsError}
+                              </TableCell>
+                            </TableRow>
+                          ) : users.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={9}
+                                className="text-center text-gray-500"
+                              >
+                                No users data available
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            users.map((user) => {
+                              const metrics =
+                                individualMetrics[
+                                  period as keyof MetricsData
+                                ]?.filter(
+                                  (m) => m.userId === user.id.toString()
+                                ) || [];
+                              const aggregatedCounts = metrics.reduce(
+                                (acc, metric) => {
+                                  Object.entries(metric.counts).forEach(
+                                    ([cat, count]) => {
+                                      acc[cat] = (acc[cat] || 0) + (count || 0);
+                                    }
+                                  );
+                                  return acc;
+                                },
+                                {
+                                  "Redline PIDs": 0,
+                                  "UPV Equipments": 0,
+                                  "UPV Equipments QC": 0,
+                                  "UPV Lines": 0,
+                                  "UPV Lines QC": 0,
+                                  "UPV Non Inline": 0,
+                                  "UPV Non Inline QC": 0,
+                                }
+                              );
+                              return (
+                                <TableRow key={`${user.id}-${period}`}>
+                                  <TableCell>
+                                    {user.name || "Unknown"}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["Redline PIDs"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Equipments"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Equipments QC"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Lines"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Lines QC"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Non Inline"]}
+                                  </TableCell>
+                                  <TableCell>
+                                    {aggregatedCounts["UPV Non Inline QC"]}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TabsContent>
+                  ))}
                 </Tabs>
               </CardContent>
             </Card>
 
+            {/* Keep Team Metrics and Project Progress cards as they are */}
             <Card className="shadow-md border-green-200">
               <CardHeader className="bg-gradient-to-r from-green-50 to-transparent border-b border-green-100">
                 <CardTitle className="text-lg text-green-800">
@@ -1507,30 +1412,6 @@ const ProjectManagerDashboard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
-                <div className="mb-4 flex gap-4">
-                  <div>
-                    <label className="block mb-2 text-sm font-medium">
-                      Select Team
-                    </label>
-                    <Select
-                      value={selectedMetricsTeam}
-                      onValueChange={setSelectedMetricsTeam}
-                      disabled={isLoading}
-                    >
-                      <SelectTrigger className="w-full max-w-xs">
-                        <SelectValue placeholder="Choose team..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {teamLeads.map((team) => (
-                          <SelectItem key={team.id} value={team.id}>
-                            {team.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
                 {teamMetricsError && (
                   <p className="text-red-600 text-center py-4">
                     {teamMetricsError}
@@ -1569,129 +1450,57 @@ const ProjectManagerDashboard = () => {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          teamLeads
-                            .filter((team) => team.id === selectedMetricsTeam)
-                            .map((team) => {
-                              const teamMembers = team.team
-                                .map((member) =>
-                                  users.find((u) => u.name === member)
-                                )
-                                .filter(Boolean);
-                              const memberIds = teamMembers.map((m) => m.id);
-                              const teamTasks = tasks.filter((task) =>
-                                memberIds.includes(task.assigneeId)
-                              );
-                              const taskItemIds = teamTasks.map(
-                                (task) => task.id
-                              );
-                              // The original logic is incorrect because taskItemIds is an array of strings (IDs), not objects.
-                              // If you want to get items from tasks, you need to flatten the items from teamTasks.
-                              const items =
-                                teamTasks.flatMap((task) =>
-                                  task.items.map((item) => ({
-                                    ...item,
-                                    task_id: task.id,
-                                    completed_at: task.completedAt,
-                                    item_type: item.type,
-                                  }))
-                                ) || [];
-                              const itemsCompletedToday = items.filter(
-                                (item) =>
-                                  item.completed_at &&
-                                  new Date(item.completed_at).setHours(
-                                    0,
-                                    0,
-                                    0,
-                                    0
-                                  ) ===
-                                    new Date("2025-07-10").setHours(0, 0, 0, 0)
-                              );
-                              const linesUpv = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "Line" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "UPV"
-                                  )
-                              ).length;
-                              const linesQc = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "Line" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "QC"
-                                  )
-                              ).length;
-                              const linesRedline = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "Line" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "Redline"
-                                  )
-                              ).length;
-                              const equipmentUpv = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "Equipment" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "UPV"
-                                  )
-                              ).length;
-                              const equipmentQc = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "Equipment" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "QC"
-                                  )
-                              ).length;
-                              const equipmentRedline =
-                                itemsCompletedToday.filter(
-                                  (item) =>
-                                    item.item_type === "Equipment" &&
-                                    teamTasks.find(
-                                      (task) =>
-                                        task.id === item.task_id &&
-                                        task.type === "Redline"
-                                    )
-                                ).length;
-                              const pidsRedline = itemsCompletedToday.filter(
-                                (item) =>
-                                  item.item_type === "PID" &&
-                                  teamTasks.find(
-                                    (task) =>
-                                      task.id === item.task_id &&
-                                      task.type === "Redline"
-                                  )
-                              ).length;
-                              return (
-                                linesUpv +
-                                  linesQc +
-                                  linesRedline +
-                                  equipmentUpv +
-                                  equipmentQc +
-                                  equipmentRedline +
-                                  pidsRedline >
-                                  0 && (
-                                  <TableRow key={team.id}>
-                                    <TableCell>{team.name}</TableCell>
-                                    <TableCell>{linesUpv}</TableCell>
-                                    <TableCell>{linesQc}</TableCell>
-                                    <TableCell>{linesRedline}</TableCell>
-                                    <TableCell>{equipmentUpv}</TableCell>
-                                    <TableCell>{equipmentQc}</TableCell>
-                                    <TableCell>{equipmentRedline}</TableCell>
-                                    <TableCell>{pidsRedline}</TableCell>
-                                  </TableRow>
-                                )
-                              );
-                            })
+                          teamLeads.map((team) => {
+                            const dailyMetric = teamMetrics.daily.find(
+                              (m) => m.userId === team.id
+                            ) || {
+                              counts: {
+                                [ItemType.Line]: { UPV: 0, QC: 0, Redline: 0 },
+                                [ItemType.Equipment]: {
+                                  UPV: 0,
+                                  QC: 0,
+                                  Redline: 0,
+                                },
+                                [ItemType.PID]: { Redline: 0 },
+                                [ItemType.NonInlineInstrument]: {
+                                  UPV: 0,
+                                  QC: 0,
+                                  Redline: 0,
+                                },
+                              },
+                            };
+                            return (
+                              <TableRow key={team.id}>
+                                <TableCell>{team.name}</TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Line].UPV || 0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Line].QC || 0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Line].Redline ||
+                                    0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Equipment].UPV ||
+                                    0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Equipment].QC ||
+                                    0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.Equipment]
+                                    .Redline || 0}
+                                </TableCell>
+                                <TableCell>
+                                  {dailyMetric.counts[ItemType.PID].Redline ||
+                                    0}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
                         )}
                       </TableBody>
                     </Table>
@@ -1719,28 +1528,27 @@ const ProjectManagerDashboard = () => {
                         ) : (
                           teamMetrics.weekly.map((metric, index) => {
                             const team = teamLeads.find(
-                              (t) => t.id === selectedMetricsTeam
+                              (t) => t.id === metric.userId
                             );
                             return (
                               <TableRow key={index}>
                                 <TableCell>{team?.name || "Unknown"}</TableCell>
                                 <TableCell>
-                                  {(metric.counts?.lines?.upv || 0) +
-                                    (metric.counts?.lines?.qc || 0) +
-                                    (metric.counts?.lines?.redline || 0) +
-                                    (metric.counts?.lines?.misc || 0)}
+                                  {(metric.counts?.[ItemType.Line]?.UPV || 0) +
+                                    (metric.counts?.[ItemType.Line]?.QC || 0) +
+                                    (metric.counts?.[ItemType.Line]?.Redline ||
+                                      0)}
                                 </TableCell>
                                 <TableCell>
-                                  {(metric.counts?.equipment?.upv || 0) +
-                                    (metric.counts?.equipment?.qc || 0) +
-                                    (metric.counts?.equipment?.redline || 0) +
-                                    (metric.counts?.equipment?.misc || 0)}
+                                  {(metric.counts?.[ItemType.Equipment]?.UPV ||
+                                    0) +
+                                    (metric.counts?.[ItemType.Equipment]?.QC ||
+                                      0) +
+                                    (metric.counts?.[ItemType.Equipment]
+                                      ?.Redline || 0)}
                                 </TableCell>
                                 <TableCell>
-                                  {(metric.counts?.pids?.upv || 0) +
-                                    (metric.counts?.pids?.qc || 0) +
-                                    (metric.counts?.pids?.redline || 0) +
-                                    (metric.counts?.pids?.misc || 0)}
+                                  {metric.counts?.[ItemType.PID]?.Redline || 0}
                                 </TableCell>
                               </TableRow>
                             );
@@ -1772,28 +1580,27 @@ const ProjectManagerDashboard = () => {
                         ) : (
                           teamMetrics.monthly.map((metric, index) => {
                             const team = teamLeads.find(
-                              (t) => t.id === selectedMetricsTeam
+                              (t) => t.id === metric.userId
                             );
                             return (
                               <TableRow key={index}>
                                 <TableCell>{team?.name || "Unknown"}</TableCell>
                                 <TableCell>
-                                  {(metric.counts?.lines?.upv || 0) +
-                                    (metric.counts?.lines?.qc || 0) +
-                                    (metric.counts?.lines?.redline || 0) +
-                                    (metric.counts?.lines?.misc || 0)}
+                                  {(metric.counts?.[ItemType.Line]?.UPV || 0) +
+                                    (metric.counts?.[ItemType.Line]?.QC || 0) +
+                                    (metric.counts?.[ItemType.Line]?.Redline ||
+                                      0)}
                                 </TableCell>
                                 <TableCell>
-                                  {(metric.counts?.equipment?.upv || 0) +
-                                    (metric.counts?.equipment?.qc || 0) +
-                                    (metric.counts?.equipment?.redline || 0) +
-                                    (metric.counts?.equipment?.misc || 0)}
+                                  {(metric.counts?.[ItemType.Equipment]?.UPV ||
+                                    0) +
+                                    (metric.counts?.[ItemType.Equipment]?.QC ||
+                                      0) +
+                                    (metric.counts?.[ItemType.Equipment]
+                                      ?.Redline || 0)}
                                 </TableCell>
                                 <TableCell>
-                                  {(metric.counts?.pids?.upv || 0) +
-                                    (metric.counts?.pids?.qc || 0) +
-                                    (metric.counts?.pids?.redline || 0) +
-                                    (metric.counts?.pids?.misc || 0)}
+                                  {metric.counts?.[ItemType.PID]?.Redline || 0}
                                 </TableCell>
                               </TableRow>
                             );
@@ -1896,199 +1703,6 @@ const ProjectManagerDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
-          <TabsContent value="data" className="space-y-6 animate-fade-in">
-            <Card className="shadow-md hover:shadow-lg transition-shadow">
-              <CardHeader className="pb-2 bg-gradient-to-r from-purple-50 to-transparent border-b">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Users size={18} className="text-purple-600" />
-                  </div>
-                  <CardTitle className="text-lg">Daily Work Summary</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="p-6">
-                <h4 className="text-sm font-medium mb-2">Team Total</h4>
-                {isLoading ? (
-                  <p className="text-gray-500">Loading...</p>
-                ) : (
-                  <>
-                    <p className="text-xl font-bold text-purple-600">
-                      Lines:{" "}
-                      {tasks
-                        .filter(
-                          (task) =>
-                            task.completedAt &&
-                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                              new Date().setHours(0, 0, 0, 0)
-                        )
-                        .reduce(
-                          (sum, task) =>
-                            sum +
-                            task.items.filter(
-                              (item) =>
-                                item.type === ItemType.Line && item.completed
-                            ).length,
-                          0
-                        )}
-                    </p>
-                    <p className="text-xl font-bold text-purple-600">
-                      Equipment:{" "}
-                      {tasks
-                        .filter(
-                          (task) =>
-                            task.completedAt &&
-                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                              new Date().setHours(0, 0, 0, 0)
-                        )
-                        .reduce(
-                          (sum, task) =>
-                            sum +
-                            task.items.filter(
-                              (item) =>
-                                item.type === ItemType.Equipment &&
-                                item.completed
-                            ).length,
-                          0
-                        )}
-                    </p>
-                    <p className="text-xl font-bold text-purple-600">
-                      P&IDs:{" "}
-                      {tasks
-                        .filter(
-                          (task) =>
-                            task.completedAt &&
-                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                              new Date().setHours(0, 0, 0, 0) &&
-                            task.type === TaskType.Redline
-                        )
-                        .reduce(
-                          (sum, task) =>
-                            sum +
-                            task.items.filter(
-                              (item) =>
-                                item.type === ItemType.PID && item.completed
-                            ).length,
-                          0
-                        )}
-                    </p>
-                    <p className="text-xl font-bold text-purple-600">
-                      Redlines:{" "}
-                      {
-                        tasks.filter(
-                          (task) =>
-                            task.completedAt &&
-                            new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                              new Date().setHours(0, 0, 0, 0) &&
-                            task.type === TaskType.Redline
-                        ).length
-                      }
-                    </p>
-                  </>
-                )}
-                <h4 className="text-sm font-medium mt-4 mb-2">By Team Lead</h4>
-                {isLoading ? (
-                  <p className="text-gray-500">Loading...</p>
-                ) : (
-                  teamLeads.map((lead) => {
-                    const leadMembers = lead.team;
-                    const leadTotal = {
-                      Lines: 0,
-                      Equipment: 0,
-                      PIDs: 0,
-                    };
-                    leadMembers.forEach((member) => {
-                      const memberTasks = tasks.filter(
-                        (task) =>
-                          task.assignee === member &&
-                          task.completedAt &&
-                          new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                            new Date().setHours(0, 0, 0, 0)
-                      );
-                      leadTotal.Lines += memberTasks.reduce(
-                        (sum, task) =>
-                          sum +
-                          task.items.filter(
-                            (item) =>
-                              item.type === ItemType.Line && item.completed
-                          ).length,
-                        0
-                      );
-                      leadTotal.Equipment += memberTasks.reduce(
-                        (sum, task) =>
-                          sum +
-                          task.items.filter(
-                            (item) =>
-                              item.type === ItemType.Equipment && item.completed
-                          ).length,
-                        0
-                      );
-                      leadTotal.PIDs += memberTasks.reduce(
-                        (sum, task) =>
-                          sum +
-                          task.items.filter(
-                            (item) =>
-                              item.type === ItemType.PID &&
-                              task.type === TaskType.Redline &&
-                              item.completed
-                          ).length,
-                        0
-                      );
-                    });
-                    return leadTotal.Lines +
-                      leadTotal.Equipment +
-                      leadTotal.PIDs >
-                      0 ? (
-                      <p key={lead.id} className="text-sm text-gray-700">
-                        {lead.name}: {leadTotal.Lines} Lines,{" "}
-                        {leadTotal.Equipment} Equipment, {leadTotal.PIDs} P&IDs
-                      </p>
-                    ) : null;
-                  })
-                )}
-                <h4 className="text-sm font-medium mt-4 mb-2">
-                  By User/Team Member
-                </h4>
-                {isLoading ? (
-                  <p className="text-gray-500">Loading...</p>
-                ) : (
-                  Object.entries(
-                    tasks
-                      .filter(
-                        (task) =>
-                          task.completedAt &&
-                          new Date(task.completedAt).setHours(0, 0, 0, 0) ===
-                            new Date().setHours(0, 0, 0, 0)
-                      )
-                      .reduce((acc, task) => {
-                        const assignee = task.assignee;
-                        if (!acc[assignee])
-                          acc[assignee] = { Lines: 0, Equipment: 0, PIDs: 0 };
-                        task.items.forEach((item) => {
-                          if (item.completed) {
-                            if (item.type === ItemType.Line)
-                              acc[assignee].Lines += 1;
-                            if (item.type === ItemType.Equipment)
-                              acc[assignee].Equipment += 1;
-                            if (
-                              item.type === ItemType.PID &&
-                              task.type === TaskType.Redline
-                            )
-                              acc[assignee].PIDs += 1;
-                          }
-                        });
-                        return acc;
-                      }, {} as Record<string, { Lines: number; Equipment: number; PIDs: number }>)
-                  ).map(([assignee, counts]) => (
-                    <p key={assignee} className="text-sm text-gray-700">
-                      {assignee}: {counts.Lines} Lines, {counts.Equipment}{" "}
-                      Equipment, {counts.PIDs} P&IDs
-                    </p>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
         </Tabs>
 
         <Modal
@@ -2119,7 +1733,7 @@ const ProjectManagerDashboard = () => {
           isOpen={commentsModalIsOpen}
           onRequestClose={closeCommentsModal}
           className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full mx-auto my-8 outline-none max-h-[80vh] overflow-y-auto"
-          overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+          overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items"
         >
           <h2 className="text-xl font-semibold mb-4">Comments</h2>
           {selectedComments.length === 0 ? (
