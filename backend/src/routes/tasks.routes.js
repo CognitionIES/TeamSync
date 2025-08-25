@@ -452,12 +452,19 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 
     const taskId = parseInt(req.params.id);
     const itemId = parseInt(req.params.itemId);
-    const { completed } = req.body;
+    const { completed, blocks } = req.body;
+
+    console.log("Received payload:", { completed, blocks }); // Debug log
 
     if (typeof completed !== "boolean") {
       return res
         .status(400)
         .json({ message: "Completed status must be a boolean" });
+    }
+    if (typeof blocks !== "number" || blocks < 0) {
+      return res
+        .status(400)
+        .json({ message: "Blocks must be a non-negative number" });
     }
 
     await db.query("BEGIN");
@@ -480,8 +487,6 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     }
 
     const task = taskRows[0];
-    const projectName = task.project_name;
-
     if (task.status !== "In Progress") {
       await db.query("ROLLBACK");
       return res
@@ -503,7 +508,6 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     }
 
     const item = itemRows[0];
-
     if (item.completed && !completed) {
       await db.query("ROLLBACK");
       return res
@@ -513,22 +517,47 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 
     const { rows: updatedItemRows } = await db.query(
       `
-  UPDATE task_items
-  SET 
-    completed = $1,
-    completed_at = CASE 
-      WHEN $1 = true THEN CURRENT_TIMESTAMP
-      ELSE NULL
-    END
-  WHERE id = $2
-  RETURNING *
-  `,
-      [completed, itemId]
+      UPDATE task_items
+      SET 
+        completed = $1,
+        completed_at = CASE WHEN $1 = true THEN CURRENT_TIMESTAMP ELSE NULL END,
+        blocks = $2
+      WHERE id = $3
+      RETURNING *
+      `,
+      [completed, blocks, itemId]
     );
 
     const updatedItem = updatedItemRows[0];
-    console.log("Updated task item:", updatedItem);
 
+    // Update daily_line_counts
+    const date = new Date().toISOString().split("T")[0];
+    const category = item.item_type || "Unknown";
+    const countValue = completed ? 1 : 0;
+    const blocksValue = completed ? blocks : 0;
+    const countsObject = { [category]: countValue, blocks: blocksValue };
+
+    console.log("Counts object for query:", countsObject); // Debug log
+
+    const countsQuery = `
+      INSERT INTO daily_line_counts (user_id, date, category, count, counts)
+      VALUES ($1, $2, $3, $4, $5::jsonb)
+      ON CONFLICT (user_id, date, category)
+      DO UPDATE SET 
+        count = daily_line_counts.count + EXCLUDED.count,
+        counts = daily_line_counts.counts || $6::jsonb,
+        updated_at = CURRENT_TIMESTAMP
+    `;
+    await db.query(countsQuery, [
+      req.user.id,
+      date,
+      category,
+      countValue,
+      JSON.stringify({ [category]: countValue }), // Ensure $5 is JSONB
+      JSON.stringify({ blocks: blocksValue }), // Ensure $6 is JSONB
+    ]);
+
+    // Rest of the existing logic (progress update, audit logs, etc.) remains the same
     const { rows: allItems } = await db.query(
       `
       SELECT COUNT(*) as total, SUM(CASE WHEN completed = true THEN 1 ELSE 0 END) as completed_count
@@ -545,9 +574,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
     await db.query(
       `
       UPDATE tasks
-      SET 
-        progress = $1,
-        updated_at = CURRENT_TIMESTAMP
+      SET progress = $1, updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
       `,
       [progress, taskId]
@@ -568,9 +595,9 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
         "Task Item Update",
         task.type,
         req.user.id,
-        `Updated task item ${updatedItem.item_name} (ID: ${itemId}) to completed=${completed} in project ${projectName}`,
+        `Updated task item ${updatedItem.name} (ID: ${itemId}) to completed=${completed} with ${blocks} blocks in project ${task.project_name}`,
         new Date(),
-        projectName,
+        task.project_name,
         teamName,
       ]
     );
@@ -583,9 +610,10 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
              json_agg(
                json_build_object(
                  'id', ti.id,
-                 'item_name', ti.name,
+                 'name', ti.name,
                  'item_type', ti.item_type,
-                 'completed', ti.completed
+                 'completed', ti.completed,
+                 'blocks', ti.blocks
                )
              ) FILTER (WHERE ti.id IS NOT NULL) as items,
              json_agg(
@@ -636,5 +664,42 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 });
 
 router.post("/:taskId/comments", protect, addTaskComment);
+
+router.get("/blocks-summary", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "Project Manager") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to view blocks summary`,
+      });
+    }
+
+    console.log("Fetching blocks summary for Project Manager ID:", req.user.id);
+
+    const query = `
+      SELECT COALESCE(SUM(ti.blocks), 0) as total_blocks
+      FROM tasks t
+      JOIN task_items ti ON t.id = ti.task_id
+      JOIN team_members tm1 ON t.assignee_id = tm1.member_id
+      JOIN team_members tm2 ON tm1.lead_id = tm2.member_id
+      WHERE tm2.lead_id = $1
+      AND ti.completed = true
+      AND t.status = 'Completed'
+    `;
+    const { rows } = await db.query(query, [req.user.id]);
+    console.log("Blocks summary query result:", rows[0]);
+    res.status(200).json({ data: { totalBlocks: rows[0].total_blocks } });
+  } catch (error) {
+    console.error("Error fetching blocks summary:", {
+      message: error.message,
+      stack: error.stack,
+      query: error.query || "Not available",
+      params: [req.user.id],
+    });
+    res.status(500).json({
+      message: "Failed to fetch blocks summary",
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;

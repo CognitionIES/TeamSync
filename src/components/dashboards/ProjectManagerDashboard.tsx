@@ -19,8 +19,16 @@ import {
   Users,
   RefreshCw,
   AlertTriangle,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
 import TaskTable from "../shared/TaskTable";
 import TeamPerformanceView from "../shared/TeamPerformanceView";
 import { Task, TaskStatus, TaskType, UserRole, ItemType } from "@/types";
@@ -174,6 +182,14 @@ interface ProjectProgress {
   progress: string;
 }
 
+interface AreaProgress {
+  areaId: string;
+  areaName: string;
+  completedItems: number;
+  targetItems: number;
+  progress: string;
+}
+
 const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
   id: apiTeamLead.id,
   name: apiTeamLead.team_lead,
@@ -197,6 +213,7 @@ const transformTask = (apiTask: ApiTask): Task => {
         ? (item.item_type as ItemType)
         : ItemType.Line,
       completed: typeof item.completed === "boolean" ? item.completed : false,
+      blocks: item.blocks || 0, // Add blocks field
     };
     console.log(
       "Raw Completed:",
@@ -230,12 +247,14 @@ const transformTask = (apiTask: ApiTask): Task => {
         name: "L-Dummy-1",
         type: ItemType.Line,
         completed: false,
+        blocks: 0, // Add blocks for dummy items
       },
       {
         id: "dummy-line-2",
         name: "L-Dummy-2",
         type: ItemType.Line,
         completed: true,
+        blocks: 0, // Add blocks for dummy items
       }
     );
   }
@@ -257,7 +276,7 @@ const transformTask = (apiTask: ApiTask): Task => {
     pidNumber: "",
     projectName: "",
     areaNumber: "",
-    description: "",
+    description: apiTask.description || "",
     lines:
       apiTask.items
         .filter((item) => item.item_type === "Line")
@@ -266,6 +285,7 @@ const transformTask = (apiTask: ApiTask): Task => {
           name: item.item_name,
           type: item.item_type,
           completed: item.completed,
+          blocks: item.blocks || 0, // Add blocks to lines
         })) || undefined,
   };
 };
@@ -273,6 +293,7 @@ const transformTask = (apiTask: ApiTask): Task => {
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
+  const [totalBlocks, setTotalBlocks] = useState<number>(0);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -311,6 +332,11 @@ const ProjectManagerDashboard = () => {
   const [individualMetricsError, setIndividualMetricsError] = useState<
     string | null
   >(null);
+  const [areaProgress, setAreaProgress] = useState<AreaProgress[]>([]); // New state for area-wise progress
+  const [areaProgressError, setAreaProgressError] = useState<string | null>(
+    null
+  );
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
@@ -530,7 +556,7 @@ const ProjectManagerDashboard = () => {
           updatedItems.find((item) => item.id === itemId)?.type || "Line";
         const taskType = task.type;
         const category = `${itemType} ${taskType === "QC" ? "QC" : taskType}`;
-        await axios.post(
+        const response = await axios.post(
           `${API_URL}/metrics/individual/update`,
           {
             userId,
@@ -548,14 +574,20 @@ const ProjectManagerDashboard = () => {
             },
           }
         );
-        await fetchIndividualMetrics(); // Refresh metrics
+        if (response.status === 200) {
+          await fetchIndividualMetrics(); // Refresh metrics
+        } else {
+          throw new Error("Metric update failed");
+        }
       }
     } catch (error) {
-      console.error("Error updating task item:", error);
-      toast.error("Failed to update task item");
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error updating task item:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update task item"
+      );
     }
   };
-
   const fetchIndividualMetrics = async () => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -580,15 +612,17 @@ const ProjectManagerDashboard = () => {
         })
       );
 
-      const today = new Date().toDateString(); // e.g., "Wed Jul 23 2025" (IST)
-      console.log("Current Date (Client IST):", today);
+      const today = selectedDate.toISOString().split("T")[0]; // e.g., "2025-08-23"
+      console.log("Selected Date (Client IST):", today);
       const filteredMetrics = {
         daily: response.data.daily.filter((m) => {
-          const metricDate = new Date(m.date).toDateString(); // Normalize to local date
+          const metricDate = new Date(m.date).toISOString().split("T")[0];
           console.log(
             `Filtering date ${
               m.date
-            } -> ${metricDate}, Today: ${today}, Match: ${metricDate === today}`
+            } -> ${metricDate}, Selected: ${today}, Match: ${
+              metricDate === today
+            }`
           );
           return metricDate === today;
         }),
@@ -609,9 +643,40 @@ const ProjectManagerDashboard = () => {
       });
       setIndividualMetricsError(
         axiosError.response?.data?.message ||
-          "Failed to fetch individual metrics"
+          `Failed to fetch individual metrics: ${axiosError.message}`
       );
       setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
+      toast.error(
+        axiosError.response?.data?.message ||
+          "Failed to fetch individual metrics. Check server logs."
+      );
+    }
+  };
+
+  const fetchAreaProgress = async () => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      console.log("Fetching area-wise progress");
+      const response = await axios.get<{ data: AreaProgress[] }>(
+        `${API_URL}/metrics/area/progress`, // Assuming a new endpoint for area-wise progress
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+      setAreaProgress(response.data.data);
+      setAreaProgressError(null);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching area progress:", axiosError);
+      setAreaProgressError(
+        axiosError.response?.data?.message || "Failed to fetch area progress"
+      );
+      setAreaProgress([]);
     }
   };
 
@@ -647,7 +712,17 @@ const ProjectManagerDashboard = () => {
         });
       });
 
-      return { userId: team.id, counts };
+      // Calculate total count and set a generic category (or customize as needed)
+      const totalCount = Object.values(counts)
+        .flatMap((typeCounts) => Object.values(typeCounts))
+        .reduce((sum, val) => sum + val, 0);
+
+      return {
+        userId: team.id,
+        counts,
+        count: totalCount,
+        category: "team", // or set a more specific category if needed
+      };
     });
     setTeamMetrics({ daily: metrics, weekly: [], monthly: [] });
     setTeamMetricsError(null);
@@ -705,7 +780,7 @@ const ProjectManagerDashboard = () => {
       }
       const usersDataResponse = JSON.parse(usersText);
       const usersData = usersDataResponse.data || [];
-      setUsers(usersData); // Ensure users includes id and name mapping
+      setUsers(usersData);
       console.log("Fetched users:", usersData);
 
       const [tasksResponse, teamsResponse] = await Promise.all([
@@ -735,6 +810,24 @@ const ProjectManagerDashboard = () => {
       const tasksData = await tasksResponse.json();
       const teamsData = await teamsResponse.json();
       setTasks(tasksData.data ? tasksData.data.map(transformTask) : []);
+
+      // Fetch total blocks with error handling
+      try {
+        const blocksResponse = await axios.get<{
+          data: { totalBlocks: number };
+        }>(`${API_URL}/tasks/blocks-summary`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        });
+        setTotalBlocks(blocksResponse.data.data.totalBlocks);
+      } catch (blocksError) {
+        console.error("Error fetching blocks summary:", blocksError);
+        setTotalBlocks(0); // Default to 0 if endpoint is unavailable
+        toast.error("Failed to fetch total blocks. Defaulting to 0.");
+      }
+
       setTeamLeads(teamsData.data ? teamsData.data.map(transformTeamLead) : []);
 
       if (usersData.length > 0) setSelectedMetricsUser("all");
@@ -766,7 +859,7 @@ const ProjectManagerDashboard = () => {
 
   useEffect(() => {
     fetchIndividualMetrics();
-  }, []);
+  }, [selectedDate]); // Refetch when selectedDate changes
 
   useEffect(() => {
     calculateTeamMetrics();
@@ -1005,7 +1098,7 @@ const ProjectManagerDashboard = () => {
             {isLoading ? (
               <MetricsSkeleton />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
                 <Card className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-2 bg-gradient-to-r from-blue-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
@@ -1080,6 +1173,25 @@ const ProjectManagerDashboard = () => {
                       {completedToday}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">Tasks Finished</p>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-md hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-2 bg-gradient-to-r from-purple-50 to-transparent border-b">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-purple-100 rounded-lg">
+                        <Users size={18} className="text-purple-600" />
+                      </div>
+                      <CardTitle className="text-lg">Total Blocks</CardTitle>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <p className="text-4xl font-bold text-purple-600">
+                      {totalBlocks}
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Completed Blocks
+                    </p>
                   </CardContent>
                 </Card>
               </div>
@@ -1289,12 +1401,90 @@ const ProjectManagerDashboard = () => {
 
                 <Tabs defaultValue="daily" className="space-y-4">
                   <TabsList className="grid grid-cols-3 w-full max-w-md">
-                    <TabsTrigger value="daily">Daily</TabsTrigger>
-                    <TabsTrigger value="weekly">Weekly</TabsTrigger>
-                    <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                    <TabsTrigger
+                      value="daily"
+                      className="flex items-center gap-2"
+                    >
+                      Daily
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="p-0 h-6 w-6"
+                          >
+                            <CalendarIcon className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={selectedDate}
+                            onSelect={(date) => date && setSelectedDate(date)}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="weekly"
+                      className="flex items-center gap-2"
+                    >
+                      Weekly
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="p-0 h-6 w-6"
+                          >
+                            <CalendarIcon className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={selectedDate}
+                            onSelect={(date) => date && setSelectedDate(date)}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="monthly"
+                      className="flex items-center gap-2"
+                    >
+                      Monthly
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="p-0 h-6 w-6"
+                          >
+                            <CalendarIcon className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={selectedDate}
+                            onSelect={(date) => date && setSelectedDate(date)}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </TabsTrigger>
                   </TabsList>
+
                   {["daily", "weekly", "monthly"].map((period) => (
                     <TabsContent key={period} value={period}>
+                      {period === "daily" && (
+                        <div className="mt-4 text-sm text-gray-500">
+                          Selected Date: {format(selectedDate, "PPP")}
+                        </div>
+                      )}
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -1306,13 +1496,14 @@ const ProjectManagerDashboard = () => {
                             <TableHead>UPV Lines QC</TableHead>
                             <TableHead>UPV Non Inline</TableHead>
                             <TableHead>UPV Non Inline QC</TableHead>
+                            <TableHead>Total Blocks</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {isLoading ? (
                             <TableRow>
                               <TableCell
-                                colSpan={9}
+                                colSpan={10}
                                 className="text-center text-gray-500"
                               >
                                 Loading...
@@ -1321,7 +1512,7 @@ const ProjectManagerDashboard = () => {
                           ) : individualMetricsError ? (
                             <TableRow>
                               <TableCell
-                                colSpan={9}
+                                colSpan={10}
                                 className="text-center text-red-500"
                               >
                                 {individualMetricsError}
@@ -1330,7 +1521,7 @@ const ProjectManagerDashboard = () => {
                           ) : users.length === 0 ? (
                             <TableRow>
                               <TableCell
-                                colSpan={9}
+                                colSpan={10}
                                 className="text-center text-gray-500"
                               >
                                 No users data available
@@ -1347,8 +1538,60 @@ const ProjectManagerDashboard = () => {
                               const aggregatedCounts = metrics.reduce(
                                 (acc, metric) => {
                                   Object.entries(metric.counts).forEach(
-                                    ([cat, count]) => {
-                                      acc[cat] = (acc[cat] || 0) + (count || 0);
+                                    ([itemType, taskCounts]) => {
+                                      if (
+                                        typeof taskCounts === "object" &&
+                                        taskCounts !== null &&
+                                        itemType !== "blocks"
+                                      ) {
+                                        Object.entries(taskCounts).forEach(
+                                          ([taskType, count]) => {
+                                            if (typeof count === "number") {
+                                              if (
+                                                itemType === "Line" &&
+                                                taskType === "UPV"
+                                              ) {
+                                                acc["UPV Lines"] =
+                                                  (acc["UPV Lines"] || 0) +
+                                                  count;
+                                              }
+                                              if (
+                                                itemType === "Line" &&
+                                                taskType === "QC"
+                                              ) {
+                                                acc["UPV Lines QC"] =
+                                                  (acc["UPV Lines QC"] || 0) +
+                                                  count;
+                                              }
+                                              if (
+                                                itemType === "Equipment" &&
+                                                taskType === "UPV"
+                                              ) {
+                                                acc["UPV Equipments"] =
+                                                  (acc["UPV Equipments"] || 0) +
+                                                  count;
+                                              }
+                                              if (
+                                                itemType === "Equipment" &&
+                                                taskType === "QC"
+                                              ) {
+                                                acc["UPV Equipments QC"] =
+                                                  (acc["UPV Equipments QC"] ||
+                                                    0) + count;
+                                              }
+                                              if (
+                                                itemType === "PID" &&
+                                                taskType === "Redline"
+                                              ) {
+                                                acc["Redline PIDs"] =
+                                                  (acc["Redline PIDs"] || 0) +
+                                                  count;
+                                              }
+                                              // Add similar conditions for "Non Inline" if applicable
+                                            }
+                                          }
+                                        );
+                                      }
                                     }
                                   );
                                   return acc;
@@ -1362,6 +1605,10 @@ const ProjectManagerDashboard = () => {
                                   "UPV Non Inline": 0,
                                   "UPV Non Inline QC": 0,
                                 }
+                              );
+                              const totalBlocks = metrics.reduce(
+                                (sum, m) => sum + (m.counts.blocks || 0),
+                                0
                               );
                               return (
                                 <TableRow key={`${user.id}-${period}`}>
@@ -1389,6 +1636,7 @@ const ProjectManagerDashboard = () => {
                                   <TableCell>
                                     {aggregatedCounts["UPV Non Inline QC"]}
                                   </TableCell>
+                                  <TableCell>{totalBlocks}</TableCell>
                                 </TableRow>
                               );
                             })
@@ -1398,6 +1646,70 @@ const ProjectManagerDashboard = () => {
                     </TabsContent>
                   ))}
                 </Tabs>
+              </CardContent>
+            </Card>
+
+            {/* Add Area-wise Progress tab */}
+            <Card className="shadow-md border-orange-200">
+              <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent border-b border-orange-100">
+                <CardTitle className="text-lg text-orange-800">
+                  Area-wise Progress
+                </CardTitle>
+                <CardDescription>Progress of projects by area</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {areaProgressError && (
+                  <p className="text-red-600 text-center py-4">
+                    {areaProgressError}
+                  </p>
+                )}
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Area Name</TableHead>
+                      <TableHead>Completed Items</TableHead>
+                      <TableHead>Target Items</TableHead>
+                      <TableHead>Progress</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-center text-gray-500"
+                        >
+                          Loading...
+                        </TableCell>
+                      </TableRow>
+                    ) : areaProgress.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-center text-gray-500"
+                        >
+                          No area progress data available.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      areaProgress.map((area) => (
+                        <TableRow key={area.areaId}>
+                          <TableCell>{area.areaName}</TableCell>
+                          <TableCell>{area.completedItems}</TableCell>
+                          <TableCell>{area.targetItems}</TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            <Progress
+                              value={parseFloat(area.progress)}
+                              className="w-[200px]"
+                            />
+                            <span>{area.progress}%</span>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
 

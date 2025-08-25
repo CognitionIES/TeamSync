@@ -65,6 +65,7 @@ interface AssignedItemsModalProps {
   userName: string;
   taskType: string;
   itemType: string;
+  onUpdateItem: (itemId: string, completed: boolean, blocks: number) => void;
 }
 
 const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
@@ -75,6 +76,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
   userName,
   taskType,
   itemType,
+  onUpdateItem,
 }) => {
   // Extract project name from the first non-empty category
   const projectName = assignedItems
@@ -191,6 +193,31 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>Line:</strong> {line.line_number}
                         </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onChange={(e) =>
+                              onUpdateItem(line.id, e.target.checked, 0)
+                            }
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue="0"
+                            onChange={(e) =>
+                              onUpdateItem(
+                                line.id,
+                                document.querySelector<HTMLInputElement>(
+                                  `input[type="checkbox"][value="${line.id}"]`
+                                )?.checked || false,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                            className="w-16 p-1 border border-gray-300 rounded text-sm"
+                            placeholder="Blocks"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -204,12 +231,12 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
           )}
 
           {taskType === "QC" && itemType === "Line" && (
-            <div className="border-b  border-gray-200 pb-4">
-              <h3 className="text-lg  font-semibold text-gray-700 mb-2">
+            <div className="border-b border-gray-200 pb-4">
+              <h3 className="text-lg font-semibold text-gray-700 mb-2">
                 QC Lines ({assignedItems.qcLines.count})
               </h3>
               {assignedItems.qcLines.count > 0 ? (
-                <div className="bg-gray-50  rounded-lg p-4 max-h-40 overflow-y-auto">
+                <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
                   <ul className="space-y-2">
                     {assignedItems.qcLines.items.map((line) => (
                       <li
@@ -219,6 +246,31 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>Line:</strong> {line.line_number}
                         </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onChange={(e) =>
+                              onUpdateItem(line.id, e.target.checked, 0)
+                            }
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue="0"
+                            onChange={(e) =>
+                              onUpdateItem(
+                                line.id,
+                                document.querySelector<HTMLInputElement>(
+                                  `input[type="checkbox"][value="${line.id}"]`
+                                )?.checked || false,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                            className="w-16 p-1 border border-gray-300 rounded text-sm"
+                            placeholder="Blocks"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -247,9 +299,31 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>P&ID:</strong> {pid.pid_number}
                         </span>
-                        <span className="text-gray-500">
-                          Project: {pid.project_name || "Unknown"}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onChange={(e) =>
+                              onUpdateItem(pid.id, e.target.checked, 0)
+                            }
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue="0"
+                            onChange={(e) =>
+                              onUpdateItem(
+                                pid.id,
+                                document.querySelector<HTMLInputElement>(
+                                  `input[type="checkbox"][value="${pid.id}"]`
+                                )?.checked || false,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                            className="w-16 p-1 border border-gray-300 rounded text-sm"
+                            placeholder="Blocks"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -278,9 +352,31 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>Equipment:</strong> {equip.equipment_name}
                         </span>
-                        <span className="text-gray-500">
-                          Project: {equip.project_name || "Unknown"}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onChange={(e) =>
+                              onUpdateItem(equip.id, e.target.checked, 0)
+                            }
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue="0"
+                            onChange={(e) =>
+                              onUpdateItem(
+                                equip.id,
+                                document.querySelector<HTMLInputElement>(
+                                  `input[type="checkbox"][value="${equip.id}"]`
+                                )?.checked || false,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                            className="w-16 p-1 border border-gray-300 rounded text-sm"
+                            placeholder="Blocks"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -309,9 +405,31 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
                         <span>
                           <strong>Equipment:</strong> {equip.equipment_name}
                         </span>
-                        <span className="text-gray-500">
-                          Project: {equip.project_name || "Unknown"}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onChange={(e) =>
+                              onUpdateItem(equip.id, e.target.checked, 0)
+                            }
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue="0"
+                            onChange={(e) =>
+                              onUpdateItem(
+                                equip.id,
+                                document.querySelector<HTMLInputElement>(
+                                  `input[type="checkbox"][value="${equip.id}"]`
+                                )?.checked || false,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                            className="w-16 p-1 border border-gray-300 rounded text-sm"
+                            placeholder="Blocks"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>

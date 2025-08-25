@@ -62,20 +62,29 @@ const aggregateMetrics = (rows, periodKey) => {
     const itemType = row.item_type || "unknown";
     const taskType = row.task_type || "misc";
     const count = parseInt(row.count) || 0;
+    const blocks = parseInt(row.counts?.blocks) || 0;
     if (!key) {
       console.log(`Skipping row with invalid ${periodKey}:`, row);
       return;
     }
     if (!aggregated[key]) {
-      aggregated[key] = { counts: {} };
+      aggregated[key] = { counts: {}, userId: row.user_id };
     }
     if (!aggregated[key].counts[itemType]) {
       aggregated[key].counts[itemType] = {};
     }
     aggregated[key].counts[itemType][taskType] =
       (aggregated[key].counts[itemType][taskType] || 0) + count;
+    aggregated[key].counts.blocks =
+      (aggregated[key].counts.blocks || 0) + blocks;
   });
-  const result = Object.values(aggregated);
+  const result = Object.values(aggregated).map((entry) => ({
+    ...entry,
+    [periodKey]: key, // Ensure the period key is included
+    date: periodKey === "date" ? key : undefined,
+    week_start: periodKey === "week_start" ? key : undefined,
+    month_start: periodKey === "month_start" ? key : undefined,
+  }));
   console.log(`Aggregated result for ${periodKey}: ${JSON.stringify(result)}`);
   return result.length > 0 ? result : [];
 };
@@ -89,109 +98,110 @@ router.get("/individual/lines", protect, async (req, res) => {
       return res.status(403).json({ message: `Unauthorized access` });
     }
 
-    const userId = req.query.userId; // Only use query param, don’t default to req.user.id
+    const userId = req.query.userId;
     const metrics = { daily: [], weekly: [], monthly: [] };
-
-    // Test database connection
-    await db.query("SELECT NOW()", []);
 
     // Daily metrics
     const dailyQuery = `
-      SELECT user_id, date, category, count
+      SELECT user_id, date, item_type, task_type, category, count, counts
       FROM daily_line_counts
       WHERE date >= NOW() - INTERVAL '30 days'
       ${userId ? "AND user_id = $1" : ""}
       ORDER BY date DESC
     `;
     const dailyParams = userId ? [userId] : [];
-    console.log(
-      "Executing dailyQuery:",
-      dailyQuery,
-      "with params:",
-      dailyParams
-    );
     const dailyResult = await db.query(dailyQuery, dailyParams);
-    console.log(
-      "Daily Rows fetched:",
-      dailyResult.rows.length,
-      "Raw rows:",
-      JSON.stringify(dailyResult.rows)
-    );
-    metrics.daily = dailyResult.rows.map((row) => ({
-      userId: row.user_id,
-      date: row.date,
-      counts: { [row.category]: row.count || 0 },
-    }));
+    metrics.daily = dailyResult.rows.map((row) => {
+      // Derive item_type and task_type from category if not present
+      const itemType =
+        row.item_type ||
+        (row.category && row.category.split(" ")[0]) ||
+        "unknown";
+      const taskType =
+        row.task_type ||
+        (row.category && row.category.split(" ").pop()) ||
+        "misc";
+      return {
+        userId: row.user_id,
+        date: row.date,
+        counts: {
+          [itemType]: {
+            [taskType]: row.count || 0,
+          },
+          blocks: row.counts?.blocks || 0,
+        },
+      };
+    });
 
     // Weekly metrics
     const weeklyQuery = `
-      SELECT user_id, DATE_TRUNC('week', date) as week_start, category, SUM(count) as total_count
+      SELECT user_id, DATE_TRUNC('week', date) as week_start, item_type, task_type, category, SUM(count) as total_count, jsonb_object_agg(task_type, count) as counts
       FROM daily_line_counts
       WHERE date >= NOW() - INTERVAL '4 weeks'
       ${userId ? "AND user_id = $1" : ""}
-      GROUP BY user_id, DATE_TRUNC('week', date), category
+      GROUP BY user_id, DATE_TRUNC('week', date), item_type, task_type, category
       ORDER BY week_start DESC
     `;
     const weeklyParams = userId ? [userId] : [];
-    console.log(
-      "Executing weeklyQuery:",
-      weeklyQuery,
-      "with params:",
-      weeklyParams
-    );
     const weeklyResult = await db.query(weeklyQuery, weeklyParams);
-    const weeklyGrouped = {};
-    weeklyResult.rows.forEach((row) => {
-      if (!weeklyGrouped[row.week_start]) {
-        weeklyGrouped[row.week_start] = {
-          userId: row.user_id,
-          week_start: row.week_start,
-          counts: {},
-        };
-      }
-      weeklyGrouped[row.week_start].counts[row.category] = row.total_count || 0;
+    metrics.weekly = weeklyResult.rows.map((row) => {
+      const itemType =
+        row.item_type ||
+        (row.category && row.category.split(" ")[0]) ||
+        "unknown";
+      const taskType =
+        row.task_type ||
+        (row.category && row.category.split(" ").pop()) ||
+        "misc";
+      return {
+        userId: row.user_id,
+        week_start: row.week_start,
+        counts: {
+          [itemType]: {
+            [taskType]: row.total_count || 0,
+          },
+          blocks: (row.counts && row.counts.blocks) || 0,
+        },
+      };
     });
-    metrics.weekly = Object.values(weeklyGrouped);
 
     // Monthly metrics
     const monthlyQuery = `
-      SELECT user_id, DATE_TRUNC('month', date) as month_start, category, SUM(count) as total_count
+      SELECT user_id, DATE_TRUNC('month', date) as month_start, item_type, task_type, category, SUM(count) as total_count, jsonb_object_agg(task_type, count) as counts
       FROM daily_line_counts
       WHERE date >= NOW() - INTERVAL '12 months'
       ${userId ? "AND user_id = $1" : ""}
-      GROUP BY user_id, DATE_TRUNC('month', date), category
+      GROUP BY user_id, DATE_TRUNC('month', date), item_type, task_type, category
       ORDER BY month_start DESC
     `;
     const monthlyParams = userId ? [userId] : [];
-    console.log(
-      "Executing monthlyQuery:",
-      monthlyQuery,
-      "with params:",
-      monthlyParams
-    );
     const monthlyResult = await db.query(monthlyQuery, monthlyParams);
-    const monthlyGrouped = {};
-    monthlyResult.rows.forEach((row) => {
-      if (!monthlyGrouped[row.month_start]) {
-        monthlyGrouped[row.month_start] = {
-          userId: row.user_id,
-          month_start: row.month_start,
-          counts: {},
-        };
-      }
-      monthlyGrouped[row.month_start].counts[row.category] =
-        row.total_count || 0;
+    metrics.monthly = monthlyResult.rows.map((row) => {
+      const itemType =
+        row.item_type ||
+        (row.category && row.category.split(" ")[0]) ||
+        "unknown";
+      const taskType =
+        row.task_type ||
+        (row.category && row.category.split(" ").pop()) ||
+        "misc";
+      return {
+        userId: row.user_id,
+        month_start: row.month_start,
+        counts: {
+          [itemType]: {
+            [taskType]: row.total_count || 0,
+          },
+          blocks: (row.counts && row.counts.blocks) || 0,
+        },
+      };
     });
-    metrics.monthly = Object.values(monthlyGrouped);
 
-    console.log("Final metrics response:", metrics);
     res.status(200).json(metrics);
   } catch (error) {
     console.error("Error fetching individual metrics:", {
       message: error.message,
       stack: error.stack,
-      query: error.query || "Unknown",
-      params: error.params || "Unknown",
     });
     res.status(500).json({
       message: "Failed to fetch individual metrics",
@@ -199,7 +209,6 @@ router.get("/individual/lines", protect, async (req, res) => {
     });
   }
 });
-
 // Add GET /api/metrics/individual/lines/daily endpoint
 router.get("/individual/lines/daily", protect, async (req, res) => {
   try {
@@ -549,10 +558,21 @@ router.get("/metrics/team/lines", protect, async (req, res) => {
 // @desc    Update individual metrics counter
 // @route   POST /api/metrics/individual/update
 // @access  Private (Project Manager, Team Member)
+// @desc    Update individual metrics counter
+// @route   POST /api/metrics/individual/update
+// @access  Private (Project Manager, Team Member)
 router.post("/individual/update", protect, async (req, res) => {
   try {
-    const { userId, taskId, itemId, itemType, taskType, category, action } =
-      req.body;
+    const {
+      userId,
+      taskId,
+      itemId,
+      itemType,
+      taskType,
+      category,
+      action,
+      blocks = 1,
+    } = req.body;
 
     // Validate required fields
     if (
@@ -567,7 +587,7 @@ router.post("/individual/update", protect, async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const date = new Date().toISOString().split("T")[0]; // e.g., "2025-07-23"
+    const date = new Date().toISOString().split("T")[0]; // e.g., "2025-08-23"
     console.log("Received request:", {
       userId,
       date,
@@ -575,40 +595,78 @@ router.post("/individual/update", protect, async (req, res) => {
       action,
       itemType,
       taskType,
+      blocks,
     });
 
     // Validate category length
     if (category.length > 50) {
-      console.error("Category too long:", category, "Length:", category.length);
       return res
         .status(400)
         .json({ message: "Category exceeds 50 characters" });
     }
 
+    // Validate action
+    if (action !== "increment" && action !== "decrement") {
+      return res
+        .status(400)
+        .json({ message: "Invalid action. Use 'increment' or 'decrement'" });
+    }
+
     const change = action === "increment" ? 1 : -1;
     console.log("Calculated change:", change);
 
-    // Check existing record
+    // Check if task and item exist
+    const taskCheckQuery = `
+      SELECT t.assignee_id, ti.completed, ti.blocks
+      FROM tasks t
+      JOIN task_items ti ON ti.task_id = t.id
+      WHERE t.id = $1 AND ti.id = $2;
+    `;
+    const taskCheckResult = await db.query(taskCheckQuery, [taskId, itemId]);
+    if (taskCheckResult.rows.length === 0) {
+      return res.status(404).json({ message: "Task or item not found" });
+    }
+    if (taskCheckResult.rows[0].assignee_id !== userId) {
+      return res
+        .status(403)
+        .json({ message: "User not authorized for this task" });
+    }
+    if (taskCheckResult.rows[0].completed && action === "increment") {
+      return res.status(400).json({ message: "Item already completed" });
+    }
+    const itemBlocks = taskCheckResult.rows[0].blocks || blocks; // Use item-specific blocks or default
+
+    // Update or insert metric with blocks
     const checkQuery = `
-      SELECT count
+      SELECT count, counts
       FROM daily_line_counts
       WHERE user_id = $1 AND date = $2 AND category = $3
+      FOR UPDATE;
     `;
     const checkParams = [userId, date, category];
-    console.log("Check query:", checkQuery, "Params:", checkParams);
     const checkResult = await db.query(checkQuery, checkParams);
 
     if (checkResult.rows.length > 0) {
       const currentCount = checkResult.rows[0].count || 0;
+      const currentBlocks =
+        (checkResult.rows[0].counts?.blocks || 0) +
+        (action === "increment" ? itemBlocks : -itemBlocks);
       const newCount = Math.max(0, currentCount + change);
       const updateQuery = `
         UPDATE daily_line_counts
-        SET count = $4, updated_at = CURRENT_TIMESTAMP
+        SET count = $4, updated_at = CURRENT_TIMESTAMP, item_type = $5, task_type = $6, counts = jsonb_build_object('blocks', $7)
         WHERE user_id = $1 AND date = $2 AND category = $3
-        RETURNING *
+        RETURNING *;
       `;
-      const updateParams = [userId, date, category, newCount];
-      console.log("Update query:", updateQuery, "Params:", updateParams);
+      const updateParams = [
+        userId,
+        date,
+        category,
+        newCount,
+        itemType,
+        taskType,
+        currentBlocks,
+      ];
       const updateResult = await db.query(updateQuery, updateParams);
 
       if (updateResult.rowCount === 0) {
@@ -617,14 +675,21 @@ router.post("/individual/update", protect, async (req, res) => {
       console.log("Update successful:", updateResult.rows[0]);
     } else {
       const insertQuery = `
-        INSERT INTO daily_line_counts (user_id, date, item_type, task_type, category, count)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO daily_line_counts (user_id, date, item_type, task_type, category, count, counts)
+        VALUES ($1, $2, $3, $4, $5, $6, jsonb_build_object('blocks', $7))
         ON CONFLICT (user_id, date, category) DO UPDATE
-        SET count = daily_line_counts.count + $6, updated_at = CURRENT_TIMESTAMP
-        RETURNING *
+        SET count = daily_line_counts.count + $6, updated_at = CURRENT_TIMESTAMP, counts = jsonb_build_object('blocks', daily_line_counts.counts->'blocks' + $7)
+        RETURNING *;
       `;
-      const insertParams = [userId, date, itemType, taskType, category, change];
-      console.log("Insert query:", insertQuery, "Params:", insertParams);
+      const insertParams = [
+        userId,
+        date,
+        itemType,
+        taskType,
+        category,
+        change,
+        itemBlocks,
+      ];
       const insertResult = await db.query(insertQuery, insertParams);
 
       if (insertResult.rowCount === 0) {
@@ -646,5 +711,4 @@ router.post("/individual/update", protect, async (req, res) => {
     });
   }
 });
-
 module.exports = router;

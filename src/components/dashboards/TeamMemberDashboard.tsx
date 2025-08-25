@@ -167,17 +167,108 @@ const TeamMemberDashboard = () => {
   const handleItemToggle = async (
     taskId: string,
     itemId: string,
-    isCompleted: boolean
+    completed: boolean,
+    category: string,
+    blocks?: number
   ) => {
     try {
-      await axios.patch(
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      const effectiveBlocks = blocks !== undefined && blocks >= 0 ? blocks : 0;
+
+      // Perform PATCH to update item status
+      const patchResponse = await axios.patch(
         `${API_URL}/tasks/${taskId}/items/${itemId}`,
-        { completed: isCompleted },
-        getAuthHeaders()
+        { completed, blocks: effectiveBlocks },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
       );
-      await fetchTasks();
-    } catch {
-      toast.error("Failed to update item status");
+
+      // Update local state with a single callback, ensuring items is an array
+      let updatedTask = null;
+      setTasks((prevTasks) => {
+        updatedTask = prevTasks.map((task) => {
+          if (task.id === taskId) {
+            const updatedItems =
+              (task.items || []).length > 0
+                ? task.items.map((item) =>
+                    item.id === itemId
+                      ? { ...item, completed, blocks: effectiveBlocks }
+                      : item
+                  )
+                : [{ id: itemId, completed, blocks: effectiveBlocks }]; // Initialize if empty
+            return { ...task, items: updatedItems };
+          }
+          return task;
+        });
+        console.log(
+          "Updated task state:",
+          updatedTask.find((t) => t.id === taskId)
+        );
+        return updatedTask;
+      });
+
+      // Use updated state for metric update decision
+      const task = updatedTask.find((t) => t.id === taskId);
+      if (!task) throw new Error("Task not found");
+      const item = task.items.find((i) => i.id === itemId);
+      console.log("Item state before metric update:", {
+        itemId,
+        completed: item?.completed,
+        blocks: item?.blocks,
+      });
+      if (!item || item.completed) {
+        console.log(
+          "Item already completed or not found, skipping metric update"
+        );
+        return;
+      }
+
+      const userId = JSON.parse(atob(token.split(".")[1])).id;
+      const itemType = item.type || "Line";
+      const taskType = task.type;
+      const effectiveCategory =
+        category || `${itemType} ${taskType === "QC" ? "QC" : taskType}`;
+
+      const response = await axios.post(
+        `${API_URL}/metrics/individual/update`,
+        {
+          userId,
+          taskId,
+          itemId,
+          itemType,
+          taskType,
+          category: effectiveCategory,
+          action: "increment",
+          blocks: effectiveBlocks,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      if (response.status === 200) {
+        await fetchTasks(); // Full refresh after successful metric update
+      } else if (response.status === 403) {
+        throw new Error("User not authorized for this task");
+      } else {
+        throw new Error(`Metric update failed with status ${response.status}`);
+      }
+      toast.success("Task item updated successfully");
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      console.error("Axios error:", axiosError.response?.data || axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update task item"
+      );
     }
   };
 

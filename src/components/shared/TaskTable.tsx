@@ -42,6 +42,11 @@ interface TaskTableProps {
   loading?: boolean;
   onViewCurrentWork?: (taskId: string, userId: string) => void;
   onViewComments?: (taskId: string) => void;
+  onUpdateItemCompletion?: (
+    taskId: string,
+    itemId: string,
+    completed: boolean
+  ) => void;
 }
 
 const truncateText = (text: string, maxLength: number = 20) => {

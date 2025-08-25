@@ -99,6 +99,7 @@ export interface Task {
   completedAt: string | null;
   progress: number;
   items: Array<{
+    blocks: number;
     id: string;
     name: string;
     type: ItemType; // Use enum
@@ -119,6 +120,7 @@ export interface Task {
   description: string;
 }
 export interface TaskItem {
+  blocks: any;
   id: string;
   name: string;
   type: "PID" | "Line" | "Equipment" | "NonInlineInstrument";

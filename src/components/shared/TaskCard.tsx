@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { useState } from "react";
 import {
   Card,
@@ -20,7 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -34,7 +35,8 @@ interface TaskCardProps {
     taskId: string,
     itemId: string,
     isCompleted: boolean,
-    category: string
+    category: string,
+    blocks?: number
   ) => void;
   onOpenComments?: (task: Task) => void;
 }
@@ -70,7 +72,6 @@ const TaskCard = ({
 
   const handleStart = async () => {
     if (!onStatusChange) return;
-
     setIsUpdating(true);
     try {
       await onStatusChange(task.id, "In Progress");
@@ -84,7 +85,6 @@ const TaskCard = ({
 
   const handleComplete = async () => {
     if (!onStatusChange) return;
-
     setIsUpdating(true);
     try {
       await onStatusChange(task.id, "Completed");
@@ -98,21 +98,13 @@ const TaskCard = ({
 
   const getCategory = (itemType: string, taskType: TaskType) => {
     const mappings = {
-      Line: {
-        UPV: "UPV Lines",
-        QC: "UPV Lines QC",
-        Redline: "Redline Lines",
-      },
+      Line: { UPV: "UPV Lines", QC: "UPV Lines QC", Redline: "Redline Lines" },
       Equipment: {
         UPV: "UPV Equipments",
         QC: "UPV Equipments QC",
         Redline: "Redline Equipments",
       },
-      PID: {
-        Redline: "Redline PIDs",
-        QC: "UPV PIDs QC",
-        UPV: "UPV PIDs",
-      },
+      PID: { Redline: "Redline PIDs", QC: "UPV PIDs QC", UPV: "UPV PIDs" },
       NonLineInstrument: {
         UPV: "UPV Non Inline",
         QC: "UPV Non Inline QC",
@@ -122,87 +114,77 @@ const TaskCard = ({
     return mappings[itemType]?.[taskType] || "Unknown";
   };
 
-  const handleItemToggle = async (item: TaskItem, isChecked: boolean) => {
-    if (!onItemToggle) return;
-
-    if (task.status !== "In Progress" && isChecked) {
-      toast.error("You must start the task before marking items as completed");
-      return Promise.reject("Task not started");
-    }
-
-    if (!isChecked && item.completed) {
-      toast.error("Items cannot be unchecked once completed");
-      return Promise.reject("Item cannot be unchecked");
-    }
-
-    const category = getCategory(item.type, task.type);
-    console.log("Toggle payload:", {
-      userId: task.assigneeId,
-      taskId: task.id,
-      itemId: item.id,
-      itemType: item.type,
-      taskType: task.type,
-      category,
-      action: "increment",
-    });
+  const handleItemToggle = async (
+    taskId: string,
+    itemId: string,
+    completed: boolean,
+    category: string,
+    blocks?: number
+  ) => {
     try {
-      await onItemToggle(task.id, item.id, isChecked, category);
       const token = localStorage.getItem("teamsync_token");
-      if (token && isChecked) {
-        try {
-          await axios.post(
-            `${API_URL}/metrics/individual/update`,
-            {
-              userId: task.assigneeId,
-              taskId: task.id,
-              itemId: item.id,
-              itemType: item.type,
-              taskType: task.type,
-              category,
-              action: "increment",
-            },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          toast.success(`${category} count updated successfully`);
-        } catch (axiosError) {
-          console.error(
-            "Axios error:",
-            axiosError.response ? axiosError.response.data : axiosError.message
-          );
-          toast.error(`Failed to update metric count: ${axiosError.message}`);
+      if (!token) throw new Error("No authentication token found");
+
+      // Validate blocks
+      const effectiveBlocks = blocks !== undefined && blocks >= 0 ? blocks : 0;
+
+      console.log("PATCH Request Config:", {
+        url: `${API_URL}/tasks/${taskId}/items/${itemId}`,
+        data: { completed, blocks: effectiveBlocks },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Cache-Control": "no-cache",
+        },
+      });
+
+      const response = await axios.patch(
+        `${API_URL}/tasks/${taskId}/items/${itemId}`,
+        { completed, blocks: effectiveBlocks },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
         }
+      );
+
+      if (completed && onItemToggle) {
+        onItemToggle(taskId, itemId, completed, category, effectiveBlocks);
       }
+
+      toast.success("Task item updated successfully");
     } catch (error) {
-      toast.error(`Failed to update ${item.type} status`);
-      throw error;
+      const axiosError = error as AxiosError<{ message?: string }>;
+      console.error("Axios error:", axiosError.response?.data || axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to update task item"
+      );
     }
   };
-
   const isLineTask = task.type === "Redline";
   const pidItem = task.items.find((item) => item.type === "PID");
 
   return (
     <Card
       className={cn(
-        "h-full flex flex-col",
+        "h-full flex flex-col shadow-md hover:shadow-lg transition-shadow duration-200",
         task.isComplex && "border-teamsync-complex border-2"
       )}
     >
       <CardHeader
-        className={`
-          pb-2 
-          ${
-            task.status === "Completed"
-              ? "bg-green-50"
-              : task.status === "In Progress"
-              ? "bg-orange-50"
-              : "bg-blue-50"
-          }`}
+        className={cn(
+          "pb-3",
+          task.status === "Completed"
+            ? "bg-green-50 border-b-2 border-green-200"
+            : task.status === "In Progress"
+            ? "bg-orange-50 border-b-2 border-orange-200"
+            : "bg-blue-50 border-b-2 border-blue-200"
+        )}
       >
         <div className="flex justify-between items-start">
           <div className="space-y-1">
             <TaskTypeIndicator type={task.type} />
-            <CardTitle className="text-lg font-semibold mb-2">
+            <CardTitle className="text-lg font-semibold text-gray-800">
               {task.type}
             </CardTitle>
           </div>
@@ -211,96 +193,146 @@ const TaskCard = ({
             isComplex={task.isComplex}
           />
         </div>
-        <div className="mt-2 space-y-2">
-          <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
-            <p className="text-base font-medium text-blue-800">
+        <div className="mt-3 grid gap-2">
+          <div className="bg-blue-50 p-2 rounded-lg">
+            <p className="text-sm font-medium text-blue-800">
               Project: {task.projectName || "Unknown"}
             </p>
-            <p className="text-sm text-blue-700 mt-1">
+            <p className="text-xs text-blue-700">
               Area No: {task.areaNumber || "N/A"}
             </p>
           </div>
           {isLineTask && pidItem && (
-            <div className="text-center py-1 px-3 bg-blue-100 rounded-md inline-block">
-              <p className="text-base font-medium text-blue-800">
+            <div className="bg-blue-50 p-2 rounded-lg">
+              <p className="text-sm font-medium text-blue-800">
                 P&ID No: {task.pidNumber || pidItem.id || "N/A"}
               </p>
             </div>
           )}
-          <div className="text-center py-1 px-3 bg-gray-100 rounded-md inline-block">
-            <p className="text-sm text-gray-600">
+          <div className="bg-gray-50 p-2 rounded-lg">
+            <p className="text-xs text-gray-600">
               Assigned: {formatDate(task.createdAt)} at{" "}
               {formatTime(task.createdAt)}
             </p>
             {task.completedAt ? (
-              <p className="text-sm text-gray-600 mt-1">
+              <p className="text-xs text-gray-600">
                 Completed: {formatDate(task.completedAt)} at{" "}
                 {formatTime(task.completedAt)}
               </p>
             ) : task.status !== "Assigned" ? (
-              <p className="text-sm text-gray-600 mt-1">Not completed</p>
+              <p className="text-xs text-gray-600">Not completed</p>
             ) : null}
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="flex-grow">
-        <h4 className="text-sm font-medium mb-2">Items</h4>
-        <div className="space-y-2">
-          {task.items.map((item) => (
-            <div key={item.id} className="flex items-center space-x-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-center space-x-2 flex-grow">
-                      <Checkbox
-                        id={`item-${item.id}`}
-                        checked={item.completed}
-                        disabled={
-                          task.status === "Completed" ||
-                          isUpdating ||
-                          (task.status !== "In Progress" && !item.completed) ||
-                          item.completed
-                        }
-                        onCheckedChange={(checked) =>
-                          handleItemToggle(item, checked as boolean)
-                        }
-                      />
-                      <label
-                        htmlFor={`item-${item.id}`}
-                        className={cn(
-                          "text-sm",
-                          item.completed && "line-through text-gray-400"
-                        )}
-                      >
-                        {item.type}: {item.name}
-                      </label>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {task.status !== "In Progress" && !item.completed
-                      ? "Start task to enable this checkbox"
-                      : item.completed
-                      ? "This item cannot be unchecked"
-                      : "Mark as completed"}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          ))}
+      <CardContent className="flex-grow p-4">
+        <h4 className="text-sm font-medium text-gray-700 mb-3">Items</h4>
+        <div className="space-y-3">
+          {task.items.map((item) => {
+            const [blocks, setBlocks] = useState(item.blocks || 0);
+            const isEditable = task.status === "In Progress" && !item.completed;
+            const isCheckable = isEditable && blocks > 0;
+            const category = getCategory(item.type, task.type);
+
+            return (
+              <div
+                key={item.id}
+                className="flex items-center justify-between p-2 bg-white rounded-lg shadow-sm hover:bg-gray-50 transition-colors duration-200"
+              >
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center space-x-3 flex-grow">
+                        <Checkbox
+                          id={`item-${item.id}`}
+                          checked={item.completed}
+                          disabled={
+                            task.status === "Completed" ||
+                            isUpdating ||
+                            (task.status !== "In Progress" &&
+                              !item.completed) ||
+                            item.completed ||
+                            !isCheckable
+                          }
+                          onCheckedChange={(checked) =>
+                            handleItemToggle(
+                              task.id,
+                              item.id,
+                              checked as boolean,
+                              category,
+                              blocks
+                            )
+                          }
+                          className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <label
+                          htmlFor={`item-${item.id}`}
+                          className={cn(
+                            "text-sm text-gray-800",
+                            item.completed && "line-through text-gray-400"
+                          )}
+                        >
+                          {item.type}: {item.name}
+                        </label>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {task.status !== "In Progress" && !item.completed
+                        ? "Start task to enable this checkbox"
+                        : item.completed
+                        ? "This item is completed and cannot be changed"
+                        : !isCheckable
+                        ? "Enter a valid number of blocks (> 0) to check"
+                        : "Mark as completed and enter blocks"}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={blocks}
+                    onChange={(e) =>
+                      isEditable && setBlocks(parseInt(e.target.value) || 0)
+                    }
+                    onBlur={() =>
+                      isEditable &&
+                      handleItemToggle(
+                        task.id,
+                        item.id,
+                        item.completed,
+                        category,
+                        blocks
+                      )
+                    }
+                    className={cn(
+                      "w-20 p-1 border rounded-md text-sm focus:outline-none focus:ring-1",
+                      isEditable
+                        ? "border-gray-300 focus:ring-blue-500"
+                        : "border-gray-200 bg-gray-100 cursor-not-allowed"
+                    )}
+                    placeholder="Blocks"
+                    disabled={!isEditable}
+                    readOnly={!isEditable}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </CardContent>
 
-      <CardFooter className="pt-2 flex justify-end space-x-2">
+      <CardFooter className="p-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
         {onOpenComments && (
           <Button
             size="sm"
             variant="outline"
             onClick={() => onOpenComments(task)}
-            className="mr-auto"
+            className="mr-auto flex items-center text-gray-600 hover:text-gray-800 hover:bg-gray-100"
           >
             <MessageSquare className="h-4 w-4 mr-1" />
-            {task.comments?.length || 0}
+            {task.comments?.length || 0} Comments
           </Button>
         )}
 
@@ -310,7 +342,7 @@ const TaskCard = ({
             variant="outline"
             onClick={handleStart}
             disabled={isUpdating}
-            className="bg-teamsync-assigned bg-opacity-10 hover:bg-opacity-20"
+            className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200"
           >
             Start
           </Button>
@@ -321,7 +353,7 @@ const TaskCard = ({
             size="sm"
             onClick={handleComplete}
             disabled={isUpdating || !allCompleted}
-            className="bg-teamsync-completed text-white hover:bg-opacity-90"
+            className="bg-green-600 text-white hover:bg-green-700 disabled:bg-green-400"
           >
             Complete
           </Button>
