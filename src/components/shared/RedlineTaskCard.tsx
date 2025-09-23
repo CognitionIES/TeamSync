@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Task, TaskStatus } from "@/types";
+import { Task, TaskStatus, TaskType } from "@/types";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import TaskTypeIndicator from "../shared/TaskTypeIndicator";
@@ -30,7 +30,8 @@ interface RedlineTaskCardProps {
     taskId: string,
     itemId: string,
     isCompleted: boolean,
-    category: string
+    category: string,
+    blocks?: number
   ) => Promise<void>;
   onOpenComments?: (task: Task) => void;
 }
@@ -63,82 +64,64 @@ const RedlineTaskCard = memo(
       });
     };
 
-    const getCategory = (itemType: string, taskType: string) => {
-      const mappings = {
-        Line: {
-          UPV: "UPV Lines",
-          QC: "UPV Lines QC",
-          Redline: "Redline Lines",
-        },
-        Equipment: {
-          UPV: "UPV Equipments",
-          QC: "UPV Equipments QC",
-          Redline: "Redline Equipments",
-        },
-        PID: {
-          Redline: "Redline PIDs",
-          QC: "UPV PIDs QC",
-          UPV: "UPV PIDs",
-        },
-        NonLineInstrument: {
-          UPV: "UPV Non Inline",
-          QC: "UPV Non Inline QC",
-          Redline: "Redline Non Inline",
-        },
+    const getCategory = (
+      itemType: string,
+      taskType: TaskType | string
+    ): string => {
+      const baseTypes = {
+        Line: "Line",
+        Equipment: "Equipment",
+        PID: "PID",
+        NonLineInstrument: "NonInlineInstrument",
       };
-      return mappings[itemType]?.[taskType] || "Unknown";
+      return baseTypes[itemType] || "Unknown";
     };
 
     const handleCheckItem = async (itemId: string, checked: boolean) => {
       if (!onItemToggle) return;
-
       if (task.status !== "In Progress" && checked) {
         toast.error(
           "You must start the task before marking items as completed"
         );
         return;
       }
-
       if (!checked && completedItems.includes(itemId)) {
         toast.error("Items cannot be unchecked once completed");
         return;
       }
-
       const item = [...pidItems, ...lineItems].find((i) => i.id === itemId);
       if (!item) return;
-
       const category = getCategory(item.type, task.type);
-      const updatedCompleted = checked
-        ? [...completedItems, itemId]
-        : completedItems.filter((id) => id !== itemId);
-      setCompletedItems(updatedCompleted);
-
-      try {
-        await onItemToggle(task.id, itemId, checked, category);
-        const token = localStorage.getItem("teamsync_token");
-        if (token && checked) {
-          await axios.post(
-            `${API_URL}/metrics/individual/update`,
-            {
-              userId: task.assigneeId,
-              taskId: task.id,
-              itemId: itemId,
-              itemType: item.type,
-              taskType: task.type,
-              category,
-              action: checked ? "increment" : "decrement",
-            },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          toast.success(`${category} count updated successfully`);
+      if (checked && !completedItems.includes(itemId)) {
+        setCompletedItems([...completedItems, itemId]);
+        try {
+          await onItemToggle(task.id, itemId, true, category, 0);
+          const token = localStorage.getItem("teamsync_token");
+          if (token) {
+            await axios.post(
+              `${API_URL}/metrics/individual/update`,
+              {
+                userId: task.assigneeId,
+                taskId: task.id,
+                itemId: itemId,
+                itemType: item.type,
+                taskType: task.type,
+                category: category,
+                action: "increment",
+                blocks: 0,
+              },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success(`${category} count updated successfully`);
+          }
+        } catch (error) {
+          setCompletedItems(completedItems);
+          toast.error(`Failed to update ${item.type} status`);
+          throw error;
         }
-      } catch (error) {
-        toast.error(`Failed to update ${item.type} status`);
-        throw error;
       }
-
       const totalItems = pidItems.length + lineItems.length;
-      const newCompletedCount = updatedCompleted.length;
+      const newCompletedCount = completedItems.length + (checked ? 1 : 0);
       if (newCompletedCount === totalItems) {
         toast.success(
           "All P&IDs and lines checked! Task is ready to be marked as complete."
@@ -262,13 +245,19 @@ const RedlineTaskCard = memo(
                                     completedItems.includes(item.id) ||
                                     item.completed
                                   }
-                                  onCheckedChange={(checked) =>
-                                    handleCheckItem(item.id, !!checked)
-                                  }
+                                  onCheckedChange={(checked: boolean) => {
+                                    if (
+                                      checked &&
+                                      !completedItems.includes(item.id)
+                                    ) {
+                                      handleCheckItem(item.id, true);
+                                    }
+                                  }}
                                   disabled={
                                     isCompleted ||
                                     completedItems.includes(item.id) ||
-                                    item.completed
+                                    item.completed ||
+                                    !isInProgress
                                   }
                                   className="data-[state=checked]:bg-green-500"
                                 />
@@ -286,7 +275,7 @@ const RedlineTaskCard = memo(
                               </div>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {task.status !== "In Progress"
+                              {!isInProgress
                                 ? "Start task to enable this checkbox"
                                 : completedItems.includes(item.id) ||
                                   item.completed
@@ -341,13 +330,19 @@ const RedlineTaskCard = memo(
                                     completedItems.includes(item.id) ||
                                     item.completed
                                   }
-                                  onCheckedChange={(checked) =>
-                                    handleCheckItem(item.id, !!checked)
-                                  }
+                                  onCheckedChange={(checked: boolean) => {
+                                    if (
+                                      checked &&
+                                      !completedItems.includes(item.id)
+                                    ) {
+                                      handleCheckItem(item.id, true);
+                                    }
+                                  }}
                                   disabled={
                                     isCompleted ||
                                     completedItems.includes(item.id) ||
-                                    item.completed
+                                    item.completed ||
+                                    !isInProgress
                                   }
                                   className="data-[state=checked]:bg-green-500"
                                 />
@@ -365,7 +360,7 @@ const RedlineTaskCard = memo(
                               </div>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {task.status !== "In Progress"
+                              {!isInProgress
                                 ? "Start task to enable this checkbox"
                                 : completedItems.includes(item.id) ||
                                   item.completed

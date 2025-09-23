@@ -49,7 +49,6 @@ const TaskCard = ({
 }: TaskCardProps) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const allCompleted = task.items.every((item) => item.completed);
-
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString("en-IN", {
@@ -96,22 +95,17 @@ const TaskCard = ({
     }
   };
 
-  const getCategory = (itemType: string, taskType: TaskType) => {
-    const mappings = {
-      Line: { UPV: "UPV Lines", QC: "UPV Lines QC", Redline: "Redline Lines" },
-      Equipment: {
-        UPV: "UPV Equipments",
-        QC: "UPV Equipments QC",
-        Redline: "Redline Equipments",
-      },
-      PID: { Redline: "Redline PIDs", QC: "UPV PIDs QC", UPV: "UPV PIDs" },
-      NonLineInstrument: {
-        UPV: "UPV Non Inline",
-        QC: "UPV Non Inline QC",
-        Redline: "Redline Non Inline",
-      },
+  const getCategory = (
+    itemType: string,
+    taskType: TaskType | string
+  ): string => {
+    const baseTypes = {
+      Line: "Line",
+      Equipment: "Equipment",
+      PID: "PID",
+      NonInlineInstrument: "NonInlineInstrument",
     };
-    return mappings[itemType]?.[taskType] || "Unknown";
+    return baseTypes[itemType] || "Equipment";
   };
 
   const handleItemToggle = async (
@@ -124,10 +118,7 @@ const TaskCard = ({
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-
-      // Validate blocks
       const effectiveBlocks = blocks !== undefined && blocks >= 0 ? blocks : 0;
-
       console.log("PATCH Request Config:", {
         url: `${API_URL}/tasks/${taskId}/items/${itemId}`,
         data: { completed, blocks: effectiveBlocks },
@@ -136,7 +127,6 @@ const TaskCard = ({
           "Cache-Control": "no-cache",
         },
       });
-
       const response = await axios.patch(
         `${API_URL}/tasks/${taskId}/items/${itemId}`,
         { completed, blocks: effectiveBlocks },
@@ -147,11 +137,9 @@ const TaskCard = ({
           },
         }
       );
-
       if (completed && onItemToggle) {
         onItemToggle(taskId, itemId, completed, category, effectiveBlocks);
       }
-
       toast.success("Task item updated successfully");
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
@@ -161,6 +149,7 @@ const TaskCard = ({
       );
     }
   };
+
   const isLineTask = task.type === "Redline";
   const pidItem = task.items.find((item) => item.type === "PID");
 
@@ -239,6 +228,7 @@ const TaskCard = ({
               <div
                 key={item.id}
                 className="flex items-center justify-between p-2 bg-white rounded-lg shadow-sm hover:bg-gray-50 transition-colors duration-200"
+                onClick={(e) => e.stopPropagation()}
               >
                 <TooltipProvider>
                   <Tooltip>
@@ -248,22 +238,23 @@ const TaskCard = ({
                           id={`item-${item.id}`}
                           checked={item.completed}
                           disabled={
-                            task.status === "Completed" ||
                             isUpdating ||
+                            item.completed ||
                             (task.status !== "In Progress" &&
                               !item.completed) ||
-                            item.completed ||
                             !isCheckable
                           }
-                          onCheckedChange={(checked) =>
-                            handleItemToggle(
-                              task.id,
-                              item.id,
-                              checked as boolean,
-                              category,
-                              blocks
-                            )
-                          }
+                          onCheckedChange={(checked: boolean) => {
+                            if (checked && !item.completed) {
+                              handleItemToggle(
+                                task.id,
+                                item.id,
+                                true,
+                                category,
+                                blocks
+                              );
+                            }
+                          }}
                           className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                         />
                         <label

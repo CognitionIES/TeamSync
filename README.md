@@ -275,7 +275,7 @@ We performed the following database migrations in PostgreSQL:
     - Navigate to the frontend directory: cd frontend.
     - Install dependencies: npm install.
     - Set up environment variables in a .env file:
-        - `REACT_APP_API_URL`: Backend API URL (e.g., http://localhost:3000/api).
+        - `REACT_APP_API_URL`: Backend API URL (e.g., http://).
     - Start the development server: npm start.
 4. **Database Setup**:
     - Use pgAdmin or DBeaver to create the database.

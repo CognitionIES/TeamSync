@@ -2,204 +2,160 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
-
-// Helper function to build time-based queries
-const buildTimeQuery = (baseQuery, params, timeInterval, groupBy, orderBy) => {
-  const hasWhere = baseQuery.toLowerCase().includes("where");
-  const whereClause = hasWhere ? "AND" : "WHERE";
-  const fullQuery = `
-    ${baseQuery.replace(/\s+GROUP BY.*$/m, "")} -- Remove any existing GROUP BY
-    ${whereClause} date >= NOW() - INTERVAL '${timeInterval}'
-    GROUP BY ${groupBy}
-    ORDER BY ${orderBy} DESC
-  `;
-  console.log("Built Query:", fullQuery, "Params:", params);
-  return fullQuery;
-};
-
-// Validate input parameters
-const validateParams = (itemType, taskType) => {
-  const validItemTypes = ["lines", "equipment", "non_line_instruments", "pids"];
-  const validTaskTypes = ["upv", "redline", "qc"];
-
-  if (!validItemTypes.includes(itemType)) {
-    throw new Error("Invalid itemType");
-  }
-  if (taskType && !validTaskTypes.includes(taskType.toLowerCase())) {
-    throw new Error("Invalid taskType");
-  }
-};
-
-// Fetch metrics for a given query configuration
-const fetchMetrics = async (baseQuery, params, res) => {
-  try {
-    const { rows } = await db.query(baseQuery, params);
-    console.log(
-      `Query executed: ${baseQuery}, Params: ${JSON.stringify(params)}, Rows: ${
-        rows.length
-      }`
-    );
-    return rows;
-  } catch (error) {
-    console.error(`FetchMetrics error: ${error.message}`, error.stack, {
-      query: baseQuery,
-      params,
-    });
-    throw new Error(`Database error: ${error.message}`);
-  }
-};
-
-// Aggregate metrics across all item types and task types
-const aggregateMetrics = (rows, periodKey) => {
-  console.log("Aggregating rows for", periodKey, "Raw rows:", rows);
-  const aggregated = {};
-  if (!rows || rows.length === 0) {
-    console.log(`No rows to aggregate for period ${periodKey}`);
-    return [];
-  }
-  rows.forEach((row) => {
-    const key = row[periodKey];
-    const itemType = row.item_type || "unknown";
-    const taskType = row.task_type || "misc";
-    const count = parseInt(row.count) || 0;
-    const blocks = parseInt(row.counts?.blocks) || 0;
-    if (!key) {
-      console.log(`Skipping row with invalid ${periodKey}:`, row);
-      return;
-    }
-    if (!aggregated[key]) {
-      aggregated[key] = { counts: {}, userId: row.user_id };
-    }
-    if (!aggregated[key].counts[itemType]) {
-      aggregated[key].counts[itemType] = {};
-    }
-    aggregated[key].counts[itemType][taskType] =
-      (aggregated[key].counts[itemType][taskType] || 0) + count;
-    aggregated[key].counts.blocks =
-      (aggregated[key].counts.blocks || 0) + blocks;
-  });
-  const result = Object.values(aggregated).map((entry) => ({
-    ...entry,
-    [periodKey]: key, // Ensure the period key is included
-    date: periodKey === "date" ? key : undefined,
-    week_start: periodKey === "week_start" ? key : undefined,
-    month_start: periodKey === "month_start" ? key : undefined,
-  }));
-  console.log(`Aggregated result for ${periodKey}: ${JSON.stringify(result)}`);
-  return result.length > 0 ? result : [];
-};
-
-// @desc    Get lines completed by an individual (daily, weekly, monthly)
-// @route   GET /api/metrics/individual/lines
-// @access  Private (Project Manager)
-router.get("/individual/lines", protect, async (req, res) => {
+// Add this new route to your metrics.routes.js
+// Add this new route to your metrics.routes.js file (place it before the existing routes)
+// Replace the existing /individual/all route with this updated version
+router.get("/individual/all", protect, async (req, res) => {
+  console.log("Entered /individual/all route for:", req.url);
   try {
     if (req.user.role !== "Project Manager") {
-      return res.status(403).json({ message: `Unauthorized access` });
+      return res.status(403).json({ message: "Unauthorized access" });
     }
 
     const userId = req.query.userId;
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid date format. Use YYYY-MM-DD" });
+    }
+
+    console.log("Fetching all metrics for:", { userId, date });
+
     const metrics = { daily: [], weekly: [], monthly: [] };
 
-    // Daily metrics
-    const dailyQuery = `
-      SELECT user_id, date, item_type, task_type, category, count, counts
-      FROM daily_line_counts
-      WHERE date >= NOW() - INTERVAL '30 days'
-      ${userId ? "AND user_id = $1" : ""}
-      ORDER BY date DESC
+    let dailyQuery = `
+      SELECT user_id, date, item_type, task_type, 
+             SUM(count) as count, SUM(blocks) as blocks
+      FROM daily_metrics
+      WHERE date = $1
     `;
-    const dailyParams = userId ? [userId] : [];
+    let dailyParams = [date];
+
+    if (userId && userId !== "all") {
+      dailyQuery += ` AND user_id = $2`;
+      dailyParams.push(userId);
+    }
+
+    dailyQuery += ` GROUP BY user_id, date, item_type, task_type ORDER BY user_id`;
+
     const dailyResult = await db.query(dailyQuery, dailyParams);
-    metrics.daily = dailyResult.rows.map((row) => {
-      // Derive item_type and task_type from category if not present
-      const itemType =
-        row.item_type ||
-        (row.category && row.category.split(" ")[0]) ||
-        "unknown";
-      const taskType =
-        row.task_type ||
-        (row.category && row.category.split(" ").pop()) ||
-        "misc";
-      return {
-        userId: row.user_id,
-        date: row.date,
-        counts: {
-          [itemType]: {
-            [taskType]: row.count || 0,
-          },
-          blocks: row.counts?.blocks || 0,
-        },
-      };
+    console.log("Daily query result:", dailyResult.rows);
+
+    const dailyMetricsMap = {};
+    dailyResult.rows.forEach((row) => {
+      const userId = row.user_id.toString();
+      if (!dailyMetricsMap[userId]) {
+        dailyMetricsMap[userId] = {
+          userId: userId,
+          date: date,
+          counts: {},
+          totalBlocks: 0,
+        };
+      }
+
+      if (!dailyMetricsMap[userId].counts[row.item_type]) {
+        dailyMetricsMap[userId].counts[row.item_type] = {};
+      }
+
+      dailyMetricsMap[userId].counts[row.item_type][row.task_type] =
+        parseInt(row.count) || 0;
+      dailyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
     });
 
-    // Weekly metrics
-    const weeklyQuery = `
-      SELECT user_id, DATE_TRUNC('week', date) as week_start, item_type, task_type, category, SUM(count) as total_count, jsonb_object_agg(task_type, count) as counts
-      FROM daily_line_counts
-      WHERE date >= NOW() - INTERVAL '4 weeks'
-      ${userId ? "AND user_id = $1" : ""}
-      GROUP BY user_id, DATE_TRUNC('week', date), item_type, task_type, category
-      ORDER BY week_start DESC
+    metrics.daily = Object.values(dailyMetricsMap);
+
+    // Weekly and monthly logic (unchanged)
+    const weekStartDate = new Date(date);
+    weekStartDate.setDate(weekStartDate.getDate() - 6);
+
+    let weeklyQuery = `
+      SELECT user_id, item_type, task_type, 
+             SUM(count) as count, SUM(blocks) as blocks,
+             DATE_TRUNC('week', $1::date) as week_start
+      FROM daily_metrics
+      WHERE date >= $2 AND date <= $1
     `;
-    const weeklyParams = userId ? [userId] : [];
+    let weeklyParams = [date, weekStartDate.toISOString().split("T")[0]];
+
+    if (userId && userId !== "all") {
+      weeklyQuery += ` AND user_id = $3`;
+      weeklyParams.push(userId);
+    }
+
+    weeklyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+
     const weeklyResult = await db.query(weeklyQuery, weeklyParams);
-    metrics.weekly = weeklyResult.rows.map((row) => {
-      const itemType =
-        row.item_type ||
-        (row.category && row.category.split(" ")[0]) ||
-        "unknown";
-      const taskType =
-        row.task_type ||
-        (row.category && row.category.split(" ").pop()) ||
-        "misc";
-      return {
-        userId: row.user_id,
-        week_start: row.week_start,
-        counts: {
-          [itemType]: {
-            [taskType]: row.total_count || 0,
-          },
-          blocks: (row.counts && row.counts.blocks) || 0,
-        },
-      };
+    const weeklyMetricsMap = {};
+    weeklyResult.rows.forEach((row) => {
+      const userId = row.user_id.toString();
+      if (!weeklyMetricsMap[userId]) {
+        weeklyMetricsMap[userId] = {
+          userId: userId,
+          week_start: row.week_start,
+          counts: {},
+          totalBlocks: 0,
+        };
+      }
+      if (!weeklyMetricsMap[userId].counts[row.item_type]) {
+        weeklyMetricsMap[userId].counts[row.item_type] = {};
+      }
+      weeklyMetricsMap[userId].counts[row.item_type][row.task_type] =
+        parseInt(row.count) || 0;
+      weeklyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
     });
+    metrics.weekly = Object.values(weeklyMetricsMap);
 
-    // Monthly metrics
-    const monthlyQuery = `
-      SELECT user_id, DATE_TRUNC('month', date) as month_start, item_type, task_type, category, SUM(count) as total_count, jsonb_object_agg(task_type, count) as counts
-      FROM daily_line_counts
-      WHERE date >= NOW() - INTERVAL '12 months'
-      ${userId ? "AND user_id = $1" : ""}
-      GROUP BY user_id, DATE_TRUNC('month', date), item_type, task_type, category
-      ORDER BY month_start DESC
+    const monthStartDate = new Date(date);
+    monthStartDate.setDate(monthStartDate.getDate() - 29);
+
+    let monthlyQuery = `
+      SELECT user_id, item_type, task_type, 
+             SUM(count) as count, SUM(blocks) as blocks,
+             DATE_TRUNC('month', $1::date) as month_start
+      FROM daily_metrics
+      WHERE date >= $2 AND date <= $1
     `;
-    const monthlyParams = userId ? [userId] : [];
+    let monthlyParams = [date, monthStartDate.toISOString().split("T")[0]];
+
+    if (userId && userId !== "all") {
+      monthlyQuery += ` AND user_id = $3`;
+      monthlyParams.push(userId);
+    }
+
+    monthlyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+
     const monthlyResult = await db.query(monthlyQuery, monthlyParams);
-    metrics.monthly = monthlyResult.rows.map((row) => {
-      const itemType =
-        row.item_type ||
-        (row.category && row.category.split(" ")[0]) ||
-        "unknown";
-      const taskType =
-        row.task_type ||
-        (row.category && row.category.split(" ").pop()) ||
-        "misc";
-      return {
-        userId: row.user_id,
-        month_start: row.month_start,
-        counts: {
-          [itemType]: {
-            [taskType]: row.total_count || 0,
-          },
-          blocks: (row.counts && row.counts.blocks) || 0,
-        },
-      };
+    const monthlyMetricsMap = {};
+    monthlyResult.rows.forEach((row) => {
+      const userId = row.user_id.toString();
+      if (!monthlyMetricsMap[userId]) {
+        monthlyMetricsMap[userId] = {
+          userId: userId,
+          month_start: row.month_start,
+          counts: {},
+          totalBlocks: 0,
+        };
+      }
+      if (!monthlyMetricsMap[userId].counts[row.item_type]) {
+        monthlyMetricsMap[userId].counts[row.item_type] = {};
+      }
+      monthlyMetricsMap[userId].counts[row.item_type][row.task_type] =
+        parseInt(row.count) || 0;
+      monthlyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
+    });
+    metrics.monthly = Object.values(monthlyMetricsMap);
+
+    console.log("Final metrics response:", {
+      daily: metrics.daily.length,
+      weekly: metrics.weekly.length,
+      monthly: metrics.monthly.length,
     });
 
     res.status(200).json(metrics);
   } catch (error) {
-    console.error("Error fetching individual metrics:", {
+    console.error("Failed to fetch individual metrics:", {
       message: error.message,
       stack: error.stack,
     });
@@ -209,165 +165,295 @@ router.get("/individual/lines", protect, async (req, res) => {
     });
   }
 });
-// Add GET /api/metrics/individual/lines/daily endpoint
-router.get("/individual/lines/daily", protect, async (req, res) => {
-  try {
-    if (req.user.role !== "Project Manager") {
-      return res.status(403).json({
-        message: `User role ${req.user.role} is not authorized to access metrics`,
-      });
-    }
 
-    const userId = req.query.userId || req.user.id;
-    const date = new Date().toISOString().split("T")[0];
-
-    const dailyQuery = `
-      SELECT user_id, date, counts
-      FROM daily_line_counts
-      WHERE user_id = $1 AND date = $2
-      ORDER BY date DESC
-    `;
-    const dailyParams = [userId, date];
-    const dailyRows = await db.query(dailyQuery, dailyParams);
-
-    const metrics = dailyRows.rows.map((row) => ({
-      userId: row.user_id,
-      date: row.date,
-      counts: row.counts || {},
-    }));
-
-    res
-      .status(200)
-      .json(metrics.length > 0 ? metrics[0] : { userId, date, counts: {} });
-  } catch (error) {
-    console.error(
-      "Error fetching daily individual metrics:",
-      error.message,
-      error.stack
-    );
-    res.status(500).json({
-      message: "Failed to fetch daily individual metrics",
-      error: error.message,
-    });
-  }
+router.get("/individual/:itemType", protect, async (req, res) => {
+  // ... (existing /individual/:itemType logic unchanged)
 });
 
-// Team metrics endpoint
-router.get("/team/lines", protect, async (req, res) => {
+// Other routes (blocks/totals, projects/progress, etc.) remain unchanged
+module.exports = router;
+
+router.get("/individual/:itemType", protect, async (req, res) => {
   try {
     if (req.user.role !== "Project Manager") {
-      return res.status(403).json({
-        message: `User role ${req.user.role} is not authorized to access metrics`,
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+
+    const { itemType } = req.params;
+    const validItemTypes = [
+      "lines",
+      "equipment",
+      "pids",
+      "non_inline_instruments",
+    ];
+    if (!validItemTypes.includes(itemType.toLowerCase())) {
+      return res.status(400).json({
+        message: `Invalid item type. Valid types: ${validItemTypes.join(", ")}`,
       });
     }
+    const mappedItemType = {
+      lines: "Line",
+      equipment: "Equipment",
+      pids: "PID",
+      non_inline_instruments: "NonInlineInstrument",
+    }[itemType.toLowerCase()];
 
-    const teamId = req.query.teamId;
-    if (!teamId) {
-      return res.status(400).json({ message: "teamId is required" });
+    const userId = req.query.userId ? String(req.query.userId) : req.user.id;
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid date format. Use YYYY-MM-DD" });
     }
 
-    let dailyBaseQuery = `
-      SELECT DATE(date) as date, COALESCE(dlc.item_type, 'Line') as item_type, COALESCE(dlc.task_type, 'misc') as task_type, SUM(dlc.count) as count
-      FROM daily_line_counts dlc
-      LEFT JOIN team_members tm ON dlc.user_id = tm.member_id AND tm.team_id = $1::text
-      WHERE (dlc.item_type = 'Line' OR dlc.item_type IS NULL)
-      GROUP BY DATE(date), COALESCE(dlc.item_type, 'Line'), COALESCE(dlc.task_type, 'misc')
-    `;
-    const dailyParams = [teamId.toString()];
-    let dailyQuery = buildTimeQuery(
-      dailyBaseQuery,
-      dailyParams,
-      "7 days",
-      "DATE(date), COALESCE(dlc.item_type, 'Line'), COALESCE(dlc.task_type, 'misc')",
-      "date"
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Fetching metrics",
+        userId,
+        date,
+        itemType,
+      })
     );
-    const dailyRows = await fetchMetrics(dailyQuery, dailyParams, res);
-    const metrics = { daily: aggregateMetrics(dailyRows, "date") || [] };
+
+    const metrics = { daily: [], weekly: [], monthly: [] };
+    const query = `
+      SELECT user_id, date, item_type, task_type, SUM(count) as count, SUM(blocks) as blocks,
+             DATE_TRUNC('week', date) as week_start,
+             DATE_TRUNC('month', date) as month_start
+      FROM daily_metrics
+      WHERE date = $1
+        AND item_type = $2
+        ${userId ? "AND user_id = $3" : ""}
+      GROUP BY user_id, date, item_type, task_type, week_start, month_start
+    `;
+    const params = userId
+      ? [date, mappedItemType, userId]
+      : [date, mappedItemType];
+    const result = await db.query(query, params);
+
+    // Aggregate daily metrics
+    const dailyMetrics = result.rows.filter(
+      (r) => r.date.toISOString().split("T")[0] === date
+    );
+    if (dailyMetrics.length > 0) {
+      const userMetric = dailyMetrics.reduce(
+        (acc, r) => {
+          if (!acc.counts[r.item_type]) acc.counts[r.item_type] = {};
+          acc.counts[r.item_type][r.task_type] =
+            (acc.counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+          acc.totalBlocks += r.blocks || 0;
+          return acc;
+        },
+        { userId: userId.toString(), date: date, counts: {}, totalBlocks: 0 }
+      );
+      metrics.daily.push(userMetric);
+    }
+
+    // Weekly and monthly aggregation (simplified for now)
+    metrics.weekly = result.rows
+      .filter(
+        (r) =>
+          r.date >= new Date(new Date(date).getTime() - 7 * 24 * 60 * 60 * 1000)
+      )
+      .reduce((acc, r) => {
+        const key = r.week_start.toISOString();
+        if (!acc[key])
+          acc[key] = {
+            userId: r.user_id.toString(),
+            week_start: r.week_start,
+            counts: {},
+            totalBlocks: 0,
+          };
+        if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
+        acc[key].counts[r.item_type][r.task_type] =
+          (acc[key].counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+        acc[key].totalBlocks += r.blocks || 0;
+        return acc;
+      }, {});
+    metrics.weekly = Object.values(metrics.weekly);
+
+    metrics.monthly = result.rows.reduce((acc, r) => {
+      const key = r.month_start.toISOString();
+      if (!acc[key])
+        acc[key] = {
+          userId: r.user_id.toString(),
+          month_start: r.month_start,
+          counts: {},
+          totalBlocks: 0,
+        };
+      if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
+      acc[key].counts[r.item_type][r.task_type] =
+        (acc[key].counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+      acc[key].totalBlocks += r.blocks || 0;
+      return acc;
+    }, {});
+    metrics.monthly = Object.values(metrics.monthly);
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Metrics fetched",
+        itemType,
+        rowCount: result.rows.length,
+        daily: metrics.daily,
+      })
+    );
 
     res.status(200).json(metrics);
   } catch (error) {
-    const query = dailyQuery || "Query not built due to error";
-    console.error("Error fetching team metrics:", error.message, error.stack, {
-      teamId: req.query.teamId,
-      query: query,
-      params: dailyParams,
-    });
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "Failed to fetch individual metrics",
+        error: error.message,
+        code: error.code || "N/A",
+        query: error.query || "N/A",
+        params: userId
+          ? [date, mappedItemType, userId]
+          : [date, mappedItemType],
+        pgError: error.detail || error.hint || "No PostgreSQL detail available",
+      })
+    );
     res.status(500).json({
-      message: "Failed to fetch team metrics",
+      message: "Failed to fetch individual metrics",
       error: error.message,
     });
   }
 });
 
-// @desc    Get project performance/progress
-// @route   GET /api/metrics/projects/progress
-// @access  Private (Project Manager)
+router.get("/blocks/totals", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "Project Manager") {
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid date format. Use YYYY-MM-DD" });
+    }
+
+    console.log(
+      JSON.stringify({ level: "info", message: "Fetching block totals", date })
+    );
+
+    const totalsQuery = `
+      SELECT user_id,
+        COALESCE(SUM(CASE WHEN date = $1 THEN blocks ELSE 0 END), 0) as daily,
+        COALESCE(SUM(CASE WHEN date >= $1::date - INTERVAL '7 days' AND date <= $1 THEN blocks ELSE 0 END), 0) as weekly,
+        COALESCE(SUM(CASE WHEN date >= $1::date - INTERVAL '30 days' AND date <= $1 THEN blocks ELSE 0 END), 0) as monthly
+      FROM daily_metrics
+      GROUP BY user_id
+    `;
+    const result = await db.query(totalsQuery, [date]);
+    const totals = result.rows.reduce((acc, row) => {
+      acc[row.user_id.toString()] = {
+        daily: parseInt(row.daily),
+        weekly: parseInt(row.weekly),
+        monthly: parseInt(row.monthly),
+      };
+      return acc;
+    }, {});
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Block totals fetched",
+        date,
+        userCount: Object.keys(totals).length,
+      })
+    );
+
+    res.status(200).json(totals);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "Failed to fetch block totals",
+        error: error.message,
+        code: error.code || "N/A",
+        query: error.query || "N/A",
+        params: [date],
+        pgError: error.detail || error.hint || "No PostgreSQL detail available",
+      })
+    );
+    res
+      .status(500)
+      .json({ message: "Failed to fetch block totals", error: error.message });
+  }
+});
+
 router.get("/projects/progress", protect, async (req, res) => {
   try {
     if (req.user.role !== "Project Manager") {
-      return res.status(403).json({
-        message: `User role ${req.user.role} is not authorized to access metrics`,
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+    const { itemType, taskType } = req.query;
+    const validItemTypes = [
+      "lines",
+      "equipment",
+      "pids",
+      "non_inline_instruments",
+    ];
+    if (itemType && !validItemTypes.includes(itemType.toLowerCase())) {
+      return res.status(400).json({
+        message: `Invalid item type. Valid types: ${validItemTypes.join(", ")}`,
       });
     }
-
-    const itemType = req.query.itemType || "lines";
-    const taskType = req.query.taskType || null;
-
-    validateParams(itemType, taskType);
-    const tableName = {
-      lines: "lines",
-      equipment: "equipment",
-      non_line_instruments: "non_line_instruments",
-      pids: "pids",
-    }[itemType];
-
-    const projectsQuery = `
-      SELECT id, name
-      FROM projects
-      ORDER BY created_at DESC;
+    const mappedItemType = itemType
+      ? {
+          lines: "Line",
+          equipment: "Equipment",
+          pids: "PID",
+          non_inline_instruments: "NonInlineInstrument",
+        }[itemType.toLowerCase()]
+      : null;
+    const validTaskTypes = ["upv", "qc", "redline", "all"];
+    if (taskType && !validTaskTypes.includes(taskType.toLowerCase())) {
+      return res.status(400).json({
+        message: `Invalid task type. Valid types: ${validTaskTypes.join(", ")}`,
+      });
+    }
+    const mappedTaskType = taskType
+      ? { upv: "UPV", qc: "QC", redline: "Redline" }[taskType.toLowerCase()]
+      : null;
+    const query = `
+      SELECT p.id AS project_id, p.name AS project_name,
+       COALESCE(SUM(CASE WHEN dm.task_type = COALESCE($1, dm.task_type) AND dm.item_type = COALESCE($2, dm.item_type) THEN dm.count ELSE 0 END), 0) AS completed_items,
+       COALESCE((SELECT COUNT(*) FROM lines l WHERE l.project_id = p.id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0) AS target_items,
+       CASE 
+         WHEN COALESCE((SELECT COUNT(*) FROM lines l WHERE l.project_id = p.id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0) = 0 THEN 0
+         ELSE ROUND((COALESCE(SUM(CASE WHEN dm.task_type = COALESCE($1, dm.task_type) AND dm.item_type = COALESCE($2, dm.item_type) THEN dm.count ELSE 0 END), 0)::FLOAT /
+                    NULLIF((SELECT COUNT(*) FROM lines l WHERE l.project_id = p.id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0)) * 100, 2)
+       END AS progress
+      FROM projects p
+      LEFT JOIN daily_metrics dm ON dm.entity_id IN (SELECT id FROM lines WHERE project_id = p.id)
+      GROUP BY p.id, p.name
+      HAVING COALESCE((SELECT COUNT(*) FROM lines l WHERE l.project_id = p.id), 0) > 0;
     `;
-    const { rows: projects } = await db.query(projectsQuery);
-
-    const projectTargets = {
-      lines: { 1: 1000, 2: 1500, 3: 1200 },
-      equipment: { 1: 500, 2: 700, 3: 600 },
-      non_line_instruments: { 1: 300, 2: 400, 3: 350 },
-      pids: { 1: 100, 2: 150, 3: 120 },
-    };
-
-    const projectProgress = [];
-    for (const project of projects) {
-      let itemsQuery = `
-        SELECT COUNT(*) as completed_items
-        FROM ${tableName}
-        WHERE project_id = $1 AND completed = TRUE
-      `;
-      const queryParams = [project.id];
-      if (taskType) {
-        itemsQuery += " AND task_id IN (SELECT id FROM tasks WHERE type = $2)";
-        queryParams.push(taskType.toUpperCase());
-      }
-
-      const { rows: itemsRows } = await db.query(itemsQuery, queryParams);
-      const completedItems = parseInt(itemsRows[0].completed_items) || 0;
-      const targetItems = projectTargets[itemType][project.id] || 1000;
-      const progress = (completedItems / targetItems) * 100;
-
-      projectProgress.push({
-        projectId: project.id.toString(),
-        projectName: project.name,
-        completedItems,
-        targetItems,
-        progress: progress.toFixed(2),
-      });
-    }
-
-    res.status(200).json({ data: projectProgress });
+    const params = [mappedTaskType, mappedItemType].filter((p) => p !== null);
+    const result = await db.query(query, params.length ? params : [null, null]);
+    const progress = result.rows.map((row) => ({
+      projectId: row.project_id.toString(),
+      projectName: row.project_name,
+      completedItems: parseInt(row.completed_items),
+      targetItems: parseInt(row.target_items),
+      progress: row.progress ? `${row.progress}%` : "0%",
+    }));
+    res.status(200).json({ data: progress });
   } catch (error) {
     console.error(
-      "Error fetching project progress:",
-      error.message,
-      error.stack
+      JSON.stringify({
+        level: "error",
+        message: "Failed to fetch project progress",
+        error: error.message,
+        code: error.code || "N/A",
+        query: error.query || "N/A",
+        params: req.query,
+        pgError: error.detail || error.hint || "No PostgreSQL detail available",
+      })
     );
     res.status(500).json({
       message: "Failed to fetch project progress",
@@ -376,191 +462,53 @@ router.get("/projects/progress", protect, async (req, res) => {
   }
 });
 
-router.post("/individual/lines/daily", protect, async (req, res) => {
-  try {
-    console.log("User role:", req.user.role);
-    if (!["Project Manager", "Team Member"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    const userId = req.body.userId || req.user.id;
-    const taskId = req.body.taskId;
-    const itemId = req.body.itemId;
-    const date = new Date().toISOString().split("T")[0];
-
-    // Fetch task and item details to determine category
-    const taskQuery = `
-      SELECT t.type as task_type, ti.item_type
-      FROM tasks t
-      JOIN task_items ti ON ti.task_id = t.id
-      WHERE t.id = $1 AND ti.id = $2
-    `;
-    const taskResult = await db.query(taskQuery, [taskId, itemId]);
-    if (taskResult.rows.length === 0) {
-      return res.status(404).json({ message: "Task or item not found" });
-    }
-    const { task_type, item_type } = taskResult.rows[0];
-
-    // Determine category based on task and item type
-    let category = "Unknown";
-    if (item_type === "Line" && task_type === "QC") category = "Line QC";
-    else if (item_type === "Equipment" && task_type === "QC")
-      category = "Equipment QC";
-    else if (item_type === "Line") category = "Line";
-    else if (item_type === "Equipment") category = "Equipment";
-    else if (item_type === "PID" && task_type === "Redline") category = "PID";
-    else if (item_type === "PID" && task_type === "QC") category = "PID QC";
-
-    if (taskId && itemId) {
-      const updateItemQuery = `
-        UPDATE task_items SET completed = TRUE, completed_at = CURRENT_TIMESTAMP
-        WHERE task_id = $1 AND id = $2 AND completed = FALSE;
-      `;
-      await db.query(updateItemQuery, [taskId, itemId]);
-    }
-
-    const checkQuery = `
-      SELECT count FROM daily_line_counts 
-      WHERE user_id = $1 AND date = $2 AND category = $3
-    `;
-    const checkParams = [userId, date, category];
-    const { rows } = await db.query(checkQuery, checkParams);
-
-    if (rows.length > 0) {
-      const newCount = rows[0].count + 1;
-      const updateQuery = `
-        UPDATE daily_line_counts 
-        SET count = $1, updated_at = CURRENT_TIMESTAMP 
-        WHERE user_id = $2 AND date = $3 AND category = $4
-      `;
-      await db.query(updateQuery, [newCount, userId, date, category]);
-    } else {
-      const insertQuery = `
-        INSERT INTO daily_line_counts (user_id, count, date, category)
-        VALUES ($1, $2, $3, $4)
-      `;
-      await db.query(insertQuery, [userId, 1, date, category]);
-    }
-
-    // Fetch updated metrics with categorized counts
-    const fetchQuery = `
-      SELECT category, SUM(count) as count
-      FROM daily_line_counts
-      WHERE user_id = $1 AND date = $2
-      GROUP BY category
-    `;
-    const { rows: updatedRows } = await db.query(fetchQuery, [userId, date]);
-    const metrics = {
-      daily: [
-        {
-          counts: updatedRows.reduce(
-            (acc, row) => ({ ...acc, [row.category]: row.count || 0 }),
-            {}
-          ),
-        },
-      ],
-    };
-    res.status(200).json(metrics);
-  } catch (error) {
-    console.error("Error updating daily lines:", error.message, error.stack);
-    res
-      .status(500)
-      .json({ message: "Failed to update daily lines", error: error.message });
-  }
-});
-
-router.post("/metrics/task/count", protect, async (req, res) => {
-  try {
-    const { teamId, taskType } = req.body;
-    if (!teamId || !taskType) {
-      return res
-        .status(400)
-        .json({ message: "teamId and taskType are required" });
-    }
-
-    const query = `
-      INSERT INTO task_counts (team_id, task_type, count)
-      VALUES ($1, $2, 1)
-      ON CONFLICT (team_id, task_type) 
-      DO UPDATE SET count = task_counts.count + 1, updated_at = NOW()
-      RETURNING count;
-    `;
-    const params = [teamId.toString(), taskType];
-    console.log("Increment Counter Query Params:", params);
-    const result = await fetchMetrics(query, params, res);
-    console.log("Increment Counter Result:", result);
-
-    res.status(200).json({ count: result[0].count });
-  } catch (error) {
-    console.error(
-      "Error incrementing task count:",
-      error.message,
-      error.stack,
-      {
-        teamId: req.body.teamId,
-        taskType: req.body.taskType,
-      }
-    );
-    res.status(500).json({
-      message: "Failed to increment task count",
-      error: error.message,
-    });
-  }
-});
-
-router.get("/metrics/team/lines", protect, async (req, res) => {
+router.get("/area/progress", protect, async (req, res) => {
   try {
     if (req.user.role !== "Project Manager") {
-      return res.status(403).json({
-        message: `User role ${req.user.role} is not authorized to access metrics`,
-      });
+      return res.status(403).json({ message: "Unauthorized access" });
     }
-
-    const teamId = req.query.teamId;
-    if (!teamId) {
-      return res.status(400).json({
-        message: "teamId is required",
-      });
-    }
-
     const query = `
-      SELECT task_type, count
-      FROM task_counts
-      WHERE team_id = $1
+      SELECT a.id AS area_id, a.name AS area_name,
+       COALESCE(SUM(CASE WHEN dm.task_type = 'QC' AND dm.item_type IN ('Line', 'Equipment') THEN dm.count ELSE 0 END), 0) AS completed_items,
+       COALESCE((SELECT COUNT(*) FROM lines l JOIN projects p ON l.project_id = p.id WHERE p.id = a.project_id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0) AS target_items,
+       CASE 
+         WHEN COALESCE((SELECT COUNT(*) FROM lines l JOIN projects p ON l.project_id = p.id WHERE p.id = a.project_id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0) = 0 THEN 0
+         ELSE ROUND((COALESCE(SUM(CASE WHEN dm.task_type = 'QC' AND dm.item_type IN ('Line', 'Equipment') THEN dm.count ELSE 0 END), 0)::FLOAT /
+                    NULLIF((SELECT COUNT(*) FROM lines l JOIN projects p ON l.project_id = p.id WHERE p.id = a.project_id AND l.type_id IN (SELECT id FROM line_types WHERE name = 'Line')), 0)) * 100, 2)
+       END AS progress
+      FROM areas a
+      LEFT JOIN projects p ON p.id = a.project_id
+      LEFT JOIN daily_metrics dm ON dm.entity_id IN (SELECT id FROM lines WHERE project_id = p.id) AND dm.item_type IN ('Line', 'Equipment')
+      GROUP BY a.id, a.name
+      HAVING COALESCE((SELECT COUNT(*) FROM lines l JOIN projects p ON l.project_id = p.id WHERE p.id = a.project_id), 0) > 0;
     `;
-    const params = [teamId.toString()];
-    console.log("Team Metrics Query Params:", params);
-    const result = await fetchMetrics(query, params, res);
-    console.log("Team Metrics Raw Rows:", result);
-
-    const metrics = {
-      "Lines UPV QC": 0,
-      "Equipment UPV QC": 0,
-      "PIDS Redline": 0,
-      QC: 0,
-    };
-    result.forEach((row) => {
-      metrics[row.task_type] = row.count || 0;
-    });
-
-    res.status(200).json(metrics);
+    const result = await db.query(query);
+    const progress = result.rows.map((row) => ({
+      areaId: row.area_id.toString(),
+      areaName: row.area_name,
+      completedItems: parseInt(row.completed_items),
+      targetItems: parseInt(row.target_items),
+      progress: row.progress ? `${row.progress}%` : "0%",
+    }));
+    res.status(200).json({ data: progress });
   } catch (error) {
-    console.error("Error fetching team metrics:", error.message, error.stack, {
-      teamId: req.query.teamId,
-    });
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "Failed to fetch area progress",
+        error: error.message,
+        code: error.code || "N/A",
+        query: error.query || "N/A",
+        pgError: error.detail || error.hint || "No PostgreSQL detail available",
+      })
+    );
     res.status(500).json({
-      message: "Failed to fetch team metrics",
+      message: "Failed to fetch area progress",
       error: error.message,
     });
   }
 });
 
-// @desc    Update individual metrics counter
-// @route   POST /api/metrics/individual/update
-// @access  Private (Project Manager, Team Member)
-// @desc    Update individual metrics counter
-// @route   POST /api/metrics/individual/update
-// @access  Private (Project Manager, Team Member)
 router.post("/individual/update", protect, async (req, res) => {
   try {
     const {
@@ -569,146 +517,121 @@ router.post("/individual/update", protect, async (req, res) => {
       itemId,
       itemType,
       taskType,
-      category,
       action,
-      blocks = 1,
+      blocks = 0,
     } = req.body;
-
-    // Validate required fields
-    if (
-      !userId ||
-      !taskId ||
-      !itemId ||
-      !itemType ||
-      !taskType ||
-      !category ||
-      !action
-    ) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    const date = new Date().toISOString().split("T")[0]; // e.g., "2025-08-23"
-    console.log("Received request:", {
+    console.log("Received Request:", {
       userId,
-      date,
-      category,
-      action,
+      taskId,
+      itemId,
       itemType,
       taskType,
+      action,
       blocks,
     });
-
-    // Validate category length
-    if (category.length > 50) {
+    if (action !== "increment") {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+    const taskItemResult = await db.query(
+      "SELECT line_id, item_id, item_type FROM task_items WHERE id = $1",
+      [itemId]
+    );
+    console.log("Task Item Query Result:", taskItemResult.rows);
+    if (taskItemResult.rows.length === 0) {
       return res
-        .status(400)
-        .json({ message: "Category exceeds 50 characters" });
+        .status(404)
+        .json({ message: `Task item not found for id: ${itemId}` });
     }
+    let effectiveEntityId = taskItemResult.rows[0].line_id;
+    const { item_id, item_type } = taskItemResult.rows[0];
 
-    // Validate action
-    if (action !== "increment" && action !== "decrement") {
-      return res
-        .status(400)
-        .json({ message: "Invalid action. Use 'increment' or 'decrement'" });
-    }
-
-    const change = action === "increment" ? 1 : -1;
-    console.log("Calculated change:", change);
-
-    // Check if task and item exist
-    const taskCheckQuery = `
-      SELECT t.assignee_id, ti.completed, ti.blocks
-      FROM tasks t
-      JOIN task_items ti ON ti.task_id = t.id
-      WHERE t.id = $1 AND ti.id = $2;
-    `;
-    const taskCheckResult = await db.query(taskCheckQuery, [taskId, itemId]);
-    if (taskCheckResult.rows.length === 0) {
-      return res.status(404).json({ message: "Task or item not found" });
-    }
-    if (taskCheckResult.rows[0].assignee_id !== userId) {
-      return res
-        .status(403)
-        .json({ message: "User not authorized for this task" });
-    }
-    if (taskCheckResult.rows[0].completed && action === "increment") {
-      return res.status(400).json({ message: "Item already completed" });
-    }
-    const itemBlocks = taskCheckResult.rows[0].blocks || blocks; // Use item-specific blocks or default
-
-    // Update or insert metric with blocks
-    const checkQuery = `
-      SELECT count, counts
-      FROM daily_line_counts
-      WHERE user_id = $1 AND date = $2 AND category = $3
-      FOR UPDATE;
-    `;
-    const checkParams = [userId, date, category];
-    const checkResult = await db.query(checkQuery, checkParams);
-
-    if (checkResult.rows.length > 0) {
-      const currentCount = checkResult.rows[0].count || 0;
-      const currentBlocks =
-        (checkResult.rows[0].counts?.blocks || 0) +
-        (action === "increment" ? itemBlocks : -itemBlocks);
-      const newCount = Math.max(0, currentCount + change);
-      const updateQuery = `
-        UPDATE daily_line_counts
-        SET count = $4, updated_at = CURRENT_TIMESTAMP, item_type = $5, task_type = $6, counts = jsonb_build_object('blocks', $7)
-        WHERE user_id = $1 AND date = $2 AND category = $3
-        RETURNING *;
-      `;
-      const updateParams = [
-        userId,
-        date,
-        category,
-        newCount,
-        itemType,
-        taskType,
-        currentBlocks,
-      ];
-      const updateResult = await db.query(updateQuery, updateParams);
-
-      if (updateResult.rowCount === 0) {
-        throw new Error("Failed to update existing metric record");
+    if (!effectiveEntityId) {
+      let projectId = null;
+      if (item_type === "Equipment") {
+        const equipResult = await db.query(
+          "SELECT project_id FROM equipment WHERE id = $1",
+          [item_id]
+        );
+        projectId = equipResult.rows[0]?.project_id;
+      } else if (item_type === "NonInlineInstrument") {
+        const instrResult = await db.query(
+          "SELECT project_id FROM non_inline_instruments WHERE id = $1",
+          [item_id]
+        );
+        projectId = instrResult.rows[0]?.project_id;
+      } else if (item_type === "PID") {
+        const pidResult = await db.query(
+          "SELECT project_id FROM pids WHERE id = $1",
+          [item_id]
+        );
+        projectId = pidResult.rows[0]?.project_id;
+      } else if (item_type === "Line") {
+        const lineResult = await db.query(
+          "SELECT id FROM lines WHERE id = $1",
+          [item_id]
+        );
+        effectiveEntityId = lineResult.rows[0]?.id;
       }
-      console.log("Update successful:", updateResult.rows[0]);
-    } else {
-      const insertQuery = `
-        INSERT INTO daily_line_counts (user_id, date, item_type, task_type, category, count, counts)
-        VALUES ($1, $2, $3, $4, $5, $6, jsonb_build_object('blocks', $7))
-        ON CONFLICT (user_id, date, category) DO UPDATE
-        SET count = daily_line_counts.count + $6, updated_at = CURRENT_TIMESTAMP, counts = jsonb_build_object('blocks', daily_line_counts.counts->'blocks' + $7)
-        RETURNING *;
-      `;
-      const insertParams = [
-        userId,
-        date,
-        itemType,
-        taskType,
-        category,
-        change,
-        itemBlocks,
-      ];
-      const insertResult = await db.query(insertQuery, insertParams);
-
-      if (insertResult.rowCount === 0) {
-        throw new Error("Failed to insert new metric record");
+      if (projectId && !effectiveEntityId) {
+        const lineMatch = await db.query(
+          "SELECT id FROM lines WHERE project_id = $1 LIMIT 1",
+          [projectId]
+        );
+        effectiveEntityId = lineMatch.rows[0]?.id;
       }
-      console.log("Insert successful:", insertResult.rows[0]);
+      if (!effectiveEntityId) {
+        const taskResult = await db.query(
+          "SELECT project_id FROM tasks WHERE id = $1",
+          [taskId]
+        );
+        projectId = taskResult.rows[0]?.project_id;
+        if (projectId) {
+          const newLineResult = await db.query(
+            "INSERT INTO lines (project_id, line_number, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING id",
+            [projectId, "Default Line"]
+          );
+          effectiveEntityId = newLineResult.rows[0].id;
+          await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
+            effectiveEntityId,
+            itemId,
+          ]);
+          console.log("Created new line_id:", effectiveEntityId);
+        }
+      }
     }
 
-    res.status(200).json({ message: "Metrics updated successfully" });
+    if (!effectiveEntityId) {
+      return res
+        .status(404)
+        .json({ message: "No valid entity found for task item" });
+    }
+
+    const result = await db.query(
+      `INSERT INTO daily_metrics (user_id, entity_id, item_type, task_type, count, date, blocks)
+       VALUES ($1, $2, $3, $4, 1, CURRENT_DATE, $5)
+       ON CONFLICT (user_id, date, item_type, task_type) 
+       DO UPDATE SET count = daily_metrics.count + 1, blocks = daily_metrics.blocks + $5, entity_id = $2, updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [userId, effectiveEntityId, itemType, taskType, blocks]
+    );
+    res.status(200).json({ message: "Metric updated", data: result.rows[0] });
   } catch (error) {
     console.error(
-      "Error updating individual metrics:",
-      error.message,
-      error.stack
+      JSON.stringify({
+        level: "error",
+        message: "Failed to update individual metrics",
+        error: error.message,
+        code: error.code || "N/A",
+        body: req.body,
+        pgError: error.detail || error.hint || "No PostgreSQL detail available",
+      })
     );
     res.status(500).json({
       message: "Failed to update individual metrics",
       error: error.message,
+      detail: error.detail || "Check backend logs",
     });
   }
 });
+
 module.exports = router;

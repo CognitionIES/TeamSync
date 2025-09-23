@@ -28,22 +28,35 @@ app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/projects", require("./routes/projects.routes"));
 app.use("/api/tasks", require("./routes/tasks.routes"));
 app.use("/api/users", require("./routes/users.routes"));
-app.use("/api/teams", require("./routes/teams.routes")); 
+app.use("/api/teams", require("./routes/teams.routes"));
 app.use("/api/audit-logs", require("./routes/auditLogs.routes"));
 app.use("/api/areas", require("./routes/areas.routes"));
 app.use("/api/pids", require("./routes/pids.routes"));
 app.use("/api/lines", require("./routes/lines.routes"));
-app.use("/api/metrics", require("./routes/metrics.routes"));
-app.use("/api/project-stats", require("./routes/projectStats.routes")); 
-app.use("/api/task-status", require("./routes/taskStatus.routes")); 
-app.use("/api/non-inline-instruments", require("./routes/non-inline-instruments.routes"));
+let metricsRoutes;
+try {
+  metricsRoutes = require("./routes/metrics.routes");
+} catch (error) {
+  console.error("Failed to load metrics.routes.js:", error.message);
+}
+app.use("/api/project-stats", require("./routes/projectStats.routes"));
+app.use("/api/task-status", require("./routes/taskStatus.routes"));
+app.use(
+  "/api/non-inline-instruments",
+  require("./routes/non-inline-instruments.routes")
+);
 if (equipmentRoutes) {
   app.use("/api/equipment", equipmentRoutes);
   console.log("Mounted /api/equipment route");
 } else {
   console.error("Equipment routes not mounted due to loading error");
 }
-
+if (metricsRoutes) {
+  app.use("/api/metrics", metricsRoutes);
+  console.log("Mounted /api/metrics route");
+} else {
+  console.error("Metrics routes not mounted due to loading error");
+}
 console.log("Routes loaded:", {
   equipment: !!equipmentRoutes,
 });

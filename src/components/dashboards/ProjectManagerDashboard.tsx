@@ -43,6 +43,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { MetricsTable } from "../MetricsTable"; // Import MetricsTable
 import {
   Table,
   TableBody,
@@ -50,9 +52,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Progress } from "@/components/ui/progress";
-
+} from "../ui/table";
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 
@@ -117,13 +117,11 @@ interface ApiTeamLead {
     }>;
   }>;
 }
-
 interface ApiUser {
   id: string;
   name: string;
   role: string;
 }
-
 interface FetchedAssignedItems {
   pids: any;
   lines: any;
@@ -149,31 +147,24 @@ interface FetchedAssignedItems {
     items: { id: string; equipment_name: string; project_id: string }[];
   };
 }
-
 interface TeamLead {
   id: string;
   name: string;
   team: string[];
 }
-
 interface MetricEntry {
-  count: number;
-  category: any;
   userId: string;
   date?: string;
   week_start?: string;
   month_start?: string;
-  counts: {
-    [category: string]: number;
-  };
+  counts: { [key: string]: { [key: string]: number } | number };
+  totalBlocks: number;
 }
-
 interface MetricsData {
   daily: MetricEntry[];
   weekly: MetricEntry[];
   monthly: MetricEntry[];
 }
-
 interface ProjectProgress {
   projectId: string;
   projectName: string;
@@ -181,7 +172,6 @@ interface ProjectProgress {
   targetItems: number;
   progress: string;
 }
-
 interface AreaProgress {
   areaId: string;
   areaName: string;
@@ -189,20 +179,20 @@ interface AreaProgress {
   targetItems: number;
   progress: string;
 }
-
+interface BlockTotals {
+  [userId: string]: { daily: number; weekly: number; monthly: number };
+}
 const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
   id: apiTeamLead.id,
   name: apiTeamLead.team_lead,
   team: apiTeamLead.team_members.map((member) => member.member_name),
 });
-
 const transformTask = (apiTask: ApiTask): Task => {
   console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
   const validTaskTypes = Object.values(TaskType);
   const taskType = validTaskTypes.includes(apiTask.type as TaskType)
     ? (apiTask.type as TaskType)
     : TaskType.UPV;
-
   const validItemTypes = Object.values(ItemType);
   const items = apiTask.items.map((item) => {
     const rawCompleted = item.completed;
@@ -213,7 +203,6 @@ const transformTask = (apiTask: ApiTask): Task => {
         ? (item.item_type as ItemType)
         : ItemType.Line,
       completed: typeof item.completed === "boolean" ? item.completed : false,
-      blocks: item.blocks || 0, // Add blocks field
     };
     console.log(
       "Raw Completed:",
@@ -223,7 +212,6 @@ const transformTask = (apiTask: ApiTask): Task => {
     );
     return transformedItem;
   });
-
   console.log("Raw Comments:", apiTask.comments);
   const transformedComments = Array.isArray(apiTask.comments)
     ? apiTask.comments.map((comment) => ({
@@ -236,7 +224,6 @@ const transformTask = (apiTask: ApiTask): Task => {
       }))
     : [];
   console.log("Transformed Comments:", transformedComments);
-
   if (
     !items.some((item) => item.type === ItemType.Line) &&
     process.env.NODE_ENV === "development"
@@ -247,18 +234,15 @@ const transformTask = (apiTask: ApiTask): Task => {
         name: "L-Dummy-1",
         type: ItemType.Line,
         completed: false,
-        blocks: 0, // Add blocks for dummy items
       },
       {
         id: "dummy-line-2",
         name: "L-Dummy-2",
         type: ItemType.Line,
         completed: true,
-        blocks: 0, // Add blocks for dummy items
       }
     );
   }
-
   return {
     id: apiTask.id,
     type: taskType,
@@ -276,7 +260,7 @@ const transformTask = (apiTask: ApiTask): Task => {
     pidNumber: "",
     projectName: "",
     areaNumber: "",
-    description: apiTask.description || "",
+    description: "",
     lines:
       apiTask.items
         .filter((item) => item.item_type === "Line")
@@ -285,15 +269,12 @@ const transformTask = (apiTask: ApiTask): Task => {
           name: item.item_name,
           type: item.item_type,
           completed: item.completed,
-          blocks: item.blocks || 0, // Add blocks to lines
         })) || undefined,
   };
 };
-
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
-  const [totalBlocks, setTotalBlocks] = useState<number>(0);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -332,19 +313,18 @@ const ProjectManagerDashboard = () => {
   const [individualMetricsError, setIndividualMetricsError] = useState<
     string | null
   >(null);
-  const [areaProgress, setAreaProgress] = useState<AreaProgress[]>([]); // New state for area-wise progress
+  const [areaProgress, setAreaProgress] = useState<AreaProgress[]>([]);
   const [areaProgressError, setAreaProgressError] = useState<string | null>(
     null
   );
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-
+  const [blockTotals, setBlockTotals] = useState<BlockTotals>({}); // Updated to object structure
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) {
         throw new Error("No authentication token found");
       }
-
       const response = await axios.get<{ data: FetchedAssignedItems }>(
         `${API_URL}/users/${userId}/assigned-items/${taskId}`,
         {
@@ -354,7 +334,6 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-
       console.log("Raw API Response for Assigned Items:", response.data.data);
       return response.data.data;
     } catch (error) {
@@ -368,7 +347,6 @@ const ProjectManagerDashboard = () => {
       );
     }
   };
-
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
     setSelectedUserId(userId);
     setLoadingItems(true);
@@ -382,7 +360,6 @@ const ProjectManagerDashboard = () => {
         toast.error("Task not found. Cannot display assigned items.");
         return;
       }
-
       setSelectedTaskType(task.type);
       let itemType: ItemType | null = null;
       if (task.items.length > 0) {
@@ -401,7 +378,6 @@ const ProjectManagerDashboard = () => {
         }
       }
       console.log("Determined Item Type:", itemType);
-
       if (!itemType) {
         toast.error(
           `Unsupported task type: ${task.type}. Cannot display assigned items.`
@@ -410,12 +386,9 @@ const ProjectManagerDashboard = () => {
         setSelectedItemType("");
         return;
       }
-
       setSelectedItemType(itemType);
-
       const items = await fetchAssignedItems(userId, taskId);
       console.log("Fetched Assigned Items:", items);
-
       const mappedItems: FetchedAssignedItems = {
         pids: items.pids ?? [],
         lines: items.lines ?? [],
@@ -476,7 +449,6 @@ const ProjectManagerDashboard = () => {
             })) || [],
         },
       };
-
       setAssignedItems(mappedItems);
       setModalIsOpen(true);
     } catch (error) {
@@ -489,7 +461,6 @@ const ProjectManagerDashboard = () => {
       setLoadingItems(false);
     }
   };
-
   const closeModal = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
@@ -497,7 +468,6 @@ const ProjectManagerDashboard = () => {
     setSelectedTaskType("");
     setSelectedItemType("");
   };
-
   const handleViewComments = (taskId: string) => {
     console.log("handleViewComments called for taskId:", taskId);
     const task = tasks.find((t) => t.id === taskId);
@@ -510,13 +480,11 @@ const ProjectManagerDashboard = () => {
       toast.error("Task not found. Cannot display comments.");
     }
   };
-
   const closeCommentsModal = () => {
     setCommentsModalIsOpen(false);
     setSelectedComments([]);
     setSelectedTask(null);
   };
-
   const updateTaskItemCompletion = async (
     taskId: string,
     itemId: string,
@@ -525,15 +493,12 @@ const ProjectManagerDashboard = () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-
       const task = tasks.find((t) => t.id === taskId);
       if (!task) throw new Error("Task not found");
-
       const updatedItems = task.items.map((item) =>
         item.id === itemId ? { ...item, completed } : item
       );
       const updatedTask = { ...task, items: updatedItems };
-
       await axios.put(
         `${API_URL}/tasks/${taskId}`,
         { items: updatedItems },
@@ -544,19 +509,16 @@ const ProjectManagerDashboard = () => {
           },
         }
       );
-
       setTasks((prevTasks) =>
         prevTasks.map((t) => (t.id === taskId ? updatedTask : t))
       );
       toast.success("Task item updated successfully");
-
       if (completed) {
         const userId = task.assigneeId;
         const itemType =
           updatedItems.find((item) => item.id === itemId)?.type || "Line";
         const taskType = task.type;
-        const category = `${itemType} ${taskType === "QC" ? "QC" : taskType}`;
-        const response = await axios.post(
+        await axios.post(
           `${API_URL}/metrics/individual/update`,
           {
             userId,
@@ -564,7 +526,6 @@ const ProjectManagerDashboard = () => {
             itemId,
             itemType,
             taskType,
-            category,
             action: "increment",
           },
           {
@@ -574,93 +535,66 @@ const ProjectManagerDashboard = () => {
             },
           }
         );
-        if (response.status === 200) {
-          await fetchIndividualMetrics(); // Refresh metrics
-        } else {
-          throw new Error("Metric update failed");
-        }
+        await fetchIndividualMetrics(); // Refresh metrics
       }
     } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error updating task item:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to update task item"
-      );
+      console.error("Error updating task item:", error);
+      toast.error("Failed to update task item");
     }
   };
   const fetchIndividualMetrics = async () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
+      const formattedDate = format(selectedDate, "yyyy-MM-dd");
+      console.log("Fetching metrics for date:", formattedDate);
+      console.log("Users:", users);
 
-      console.log("Fetching individual metrics for all users - Start");
       const response = await axios.get<MetricsData>(
-        `${API_URL}/metrics/individual/lines`,
+        `${API_URL}/metrics/individual/all?date=${formattedDate}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
+          params: {
+            userId: users.map((u) => u.id.toString()).join(",") || "all",
+          }, // Pass all userIds or "all"
         }
       );
-      console.log("Fetched Individual Metrics Response (Raw):", response.data);
-      response.data.daily.forEach((metric, index) =>
-        console.log(`Daily Entry ${index}:`, {
-          userId: metric.userId,
-          date: metric.date,
-          counts: metric.counts,
-        })
-      );
 
-      const today = selectedDate.toISOString().split("T")[0]; // e.g., "2025-08-23"
-      console.log("Selected Date (Client IST):", today);
-      const filteredMetrics = {
-        daily: response.data.daily.filter((m) => {
-          const metricDate = new Date(m.date).toISOString().split("T")[0];
-          console.log(
-            `Filtering date ${
-              m.date
-            } -> ${metricDate}, Selected: ${today}, Match: ${
-              metricDate === today
-            }`
-          );
-          return metricDate === today;
-        }),
-        weekly: response.data.weekly,
-        monthly: response.data.monthly,
+      console.log("Response for all users:", response.data);
+
+      const combinedMetrics: MetricsData = {
+        daily: response.data.daily || [],
+        weekly: response.data.weekly || [],
+        monthly: response.data.monthly || [],
       };
-      console.log("Filtered Metrics:", filteredMetrics);
 
-      setIndividualMetrics(filteredMetrics);
-      console.log("Individual Metrics State Updated:", filteredMetrics);
+      console.log("Final combined user metrics:", combinedMetrics.daily);
+
+      setIndividualMetrics(combinedMetrics);
       setIndividualMetricsError(null);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching individual metrics:", {
         message: axiosError.message,
         response: axiosError.response?.data,
-        stack: axiosError.stack,
       });
       setIndividualMetricsError(
         axiosError.response?.data?.message ||
-          `Failed to fetch individual metrics: ${axiosError.message}`
+          "Failed to fetch individual metrics"
       );
       setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
-      toast.error(
-        axiosError.response?.data?.message ||
-          "Failed to fetch individual metrics. Check server logs."
-      );
     }
   };
-
   const fetchAreaProgress = async () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-
       console.log("Fetching area-wise progress");
       const response = await axios.get<{ data: AreaProgress[] }>(
-        `${API_URL}/metrics/area/progress`, // Assuming a new endpoint for area-wise progress
+        `${API_URL}/metrics/area/progress`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -679,13 +613,33 @@ const ProjectManagerDashboard = () => {
       setAreaProgress([]);
     }
   };
-
-  // Add useEffect to monitor state changes
-  useEffect(() => {
-    console.log("Individual Metrics State Updated:", individualMetrics);
-  }, [individualMetrics]);
+  const fetchBlockTotals = async () => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+      const formattedDate = format(selectedDate, "yyyy-MM-dd");
+      const response = await axios.get<BlockTotals>(
+        `${API_URL}/metrics/blocks/totals?date=${formattedDate}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+      setBlockTotals(response.data);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching block totals:", {
+        message: axiosError.message,
+        response: axiosError.response?.data,
+      });
+      toast.error("Failed to fetch block totals");
+      setBlockTotals({});
+    }
+  };
   const calculateTeamMetrics = () => {
-    const today = new Date("2025-07-22T00:00:00+05:30").setHours(0, 0, 0, 0);
+    const today = selectedDate.setHours(0, 0, 0, 0); // Use selectedDate
     const metrics: MetricEntry[] = teamLeads.map((team) => {
       const memberIds = team.team
         .map((memberName) => users.find((u) => u.name === memberName)?.id || "")
@@ -702,7 +656,6 @@ const ProjectManagerDashboard = () => {
         [ItemType.PID]: { Redline: 0 },
         [ItemType.NonInlineInstrument]: { UPV: 0, QC: 0, Redline: 0 },
       };
-
       teamTasks.forEach((task) => {
         task.items.forEach((item) => {
           if (item.completed) {
@@ -711,31 +664,17 @@ const ProjectManagerDashboard = () => {
           }
         });
       });
-
-      // Calculate total count and set a generic category (or customize as needed)
-      const totalCount = Object.values(counts)
-        .flatMap((typeCounts) => Object.values(typeCounts))
-        .reduce((sum, val) => sum + val, 0);
-
-      return {
-        userId: team.id,
-        counts,
-        count: totalCount,
-        category: "team", // or set a more specific category if needed
-      };
+      return { userId: team.id, counts, totalBlocks: 0 }; // totalBlocks set to 0 as it's not calculated client-side
     });
     setTeamMetrics({ daily: metrics, weekly: [], monthly: [] });
     setTeamMetricsError(null);
   };
-
   const fetchProjectProgress = async (itemType: string, taskType: string) => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-
       const params = new URLSearchParams({ itemType });
       if (taskType && taskType !== "all") params.append("taskType", taskType);
-
       const response = await axios.get(
         `${API_URL}/metrics/projects/progress?${params.toString()}`,
         {
@@ -754,7 +693,6 @@ const ProjectManagerDashboard = () => {
       );
     }
   };
-
   const fetchData = async () => {
     setIsLoading(true);
     setError(null);
@@ -763,7 +701,6 @@ const ProjectManagerDashboard = () => {
       if (!token) {
         throw new Error("No authentication token found");
       }
-
       const usersResponse = await fetch(`${API_URL}/users`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -782,7 +719,6 @@ const ProjectManagerDashboard = () => {
       const usersData = usersDataResponse.data || [];
       setUsers(usersData);
       console.log("Fetched users:", usersData);
-
       const [tasksResponse, teamsResponse] = await Promise.all([
         fetch(`${API_URL}/tasks`, {
           headers: {
@@ -810,40 +746,20 @@ const ProjectManagerDashboard = () => {
       const tasksData = await tasksResponse.json();
       const teamsData = await teamsResponse.json();
       setTasks(tasksData.data ? tasksData.data.map(transformTask) : []);
-
-      // Fetch total blocks with error handling
-      try {
-        const blocksResponse = await axios.get<{
-          data: { totalBlocks: number };
-        }>(`${API_URL}/tasks/blocks-summary`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache",
-          },
-        });
-        setTotalBlocks(blocksResponse.data.data.totalBlocks);
-      } catch (blocksError) {
-        console.error("Error fetching blocks summary:", blocksError);
-        setTotalBlocks(0); // Default to 0 if endpoint is unavailable
-        toast.error("Failed to fetch total blocks. Defaulting to 0.");
-      }
-
       setTeamLeads(teamsData.data ? teamsData.data.map(transformTeamLead) : []);
-
       if (usersData.length > 0) setSelectedMetricsUser("all");
       else console.warn("No users found, skipping selectedMetricsUser set");
       if (teamsData.data && teamsData.data.length > 0)
         setSelectedMetricsTeam(teamsData.data[0].id);
       else
         console.warn("No team leads found, skipping selectedMetricsTeam set");
-
-      await fetchProjectProgress(
-        selectedProjectItemType,
-        selectedProjectTaskType
-      );
-      if (usersData.length > 0) await fetchIndividualMetrics();
+      await Promise.all([
+        fetchProjectProgress(selectedProjectItemType, selectedProjectTaskType),
+        fetchIndividualMetrics(),
+        fetchBlockTotals(),
+        fetchAreaProgress(),
+      ]);
       calculateTeamMetrics();
-
       toast.success("Data refreshed");
     } catch (error) {
       console.error("Fetch error:", error.message, error.stack);
@@ -856,26 +772,20 @@ const ProjectManagerDashboard = () => {
   useEffect(() => {
     fetchData();
   }, []);
-
   useEffect(() => {
     fetchIndividualMetrics();
-  }, [selectedDate]); // Refetch when selectedDate changes
-
-  useEffect(() => {
+    fetchBlockTotals();
     calculateTeamMetrics();
-  }, [tasks, teamLeads, selectedMetricsTeam]);
-
+  }, [selectedDate]);
   useEffect(() => {
     fetchProjectProgress(selectedProjectItemType, selectedProjectTaskType);
   }, [selectedProjectItemType, selectedProjectTaskType]);
-
   const teamMembers = Array.from(new Set(users.map((user) => user.name)));
   const teamLeadMembers = new Set(teamLeads.flatMap((lead) => lead.team));
   const usersNotInTeams = users.filter(
     (user) => !teamLeadMembers.has(user.name)
   );
-
-  const today = new Date("2025-07-22T00:00:00+05:30").setHours(0, 0, 0, 0);
+  const today = selectedDate.setHours(0, 0, 0, 0);
   const assignedToday = tasks.filter(
     (task) => new Date(task.createdAt).setHours(0, 0, 0, 0) === today
   ).length;
@@ -896,7 +806,6 @@ const ProjectManagerDashboard = () => {
   ).length;
   const completionRate =
     totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
-
   const handleRefresh = () => {
     fetchData()
       .then(() => {
@@ -907,7 +816,6 @@ const ProjectManagerDashboard = () => {
         toast.error("Failed to refresh data");
       });
   };
-
   const handleExport = async () => {
     setIsExporting(true);
     try {
@@ -969,7 +877,6 @@ const ProjectManagerDashboard = () => {
       setIsExporting(false);
     }
   };
-
   const MetricsSkeleton = () => (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
       {[...Array(4)].map((_, index) => (
@@ -988,6 +895,27 @@ const ProjectManagerDashboard = () => {
       ))}
     </div>
   );
+  const testApiEndpoint = async () => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      const response = await axios.get(
+        `${API_URL}/metrics/individual/all?date=2025-09-22&userId=all`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      console.log("Direct API test response:", response.data);
+    } catch (error) {
+      console.error("API test error:", error);
+    }
+  };
+
+  // Call this in useEffect temporarily
+  useEffect(() => {
+    testApiEndpoint();
+  }, []);
 
   if (error) {
     return (
@@ -1039,12 +967,10 @@ const ProjectManagerDashboard = () => {
       </div>
     );
   }
-
   return (
     <div className="min-h-screen">
       <DashboardBackground role="Project Manager" />
       <Navbar onRefresh={handleRefresh} />
-
       <div className="container mx-auto p-4 sm:p-8">
         <header className="mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
@@ -1080,7 +1006,6 @@ const ProjectManagerDashboard = () => {
             </div>
           </div>
         </header>
-
         <Tabs
           defaultValue="overview"
           className="space-y-6"
@@ -1093,12 +1018,11 @@ const ProjectManagerDashboard = () => {
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
           </TabsList>
-
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
             {isLoading ? (
               <MetricsSkeleton />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <Card className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-2 bg-gradient-to-r from-blue-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
@@ -1122,7 +1046,6 @@ const ProjectManagerDashboard = () => {
                     </p>
                   </CardContent>
                 </Card>
-
                 <Card className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-2 bg-gradient-to-r from-indigo-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
@@ -1139,7 +1062,6 @@ const ProjectManagerDashboard = () => {
                     <p className="text-sm text-gray-500 mt-1">New Tasks</p>
                   </CardContent>
                 </Card>
-
                 <Card className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-2 bg-gradient-to-r from-orange-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
@@ -1158,7 +1080,6 @@ const ProjectManagerDashboard = () => {
                     </p>
                   </CardContent>
                 </Card>
-
                 <Card className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-2 bg-gradient-to-r from-green-50 to-transparent border-b">
                     <div className="flex items-center gap-3">
@@ -1175,28 +1096,8 @@ const ProjectManagerDashboard = () => {
                     <p className="text-sm text-gray-500 mt-1">Tasks Finished</p>
                   </CardContent>
                 </Card>
-
-                <Card className="shadow-md hover:shadow-lg transition-shadow">
-                  <CardHeader className="pb-2 bg-gradient-to-r from-purple-50 to-transparent border-b">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-purple-100 rounded-lg">
-                        <Users size={18} className="text-purple-600" />
-                      </div>
-                      <CardTitle className="text-lg">Total Blocks</CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-6">
-                    <p className="text-4xl font-bold text-purple-600">
-                      {totalBlocks}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Completed Blocks
-                    </p>
-                  </CardContent>
-                </Card>
               </div>
             )}
-
             <Card className="shadow-md">
               <CardHeader>
                 <CardTitle>Tasks Overview</CardTitle>
@@ -1218,7 +1119,6 @@ const ProjectManagerDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="teams" className="space-y-6 animate-fade-in">
             <Card className="shadow-md">
               <CardHeader>
@@ -1311,7 +1211,6 @@ const ProjectManagerDashboard = () => {
                         </div>
                       </div>
                     )}
-
                     {usersNotInTeams.length > 0 && (
                       <div>
                         <h3 className="text-lg font-semibold mb-4">
@@ -1336,7 +1235,6 @@ const ProjectManagerDashboard = () => {
                         </div>
                       </div>
                     )}
-
                     {teamLeads.length === 0 && usersNotInTeams.length === 0 && (
                       <p className="text-gray-500 text-center py-4">
                         No users or team leads available.
@@ -1347,7 +1245,6 @@ const ProjectManagerDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="tasks" className="space-y-6 animate-fade-in">
             <Card className="shadow-md">
               <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-transparent">
@@ -1372,7 +1269,6 @@ const ProjectManagerDashboard = () => {
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="performance" className="animate-fade-in">
             <TeamPerformanceView
               teamLeads={teamLeads}
@@ -1381,7 +1277,6 @@ const ProjectManagerDashboard = () => {
               tasks={tasks}
             />
           </TabsContent>
-
           <TabsContent value="metrics" className="space-y-6 animate-fade-in">
             <Card className="shadow-md border-blue-200">
               <CardHeader className="bg-gradient-to-r from-blue-50 to-transparent border-b border-blue-100">
@@ -1398,258 +1293,93 @@ const ProjectManagerDashboard = () => {
                     {individualMetricsError}
                   </p>
                 )}
-
                 <Tabs defaultValue="daily" className="space-y-4">
                   <TabsList className="grid grid-cols-3 w-full max-w-md">
-                    <TabsTrigger
-                      value="daily"
-                      className="flex items-center gap-2"
-                    >
-                      Daily
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="p-0 h-6 w-6"
-                          >
-                            <CalendarIcon className="h-4 w-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date) => date && setSelectedDate(date)}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="weekly"
-                      className="flex items-center gap-2"
-                    >
-                      Weekly
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="p-0 h-6 w-6"
-                          >
-                            <CalendarIcon className="h-4 w-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date) => date && setSelectedDate(date)}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="monthly"
-                      className="flex items-center gap-2"
-                    >
-                      Monthly
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="p-0 h-6 w-6"
-                          >
-                            <CalendarIcon className="h-4 w-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date) => date && setSelectedDate(date)}
-                            initialFocus
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </TabsTrigger>
+                    {["daily", "weekly", "monthly"].map((period) => (
+                      <TabsTrigger
+                        key={period}
+                        value={period}
+                        className="flex items-center gap-2"
+                      >
+                        {period.charAt(0).toUpperCase() + period.slice(1)}
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <span className="p-0 h-6 w-6">
+                              <CalendarIcon className="h-4 w-4" />
+                            </span>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0">
+                            <Calendar
+                              mode="single"
+                              selected={selectedDate}
+                              onSelect={(date) => date && setSelectedDate(date)}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </TabsTrigger>
+                    ))}
                   </TabsList>
-
                   {["daily", "weekly", "monthly"].map((period) => (
                     <TabsContent key={period} value={period}>
+                      <MetricsTable
+                        period={period as "daily" | "weekly" | "monthly"}
+                        metrics={individualMetrics[period as keyof MetricsData]}
+                        blockTotals={blockTotals}
+                        users={users.map((user) => ({
+                          ...user,
+                          id: parseInt(user.id),
+                        }))}
+                      />
                       {period === "daily" && (
                         <div className="mt-4 text-sm text-gray-500">
                           Selected Date: {format(selectedDate, "PPP")}
                         </div>
                       )}
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Redline PIDs</TableHead>
-                            <TableHead>UPV Equipments</TableHead>
-                            <TableHead>UPV Equipments QC</TableHead>
-                            <TableHead>UPV Lines</TableHead>
-                            <TableHead>UPV Lines QC</TableHead>
-                            <TableHead>UPV Non Inline</TableHead>
-                            <TableHead>UPV Non Inline QC</TableHead>
-                            <TableHead>Total Blocks</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {isLoading ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={10}
-                                className="text-center text-gray-500"
-                              >
-                                Loading...
-                              </TableCell>
-                            </TableRow>
-                          ) : individualMetricsError ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={10}
-                                className="text-center text-red-500"
-                              >
-                                {individualMetricsError}
-                              </TableCell>
-                            </TableRow>
-                          ) : users.length === 0 ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={10}
-                                className="text-center text-gray-500"
-                              >
-                                No users data available
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            users.map((user) => {
-                              const metrics =
-                                individualMetrics[
-                                  period as keyof MetricsData
-                                ]?.filter(
-                                  (m) => m.userId === user.id.toString()
-                                ) || [];
-                              const aggregatedCounts = metrics.reduce(
-                                (acc, metric) => {
-                                  Object.entries(metric.counts).forEach(
-                                    ([itemType, taskCounts]) => {
-                                      if (
-                                        typeof taskCounts === "object" &&
-                                        taskCounts !== null &&
-                                        itemType !== "blocks"
-                                      ) {
-                                        Object.entries(taskCounts).forEach(
-                                          ([taskType, count]) => {
-                                            if (typeof count === "number") {
-                                              if (
-                                                itemType === "Line" &&
-                                                taskType === "UPV"
-                                              ) {
-                                                acc["UPV Lines"] =
-                                                  (acc["UPV Lines"] || 0) +
-                                                  count;
-                                              }
-                                              if (
-                                                itemType === "Line" &&
-                                                taskType === "QC"
-                                              ) {
-                                                acc["UPV Lines QC"] =
-                                                  (acc["UPV Lines QC"] || 0) +
-                                                  count;
-                                              }
-                                              if (
-                                                itemType === "Equipment" &&
-                                                taskType === "UPV"
-                                              ) {
-                                                acc["UPV Equipments"] =
-                                                  (acc["UPV Equipments"] || 0) +
-                                                  count;
-                                              }
-                                              if (
-                                                itemType === "Equipment" &&
-                                                taskType === "QC"
-                                              ) {
-                                                acc["UPV Equipments QC"] =
-                                                  (acc["UPV Equipments QC"] ||
-                                                    0) + count;
-                                              }
-                                              if (
-                                                itemType === "PID" &&
-                                                taskType === "Redline"
-                                              ) {
-                                                acc["Redline PIDs"] =
-                                                  (acc["Redline PIDs"] || 0) +
-                                                  count;
-                                              }
-                                              // Add similar conditions for "Non Inline" if applicable
-                                            }
-                                          }
-                                        );
-                                      }
-                                    }
-                                  );
-                                  return acc;
-                                },
-                                {
-                                  "Redline PIDs": 0,
-                                  "UPV Equipments": 0,
-                                  "UPV Equipments QC": 0,
-                                  "UPV Lines": 0,
-                                  "UPV Lines QC": 0,
-                                  "UPV Non Inline": 0,
-                                  "UPV Non Inline QC": 0,
-                                }
-                              );
-                              const totalBlocks = metrics.reduce(
-                                (sum, m) => sum + (m.counts.blocks || 0),
-                                0
-                              );
-                              return (
-                                <TableRow key={`${user.id}-${period}`}>
-                                  <TableCell>
-                                    {user.name || "Unknown"}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["Redline PIDs"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Equipments"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Equipments QC"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Lines"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Lines QC"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Non Inline"]}
-                                  </TableCell>
-                                  <TableCell>
-                                    {aggregatedCounts["UPV Non Inline QC"]}
-                                  </TableCell>
-                                  <TableCell>{totalBlocks}</TableCell>
-                                </TableRow>
-                              );
-                            })
-                          )}
-                        </TableBody>
-                      </Table>
                     </TabsContent>
                   ))}
                 </Tabs>
               </CardContent>
             </Card>
-
-            {/* Add Area-wise Progress tab */}
+            <Card className="shadow-md border-teal-200">
+              <CardHeader className="bg-gradient-to-r from-teal-50 to-transparent border-b border-teal-100">
+                <CardTitle className="text-lg text-teal-800">
+                  Total Blocks
+                </CardTitle>
+                <CardDescription>
+                  Accumulated blocks by time period
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <Tabs defaultValue="daily" className="space-y-4">
+                  <TabsList className="grid grid-cols-3 w-full max-w-md">
+                    <TabsTrigger value="daily">Daily</TabsTrigger>
+                    <TabsTrigger value="weekly">Weekly</TabsTrigger>
+                    <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                  </TabsList>
+                  {["daily", "weekly", "monthly"].map((period) => (
+                    <TabsContent key={period} value={period}>
+                      <div className="text-3xl font-bold text-teal-600 mb-2">
+                        {Object.values(blockTotals).reduce(
+                          (sum, user) =>
+                            sum + (user[period as keyof typeof user] || 0),
+                          0
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500">
+                        {period.charAt(0).toUpperCase() + period.slice(1)} Total
+                        Blocks
+                      </p>
+                      {period === "daily" && (
+                        <div className="mt-4 text-sm text-gray-500">
+                          Selected Date: {format(selectedDate, "PPP")}
+                        </div>
+                      )}
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              </CardContent>
+            </Card>
             <Card className="shadow-md border-orange-200">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent border-b border-orange-100">
                 <CardTitle className="text-lg text-orange-800">
@@ -1663,7 +1393,6 @@ const ProjectManagerDashboard = () => {
                     {areaProgressError}
                   </p>
                 )}
-
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1712,8 +1441,6 @@ const ProjectManagerDashboard = () => {
                 </Table>
               </CardContent>
             </Card>
-
-            {/* Keep Team Metrics and Project Progress cards as they are */}
             <Card className="shadow-md border-green-200">
               <CardHeader className="bg-gradient-to-r from-green-50 to-transparent border-b border-green-100">
                 <CardTitle className="text-lg text-green-800">
@@ -1729,14 +1456,12 @@ const ProjectManagerDashboard = () => {
                     {teamMetricsError}
                   </p>
                 )}
-
                 <Tabs defaultValue="daily" className="space-y-4">
                   <TabsList className="grid grid-cols-3 w-full max-w-md">
                     <TabsTrigger value="daily">Daily</TabsTrigger>
                     <TabsTrigger value="weekly">Weekly</TabsTrigger>
                     <TabsTrigger value="monthly">Monthly</TabsTrigger>
                   </TabsList>
-
                   <TabsContent value="daily">
                     <Table>
                       <TableHeader>
@@ -1924,7 +1649,6 @@ const ProjectManagerDashboard = () => {
                 </Tabs>
               </CardContent>
             </Card>
-
             <Card className="shadow-md border-purple-200">
               <CardHeader className="bg-gradient-to-r from-purple-50 to-transparent border-b border-purple-100">
                 <CardTitle className="text-lg text-purple-800">
@@ -1951,8 +1675,8 @@ const ProjectManagerDashboard = () => {
                       <SelectContent>
                         <SelectItem value="lines">Lines</SelectItem>
                         <SelectItem value="equipment">Equipment</SelectItem>
-                        <SelectItem value="non_line_instruments">
-                          Non-Line Instruments
+                        <SelectItem value="non_inline_instruments">
+                          Non-Inline Instruments
                         </SelectItem>
                         <SelectItem value="pids">P&IDs</SelectItem>
                       </SelectContent>
@@ -1979,7 +1703,6 @@ const ProjectManagerDashboard = () => {
                     </Select>
                   </div>
                 </div>
-
                 {projectProgress.length === 0 ? (
                   <p className="text-gray-500 text-center py-4">
                     No project progress data available.
@@ -2016,7 +1739,6 @@ const ProjectManagerDashboard = () => {
             </Card>
           </TabsContent>
         </Tabs>
-
         <Modal
           isOpen={modalIsOpen}
           onRequestClose={closeModal}
@@ -2093,5 +1815,4 @@ const ProjectManagerDashboard = () => {
     </div>
   );
 };
-
 export default ProjectManagerDashboard;

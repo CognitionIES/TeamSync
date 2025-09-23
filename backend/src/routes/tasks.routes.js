@@ -442,6 +442,8 @@ router.patch("/:id/status", protect, async (req, res) => {
 });
 
 // PATCH /api/tasks/:id/items/:itemId - Update task item status
+// Replace the existing PATCH route in tasks.routes.js
+// Replace the existing PATCH route in tasks.routes.js
 router.patch("/:id/items/:itemId", protect, async (req, res) => {
   try {
     if (req.user.role !== "Team Member") {
@@ -530,32 +532,90 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
 
     const updatedItem = updatedItemRows[0];
 
-    // Update daily_line_counts
+    // Dynamically map entity_id based on item_type
+    let entityId = item.line_id; // Use line_id if available
+    if (!entityId) {
+      if (item.item_type === "Line") {
+        const lineResult = await db.query(
+          `SELECT id FROM lines WHERE id = $1`,
+          [item.item_id]
+        );
+        entityId = lineResult.rows.length > 0 ? lineResult.rows[0].id : null;
+      } else if (item.item_type === "Equipment") {
+        const equipResult = await db.query(
+          `SELECT project_id FROM equipment WHERE id = $1`,
+          [item.item_id]
+        );
+        if (equipResult.rows.length > 0) {
+          const projectId = equipResult.rows[0].project_id;
+          const lineMatch = await db.query(
+            `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
+            [projectId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+        }
+      } else if (item.item_type === "PID") {
+        const pidResult = await db.query(`SELECT id FROM pids WHERE id = $1`, [
+          item.item_id,
+        ]);
+        if (pidResult.rows.length > 0) {
+          const pidId = pidResult.rows[0].id;
+          const lineMatch = await db.query(
+            `SELECT l.id FROM lines l JOIN pids p ON l.pid_id = p.id WHERE p.id = $1`,
+            [pidId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+        }
+      } else if (item.item_type === "NonInlineInstrument") {
+        const instrResult = await db.query(
+          `SELECT project_id FROM non_inline_instruments WHERE id = $1`,
+          [item.item_id]
+        );
+        if (instrResult.rows.length > 0) {
+          const projectId = instrResult.rows[0].project_id;
+          const lineMatch = await db.query(
+            `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
+            [projectId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+        }
+      }
+    }
+
+    if (entityId === null) {
+      await db.query("ROLLBACK");
+      return res
+        .status(400)
+        .json({ message: "Invalid entity ID for daily_metrics" });
+    }
+
+    // Update daily_metrics with correct ON CONFLICT clause
     const date = new Date().toISOString().split("T")[0];
     const category = item.item_type || "Unknown";
-    const countValue = completed ? 1 : 0;
-    const blocksValue = completed ? blocks : 0;
-    const countsObject = { [category]: countValue, blocks: blocksValue };
+    const countValue = completed ? 1 : -1;
+    const blocksValue = completed ? blocks : -blocks;
 
-    console.log("Counts object for query:", countsObject); // Debug log
-
-    const countsQuery = `
-      INSERT INTO daily_line_counts (user_id, date, category, count, counts)
-      VALUES ($1, $2, $3, $4, $5::jsonb)
-      ON CONFLICT (user_id, date, category)
+    await db.query(
+      `
+      INSERT INTO daily_metrics (user_id, entity_id, item_type, task_type, count, date, blocks)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (user_id, date, item_type, task_type) 
       DO UPDATE SET 
-        count = daily_line_counts.count + EXCLUDED.count,
-        counts = daily_line_counts.counts || $6::jsonb,
+        count = GREATEST(daily_metrics.count + $5, 0),
+        blocks = GREATEST(daily_metrics.blocks + $7, 0),
+        entity_id = $2,
         updated_at = CURRENT_TIMESTAMP
-    `;
-    await db.query(countsQuery, [
-      req.user.id,
-      date,
-      category,
-      countValue,
-      JSON.stringify({ [category]: countValue }), // Ensure $5 is JSONB
-      JSON.stringify({ blocks: blocksValue }), // Ensure $6 is JSONB
-    ]);
+      `,
+      [
+        req.user.id,
+        entityId,
+        category,
+        task.type || "UPV", // Default to "UPV" if task.type is NULL
+        countValue,
+        date,
+        blocksValue,
+      ]
+    );
 
     // Rest of the existing logic (progress update, audit logs, etc.) remains the same
     const { rows: allItems } = await db.query(
@@ -592,10 +652,10 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       `,
       [
-        "Task Item Update",
+        "Task Item Toggle",
         task.type,
         req.user.id,
-        `Updated task item ${updatedItem.name} (ID: ${itemId}) to completed=${completed} with ${blocks} blocks in project ${task.project_name}`,
+        `Toggled task item ${updatedItem.name} (ID: ${itemId}) to completed=${completed} with ${blocks} blocks in project ${task.project_name}`,
         new Date(),
         task.project_name,
         teamName,
@@ -662,7 +722,6 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       .json({ message: "Failed to update task item", error: error.message });
   }
 });
-
 router.post("/:taskId/comments", protect, addTaskComment);
 
 router.get("/blocks-summary", protect, async (req, res) => {
@@ -701,5 +760,132 @@ router.get("/blocks-summary", protect, async (req, res) => {
     });
   }
 });
+router.get("/:itemId/entity", protect, async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const itemIdNum = parseInt(itemId, 10);
 
+    if (isNaN(itemIdNum)) {
+      return res.status(400).json({ message: "Invalid item ID" });
+    }
+
+    const itemResult = await db.query(
+      `
+      SELECT item_type, item_id, line_id, task_id FROM task_items WHERE id = $1
+      `,
+      [itemIdNum]
+    );
+
+    if (itemResult.rows.length === 0) {
+      return res.status(404).json({ message: "Task item not found" });
+    }
+
+    const { item_type, item_id, line_id, task_id } = itemResult.rows[0];
+    let entityId = line_id;
+
+    if (!entityId) {
+      if (item_type === "Line") {
+        const lineResult = await db.query(
+          `SELECT id FROM lines WHERE id = $1`,
+          [item_id]
+        );
+        entityId = lineResult.rows.length > 0 ? lineResult.rows[0].id : null;
+      } else if (item_type === "Equipment") {
+        const equipResult = await db.query(
+          `SELECT project_id FROM equipment WHERE id = $1`,
+          [item_id]
+        );
+        if (equipResult.rows.length > 0) {
+          const projectId = equipResult.rows[0].project_id;
+          const lineMatch = await db.query(
+            `SELECT id FROM lines WHERE project_id = $1 AND id IS NOT NULL LIMIT 1`,
+            [projectId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+          if (entityId) {
+            await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
+              entityId,
+              itemIdNum,
+            ]);
+          }
+        }
+      } else if (item_type === "PID") {
+        const pidResult = await db.query(`SELECT id FROM pids WHERE id = $1`, [
+          item_id,
+        ]);
+        if (pidResult.rows.length > 0) {
+          const pidId = pidResult.rows[0].id;
+          const lineMatch = await db.query(
+            `SELECT l.id FROM lines l JOIN pids p ON l.pid_id = p.id WHERE p.id = $1`,
+            [pidId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+          if (entityId) {
+            await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
+              entityId,
+              itemIdNum,
+            ]);
+          }
+        }
+      } else if (item_type === "NonInlineInstrument") {
+        const instrResult = await db.query(
+          `SELECT project_id FROM non_inline_instruments WHERE id = $1`,
+          [item_id]
+        );
+        if (instrResult.rows.length > 0) {
+          const projectId = instrResult.rows[0].project_id;
+          const lineMatch = await db.query(
+            `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
+            [projectId]
+          );
+          entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+          if (entityId) {
+            await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
+              entityId,
+              itemIdNum,
+            ]);
+          }
+        }
+      }
+    }
+
+    if (entityId === null) {
+      const taskProject = await db.query(
+        `SELECT project_id FROM tasks WHERE id = $1`,
+        [task_id]
+      );
+      if (taskProject.rows.length > 0) {
+        const projectId = taskProject.rows[0].project_id;
+        const lineMatch = await db.query(
+          `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
+          [projectId]
+        );
+        entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
+        if (entityId) {
+          await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
+            entityId,
+            itemIdNum,
+          ]);
+        }
+      }
+    }
+
+    if (entityId === null) {
+      return res
+        .status(404)
+        .json({ message: "No valid entity found for task item" });
+    }
+
+    res.status(200).json({ entityId });
+  } catch (error) {
+    console.error("Error fetching entity ID:", {
+      message: error.message,
+      stack: error.stack,
+      itemId: req.params.itemId,
+    });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch entity ID", error: error.message });
+  }
+});
 module.exports = router;

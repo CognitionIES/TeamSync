@@ -99,6 +99,7 @@ export interface Task {
   completedAt: string | null;
   progress: number;
   items: Array<{
+    item_id: string;
     blocks: number;
     id: string;
     name: string;
