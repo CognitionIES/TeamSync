@@ -888,4 +888,226 @@ router.get("/:itemId/entity", protect, async (req, res) => {
       .json({ message: "Failed to fetch entity ID", error: error.message });
   }
 });
+// PATCH /api/tasks/:id/retract - Retract a task and optionally reassign
+router.patch("/:id/retract", protect, async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.id);
+    const { newAssigneeId } = req.body; // Optional: new assignee ID for reassignment
+
+    // Validate user role (only Team Lead can retract tasks)
+    if (req.user.role !== "Team Lead") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to retract tasks`,
+      });
+    }
+
+    // Check if the task exists and is assigned to the team lead's team
+    const { rows: taskRows } = await db.query(
+      `
+      SELECT t.*, u.name as assignee, p.name as project_name
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      WHERE t.id = $1 AND (t.assignee_id IN (
+        SELECT member_id FROM team_members WHERE lead_id = $2
+      ) OR t.assignee_id = $2)
+      `,
+      [taskId, req.user.id]
+    );
+
+    if (taskRows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Task not found or not authorized" });
+    }
+
+    const task = taskRows[0];
+
+    // Get completed items that should not be reassigned
+    const { rows: completedItems } = await db.query(
+      `
+      SELECT id, item_type, item_id, name, completed
+      FROM task_items
+      WHERE task_id = $1 AND completed = true
+      `,
+      [taskId]
+    );
+
+    await db.query("BEGIN");
+
+    try {
+      // If reassigning to a new user
+      if (newAssigneeId && parseInt(newAssigneeId) !== task.assignee_id) {
+        const newAssigneeIdInt = parseInt(newAssigneeId);
+
+        // Validate new assignee exists and is in the team
+        const { rows: newAssigneeRows } = await db.query(
+          `
+          SELECT u.*, tm.lead_id
+          FROM users u
+          LEFT JOIN team_members tm ON u.id = tm.member_id
+          WHERE u.id = $1 AND (tm.lead_id = $2 OR u.id = $2)
+          `,
+          [newAssigneeIdInt, req.user.id]
+        );
+
+        if (newAssigneeRows.length === 0) {
+          await db.query("ROLLBACK");
+          return res.status(400).json({
+            message: "Invalid assignee or assignee not in your team",
+          });
+        }
+
+        // Create a new task for the new assignee with only incomplete items
+        const { rows: newTaskRows } = await db.query(
+          `
+          INSERT INTO tasks (type, assignee_id, status, is_complex, project_id, description, progress)
+          VALUES ($1, $2, 'Assigned', $3, $4, $5, 0)
+          RETURNING *
+          `,
+          [
+            task.type,
+            newAssigneeIdInt,
+            task.is_complex,
+            task.project_id,
+            task.description,
+          ]
+        );
+
+        const newTask = newTaskRows[0];
+
+        // Copy only incomplete items to the new task
+        const { rows: incompleteItems } = await db.query(
+          `
+          SELECT item_type, item_id, name, line_id
+          FROM task_items
+          WHERE task_id = $1 AND completed = false
+          `,
+          [taskId]
+        );
+
+        // Insert incomplete items into the new task
+        for (const item of incompleteItems) {
+          await db.query(
+            `
+            INSERT INTO task_items (task_id, item_type, item_id, name, completed, line_id)
+            VALUES ($1, $2, $3, $4, false, $5)
+            `,
+            [newTask.id, item.item_type, item.item_id, item.name, item.line_id]
+          );
+        }
+
+        // Update the original task to mark it as completed (since completed items stay with original assignee)
+        if (completedItems.length > 0) {
+          // If there are completed items, keep the original task but remove incomplete items
+          await db.query(
+            `
+            DELETE FROM task_items
+            WHERE task_id = $1 AND completed = false
+            `,
+            [taskId]
+          );
+
+          // Update original task progress to 100% since only completed items remain
+          await db.query(
+            `
+            UPDATE tasks
+            SET status = 'Completed', progress = 100, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            `,
+            [taskId]
+          );
+        } else {
+          // If no completed items, we can delete the original task entirely
+          await db.query(`DELETE FROM task_items WHERE task_id = $1`, [taskId]);
+          await db.query(`DELETE FROM tasks WHERE id = $1`, [taskId]);
+        }
+
+        await db.query("COMMIT");
+
+        // Get the new assignee name for response
+        const newAssigneeName = newAssigneeRows[0].name;
+
+        return res.status(200).json({
+          message: `Task ${taskId} retracted and reassigned successfully`,
+          data: {
+            originalTask:
+              completedItems.length > 0
+                ? {
+                    id: task.id,
+                    status: "Completed",
+                    assignee: task.assignee,
+                    completedItems: completedItems.length,
+                  }
+                : null,
+            newTask: {
+              id: newTask.id,
+              type: newTask.type,
+              assignee: newAssigneeName,
+              assignee_id: newTask.assignee_id,
+              status: newTask.status,
+              incompleteItems: incompleteItems.length,
+              progress: 0,
+            },
+          },
+        });
+      } else {
+        // Just retracting without reassigning - reset the task
+        await db.query(
+          `
+          UPDATE task_items
+          SET completed = false, completed_at = NULL, blocks = 0
+          WHERE task_id = $1 AND completed = false
+          `,
+          [taskId]
+        );
+
+        // Calculate new progress based on completed items only
+        const { rows: progressData } = await db.query(
+          `
+          SELECT COUNT(*) as total, SUM(CASE WHEN completed = true THEN 1 ELSE 0 END) as completed_count
+          FROM task_items
+          WHERE task_id = $1
+          `,
+          [taskId]
+        );
+
+        const { total, completed_count } = progressData[0];
+        const progress =
+          total > 0 ? Math.round((completed_count / total) * 100) : 0;
+        const newStatus = progress === 100 ? "Completed" : "Assigned";
+
+        await db.query(
+          `
+          UPDATE tasks
+          SET status = $1, progress = $2, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $3
+          `,
+          [newStatus, progress, taskId]
+        );
+
+        await db.query("COMMIT");
+
+        return res.status(200).json({
+          message: `Task ${taskId} retracted successfully`,
+          data: {
+            id: task.id,
+            status: newStatus,
+            progress: progress,
+            assignee: task.assignee,
+          },
+        });
+      }
+    } catch (error) {
+      await db.query("ROLLBACK");
+      throw error;
+    }
+  } catch (error) {
+    console.error("Error retracting task:", error.message, error.stack);
+    res
+      .status(500)
+      .json({ message: "Failed to retract task", error: error.message });
+  }
+});
+
 module.exports = router;

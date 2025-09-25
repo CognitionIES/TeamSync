@@ -189,8 +189,86 @@ const TeamLeadDashboard = () => {
   >([]);
   const [selectedNonInlineInstruments, setSelectedNonInlineInstruments] =
     useState<string[]>([]);
+  const [selectedTaskForRetract, setSelectedTaskForRetract] =
+    useState<Task | null>(null);
+  const [newAssigneeId, setNewAssigneeId] = useState<string>("");
+  const [retractModalOpen, setRetractModalOpen] = useState(false);
+
   const token = localStorage.getItem("teamsync_token");
 
+  const handleSelectTaskForRetract = (task: Task | null) => {
+    console.log("Select Task for Retract:", task);
+    setSelectedTaskForRetract(task);
+    if (task) {
+      setRetractModalOpen(true);
+    } else {
+      setRetractModalOpen(false);
+    }
+  };
+
+  const handleRetractTask = async (taskId: string) => {
+    console.log("Retracting Task:", taskId);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) {
+      toast.error("Task not found");
+      return;
+    }
+
+    // Check if task has completed items
+    const completedItems = task.items.filter((item) => item.completed);
+    const hasCompletedWork = completedItems.length > 0;
+
+    if (hasCompletedWork && !newAssigneeId) {
+      toast.error(
+        "This task has completed work. Please select a new assignee to reassign incomplete items."
+      );
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const payload: { newAssigneeId?: string } = {};
+
+      if (newAssigneeId) {
+        payload.newAssigneeId = newAssigneeId;
+      }
+
+      const response = await axios.patch(
+        `${API_URL}/tasks/${taskId}/retract`,
+        payload,
+        getAuthHeaders()
+      );
+
+      console.log("Retract response:", response.data);
+
+      // Refresh tasks to sync with backend
+      await fetchTasks();
+
+      if (response.data.data.newTask) {
+        toast.success(
+          `Task ${taskId} retracted and reassigned to new task #${response.data.data.newTask.id}`
+        );
+      } else {
+        toast.success(`Task ${taskId} retracted successfully`);
+      }
+
+      setSelectedTaskForRetract(null);
+      setNewAssigneeId("");
+      setRetractModalOpen(false);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error retracting task:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to retract task"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReassign = (assigneeId: string) => {
+    setNewAssigneeId(assigneeId);
+  };
   useEffect(() => {
     if (!isAuthenticated || !token) {
       toast.info(getRandomMessage("login"));
@@ -1299,7 +1377,186 @@ const TeamLeadDashboard = () => {
     (member) => member.id === selectedUserId
   );
   const userName = selectedUser ? selectedUser.name : "";
+  const RetractTaskModal = () => {
+    if (!selectedTaskForRetract) return null;
 
+    const completedItems = selectedTaskForRetract.items.filter(
+      (item) => item.completed
+    );
+    const incompleteItems = selectedTaskForRetract.items.filter(
+      (item) => !item.completed
+    );
+    const hasCompletedWork = completedItems.length > 0;
+
+    return (
+      <Modal
+        isOpen={retractModalOpen}
+        onRequestClose={() => {
+          setRetractModalOpen(false);
+          setSelectedTaskForRetract(null);
+          setNewAssigneeId("");
+        }}
+        style={{
+          content: {
+            top: "50%",
+            left: "50%",
+            right: "auto",
+            bottom: "auto",
+            marginRight: "-50%",
+            transform: "translate(-50%, -50%)",
+            width: "90%",
+            maxWidth: "500px",
+            maxHeight: "80vh",
+            overflowY: "auto",
+            padding: "24px",
+            borderRadius: "12px",
+            backgroundColor: "#fff",
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            zIndex: 1050,
+          },
+          overlay: {
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            zIndex: 1000,
+          },
+        }}
+        contentLabel="Retract Task Modal"
+      >
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold text-gray-800">
+              Retract Task #{selectedTaskForRetract.id}
+            </h2>
+            <button
+              onClick={() => {
+                setRetractModalOpen(false);
+                setSelectedTaskForRetract(null);
+                setNewAssigneeId("");
+              }}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div className="bg-gray-50 p-3 rounded-md">
+            <h3 className="font-medium text-gray-800 mb-2">Task Details:</h3>
+            <p className="text-sm text-gray-600">
+              Type: {selectedTaskForRetract.type}
+            </p>
+            <p className="text-sm text-gray-600">
+              Current Assignee: {selectedTaskForRetract.assignee}
+            </p>
+            <p className="text-sm text-gray-600">
+              Status: {selectedTaskForRetract.status}
+            </p>
+            <p className="text-sm text-gray-600">
+              Progress: {selectedTaskForRetract.progress}%
+            </p>
+          </div>
+
+          {hasCompletedWork && (
+            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-md">
+              <h3 className="font-medium text-yellow-800 mb-2">
+                ⚠️ Work Already Completed
+              </h3>
+              <p className="text-sm text-yellow-700 mb-2">
+                This task has {completedItems.length} completed item(s) out of{" "}
+                {selectedTaskForRetract.items.length} total items.
+              </p>
+              <p className="text-sm text-yellow-700">
+                Completed work will remain with{" "}
+                <strong>{selectedTaskForRetract.assignee}</strong>. Only
+                incomplete items ({incompleteItems.length}) will be reassigned
+                to the new assignee.
+              </p>
+            </div>
+          )}
+
+          {!hasCompletedWork && (
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded-md">
+              <p className="text-sm text-blue-700">
+                No work has been completed on this task. You can either reset it
+                for the current assignee or reassign it to someone else.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              {hasCompletedWork
+                ? "Select New Assignee (Required)"
+                : "Reassign To (Optional)"}
+            </label>
+            <Select value={newAssigneeId} onValueChange={setNewAssigneeId}>
+              <SelectTrigger style={{ zIndex: 1100 }}>
+                <SelectValue placeholder="Select new assignee or leave empty to reset" />
+              </SelectTrigger>
+              <SelectContent
+                style={{ zIndex: 1100 }}
+                className="z-[1100]"
+                position="popper"
+              >
+                {teamMembers
+                  .filter(
+                    (member) => member.id !== selectedTaskForRetract.assigneeId
+                  )
+                  .map((member) => (
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {hasCompletedWork && !newAssigneeId && (
+              <p className="text-sm text-red-600 mt-1">
+                A new assignee is required when there is completed work.
+              </p>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-4 border-t">
+            <Button
+              onClick={() => handleRetractTask(selectedTaskForRetract.id)}
+              disabled={isLoading || (hasCompletedWork && !newAssigneeId)}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isLoading
+                ? "Processing..."
+                : hasCompletedWork
+                ? "Retract & Reassign"
+                : newAssigneeId
+                ? "Retract & Reassign"
+                : "Retract Task"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRetractModalOpen(false);
+                setSelectedTaskForRetract(null);
+                setNewAssigneeId("");
+              }}
+              disabled={isLoading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  };
   return (
     <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
@@ -1818,7 +2075,37 @@ const TeamLeadDashboard = () => {
                 onViewCurrentWork={handleViewCurrentWork}
                 showComments={true}
                 onViewComments={handleViewComments}
+                onSelectTaskForRetract={handleSelectTaskForRetract} // Updated prop name
+                onRetractTask={handleSelectTaskForRetract} //
               />
+            )}
+            {selectedTaskForRetract && (
+              <div className="mt-4 p-4 border rounded-md bg-gray-50">
+                <h3 className="text-lg font-semibold">Retract Task</h3>
+                <p>
+                  Task: {selectedTaskForRetract.id} (Assignee:{" "}
+                  {selectedTaskForRetract.assignee})
+                </p>
+                <Select onValueChange={handleReassign} value={newAssigneeId}>
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select new assignee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teamMembers.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => handleRetractTask(selectedTaskForRetract.id)}
+                  className="mt-2"
+                  disabled={isLoading || !newAssigneeId}
+                >
+                  Retract and Reassign
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1831,6 +2118,13 @@ const TeamLeadDashboard = () => {
           userName={userName}
           taskType={selectedTaskType}
           itemType={selectedItemType}
+          onUpdateItem={function (
+            itemId: string,
+            completed: boolean,
+            blocks: number
+          ): void {
+            throw new Error("Function not implemented.");
+          }}
         />
         {/* Modal for Comments */}
         <Modal
@@ -1947,6 +2241,7 @@ const TeamLeadDashboard = () => {
           </div>
         </Modal>
       </div>
+      <RetractTaskModal />
     </div>
   );
 };

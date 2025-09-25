@@ -1,5 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -82,58 +80,66 @@ const TeamMemberDashboard = () => {
     try {
       setIsLoading(true);
       const response = await axios.get<{ data: any[] }>(
-        `${API_URL}/tasks?assigneeId=${user?.id}`,
+        `${API_URL}/tasks`, // Remove the assigneeId query param as the backend already filters by user
         getAuthHeaders()
       );
-      const tasksData = response.data.data.map((task) => ({
-        id: task.id.toString(),
-        type: task.type as TaskType,
-        assignee: task.assignee || "Unknown",
-        assigneeId: task.assignee_id.toString(),
-        status: task.status || "Assigned",
-        isComplex: task.is_complex || false,
-        createdAt: task.created_at || new Date().toISOString(),
-        updatedAt: task.updated_at || new Date().toISOString(),
-        completedAt: task.completed_at || null,
-        progress: task.progress || 0,
-        projectId: task.project_id?.toString() || "Unknown",
-        projectName: task.project_name || "Unknown",
-        areaNumber: task.area_name || "N/A",
-        items: (task.items || []).map((item) => ({
-          id: item.id.toString(),
-          name: item.name || "Unnamed Item",
-          type: item.item_type || "Unknown",
-          completed: item.completed || false,
-          entityId:
-            item.line_id ||
-            (item.item_type.toLowerCase().includes("line") ||
-            item.item_type === "NonInlineInstrument"
-              ? 1
-              : null),
-          blocks: item.blocks || 0,
-        })),
-        comments: (task.comments || []).map((comment) => ({
-          id: comment.id.toString(),
-          userId: comment.user_id.toString(),
-          userName: comment.user_name || "Unknown",
-          userRole: comment.user_role || "Unknown",
-          comment: comment.comment || "",
-          createdAt: comment.created_at,
-        })),
-        description: task.description || "",
-        pidNumber: task.pid_number ?? "",
-        lines: (task.items || [])
-          .filter((item) => item.type === "Line" || item.type === "Line Item")
-          .map((item) => ({
-            id: item.id,
-            name: item.name,
-            pidId: task.items.find((i) => i.type === "PID")?.id || "",
-            completed: item.completed,
+      console.log("Raw tasks data:", response.data.data); // Debug log
+
+      const tasksData = response.data.data
+        .map((task) => ({
+          id: task.id.toString(),
+          type: task.type as TaskType,
+          assignee: task.assignee || "Unknown",
+          assigneeId: task.assignee_id?.toString() || "",
+          status: task.status || "Assigned",
+          isComplex: task.is_complex || false,
+          createdAt: task.created_at || new Date().toISOString(),
+          updatedAt: task.updated_at || new Date().toISOString(),
+          completedAt: task.completed_at || null,
+          progress: task.progress || 0,
+          projectId: task.project_id?.toString() || "Unknown",
+          projectName: task.project_name || "Unknown",
+          areaNumber: task.area_name || "N/A",
+          items: (task.items || []).map((item) => ({
+            id: item.id.toString(),
+            name: item.name || "Unnamed Item",
+            type: item.item_type || "Unknown",
+            completed: item.completed || false,
+            entityId:
+              item.line_id ||
+              (item.item_type.toLowerCase().includes("line") ||
+              item.item_type === "NonInlineInstrument"
+                ? 1
+                : null),
+            blocks: item.blocks || 0,
           })),
-      }));
+          comments: (task.comments || []).map((comment) => ({
+            id: comment.id.toString(),
+            userId: comment.user_id.toString(),
+            userName: comment.user_name || "Unknown",
+            userRole: comment.user_role || "Unknown",
+            comment: comment.comment || "",
+            createdAt: comment.created_at,
+          })),
+          description: task.description || "",
+          pidNumber: task.pid_number ?? "",
+          lines: (task.items || [])
+            .filter((item) => item.type === "Line" || item.type === "Line Item")
+            .map((item) => ({
+              id: item.id,
+              name: item.name,
+              pidId: task.items.find((i) => i.type === "PID")?.id || "",
+              completed: item.completed,
+            })),
+        }))
+        // FIXED: Only filter by assigneeId, don't exclude "Assigned" status
+        .filter((task) => task.assigneeId === user?.id?.toString());
+
+      console.log("Processed tasks data:", tasksData); // Debug log
       setTasks(tasksData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching tasks:", axiosError);
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch tasks"
       );
@@ -141,6 +147,16 @@ const TeamMemberDashboard = () => {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isAuthenticated && user?.role === "Team Member" && token) {
+      fetchTasks();
+      fetchMetrics();
+      // Increased polling frequency to catch new assignments quickly
+      const interval = setInterval(fetchTasks, 10000); // Poll every 10 seconds
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated, user, token]);
 
   const fetchMetrics = async () => {
     try {
@@ -169,6 +185,7 @@ const TeamMemberDashboard = () => {
   const handleRefresh = () => {
     fetchTasks().catch(() => toast.error("Failed to refresh tasks"));
     fetchMetrics().catch(() => toast.error("Failed to refresh metrics"));
+    toast.success("Refreshing tasks...");
   };
 
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
@@ -259,14 +276,10 @@ const TeamMemberDashboard = () => {
   if (!isAuthenticated || user?.role !== "Team Member" || !token) return null;
 
   const assignedTasks = tasks.filter(
-    (task) => task.status.toLowerCase() === "assigned"
+    (task) => task.status === "Assigned" // Use exact match for consistency
   );
-  const inProgressTasks = tasks.filter(
-    (task) => task.status.toLowerCase() === "in progress"
-  );
-  const completedTasks = tasks.filter(
-    (task) => task.status.toLowerCase() === "completed"
-  );
+  const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
+  const completedTasks = tasks.filter((task) => task.status === "Completed");
   const taskCounts = {
     assigned: assignedTasks.length,
     inProgress: inProgressTasks.length,
@@ -295,6 +308,13 @@ const TeamMemberDashboard = () => {
               {getRandomMessage("general") || "Stay on top of your tasks!"}
             </AlertDescription>
           </div>
+          {/* Debug info - remove in production */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mt-2 text-xs text-gray-500">
+              Total tasks loaded: {tasks.length} | User ID: {user?.id} | Last
+              refresh: {new Date().toLocaleTimeString()}
+            </div>
+          )}
         </header>
 
         {assignedTasks.length > 0 && (
@@ -330,12 +350,19 @@ const TeamMemberDashboard = () => {
           </div>
         </div>
 
+        {/* Mobile view tabs */}
         <div className="block md:hidden mb-6">
           <Tabs defaultValue="assigned">
             <TabsList className="grid grid-cols-3 mb-4">
-              <TabsTrigger value="assigned">Assigned</TabsTrigger>
-              <TabsTrigger value="inProgress">In Progress</TabsTrigger>
-              <TabsTrigger value="completed">Completed</TabsTrigger>
+              <TabsTrigger value="assigned">
+                Assigned ({assignedTasks.length})
+              </TabsTrigger>
+              <TabsTrigger value="inProgress">
+                In Progress ({inProgressTasks.length})
+              </TabsTrigger>
+              <TabsTrigger value="completed">
+                Completed ({completedTasks.length})
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="assigned" className="space-y-4">
               {isLoading ? (
@@ -356,8 +383,7 @@ const TeamMemberDashboard = () => {
                       ) =>
                         handleItemToggle(
                           taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
+                          itemId,
                           completed,
                           category,
                           blocks
@@ -379,8 +405,7 @@ const TeamMemberDashboard = () => {
                       ) =>
                         handleItemToggle(
                           taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
+                          itemId,
                           completed,
                           category,
                           blocks
@@ -483,11 +508,12 @@ const TeamMemberDashboard = () => {
           </Tabs>
         </div>
 
+        {/* Desktop view - rest remains the same */}
         <div className="hidden md:grid md:grid-cols-3 gap-6">
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
-              Assigned
+              Assigned ({assignedTasks.length})
             </h2>
             <div className="space-y-4">
               {isLoading ? (
@@ -508,8 +534,7 @@ const TeamMemberDashboard = () => {
                       ) =>
                         handleItemToggle(
                           taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
+                          itemId,
                           completed,
                           category,
                           blocks
@@ -531,8 +556,7 @@ const TeamMemberDashboard = () => {
                       ) =>
                         handleItemToggle(
                           taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
+                          itemId,
                           completed,
                           category,
                           blocks

@@ -24,7 +24,8 @@ import {
   Filter,
   Users,
   Calendar,
-  Zap,
+  Eye,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ interface TaskTableProps {
   showPidNumber?: boolean;
   loading?: boolean;
   onViewCurrentWork?: (taskId: string, userId: string) => void;
+  onSelectTaskForRetract?: (task: Task | null) => void;
   onViewComments?: (taskId: string) => void;
   onUpdateItemCompletion?: (
     taskId: string,
@@ -197,8 +199,9 @@ const TableSkeleton = () => (
 const TaskTable: React.FC<TaskTableProps> = ({
   tasks,
   teamMembers,
-  showFilters,
-  showCurrentWork,
+  showFilters = false,
+  showProgress = false,
+  showCurrentWork = false,
   showComments = false,
   showProjectName = false,
   showAreaName = false,
@@ -206,9 +209,12 @@ const TaskTable: React.FC<TaskTableProps> = ({
   loading = false,
   onViewCurrentWork,
   onViewComments,
+  onSelectTaskForRetract,
 }) => {
   const [filterStatus, setFilterStatus] = useState<TaskStatus | "All">("All");
-  const [filterType, setFilterType] = useState<TaskType | "All">("All");
+  const [filterType, setFilterType] = useState<TaskType | "All" | "Misc">(
+    "All"
+  );
   const [filterAssignee, setFilterAssignee] = useState<string | "All">("All");
   const [sortColumn, setSortColumn] =
     useState<keyof (typeof rows)[0]>("createdAt");
@@ -242,9 +248,10 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const assignedTime = formatDateTime(task.createdAt, "Assigned");
     const completedTime = formatDateTime(task.completedAt, "Completed");
 
-    const lineItems = task.items.filter((item) => item.type === "Line");
-    const completedLines = lineItems.filter((item) => item.completed).length;
-    const totalLines = lineItems.length;
+    const totalItems = task.items.length;
+    const completedItems = task.items.filter((item) => item.completed).length;
+    const progress =
+      totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
 
     // Ensure comments is an array
     const comments = Array.isArray(task.comments) ? task.comments : [];
@@ -253,19 +260,22 @@ const TaskTable: React.FC<TaskTableProps> = ({
       id: task.id,
       type: task.type,
       assignee: task.assignee,
-      completedLines: lineItems.length > 0 ? completedLines : null,
-      totalLines: lineItems.length > 0 ? totalLines : null,
-      currentWork: truncateText(getCurrentWork(task), 20),
+      assigneeId: task.assigneeId,
+      completedItems: completedItems,
+      totalItems: totalItems,
+      progress: progress,
+      currentWork: truncateText(getCurrentWork(task), 30),
       status: task.status,
       createdAt: createdAt || new Date(0),
       assignedTime: assignedTime,
       completedTime: completedTime,
       updatedAt: updatedAt || completedAt || new Date(0),
-      assigneeId: task.assigneeId,
       comments: comments,
       projectName: task.projectName || "Unknown",
       areaNumber: task.areaNumber || "N/A",
       pidNumber: task.pidNumber || "N/A",
+      isComplex: task.isComplex || false,
+      description: task.description || "",
     };
   });
 
@@ -281,9 +291,13 @@ const TaskTable: React.FC<TaskTableProps> = ({
         0;
       return sortDirection === "asc" ? aDate - bDate : bDate - aDate;
     }
-    if (sortColumn === "completedLines" || sortColumn === "totalLines") {
-      const aNum = (aValue as number | null) ?? -1;
-      const bNum = (bValue as number | null) ?? -1;
+    if (
+      sortColumn === "completedItems" ||
+      sortColumn === "totalItems" ||
+      sortColumn === "progress"
+    ) {
+      const aNum = (aValue as number) ?? -1;
+      const bNum = (bValue as number) ?? -1;
       return sortDirection === "asc" ? aNum - bNum : bNum - aNum;
     }
     if (typeof aValue === "string" && typeof bValue === "string") {
@@ -298,7 +312,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
 
   const totalPages = Math.ceil(sortedRows.length / tasksPerPage);
   const startIndex = (currentPage - 1) * tasksPerPage;
-  let endIndex = startIndex + tasksPerPage;
+  const endIndex = startIndex + tasksPerPage;
   const paginatedRows = sortedRows.slice(startIndex, endIndex);
 
   const handleSort = (column: keyof (typeof rows)[0]) => {
@@ -377,7 +391,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
             <div className="min-w-[140px]">
               <Select
                 onValueChange={(value) => {
-                  setFilterType(value as TaskType | "All");
+                  setFilterType(value as TaskType | "All" | "Misc");
                   setCurrentPage(1);
                 }}
                 value={filterType}
@@ -390,6 +404,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
                   <SelectItem value="Redline">Redline</SelectItem>
                   <SelectItem value="UPV">UPV</SelectItem>
                   <SelectItem value="QC">QC</SelectItem>
+                  <SelectItem value="Misc">Miscellaneous</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -444,8 +459,9 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 hover:bg-transparent"
                     onClick={() => handleSort("type")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
                     Type
                     <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -454,33 +470,36 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 hover:bg-transparent"
                     onClick={() => handleSort("assignee")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
                     Assignee
                     <ArrowUpDown className="ml-1 h-3 w-3" />
                   </Button>
                 </TableHead>
-                <TableHead className="px-4 py-3">
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("completedLines")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
-                  >
-                    Lines
-                    <ArrowUpDown className="ml-1 h-3 w-3" />
-                  </Button>
-                </TableHead>
-                {showCurrentWork && (
-                  <TableHead className="px-4 py-3 text-xs font-medium text-gray-600">
-                    Current Work
+                {showProgress && (
+                  <TableHead className="px-4 py-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto p-0 hover:bg-transparent"
+                      onClick={() => handleSort("progress")}
+                    >
+                      Progress
+                      <ArrowUpDown className="ml-1 h-3 w-3" />
+                    </Button>
                   </TableHead>
+                )}
+                {showCurrentWork && (
+                  <TableHead className="px-4 py-3">Current Work</TableHead>
                 )}
                 <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 hover:bg-transparent"
                     onClick={() => handleSort("status")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
                     Status
                     <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -489,71 +508,86 @@ const TaskTable: React.FC<TaskTableProps> = ({
                 <TableHead className="px-4 py-3">
                   <Button
                     variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 hover:bg-transparent"
                     onClick={() => handleSort("createdAt")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
                   >
                     Assigned
                     <ArrowUpDown className="ml-1 h-3 w-3" />
                   </Button>
                 </TableHead>
-                <TableHead className="px-4 py-3">
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort("completedTime")}
-                    className="h-auto p-0 text-xs font-medium text-gray-600 hover:text-gray-900"
-                  >
-                    Completed
-                    <ArrowUpDown className="ml-1 h-3 w-3" />
-                  </Button>
-                </TableHead>
+                <TableHead className="px-4 py-3">Completed</TableHead>
                 {showComments && (
-                  <TableHead className="px-4 py-3 text-xs font-medium text-gray-600">
-                    Comments
-                  </TableHead>
+                  <TableHead className="px-4 py-3">Comments</TableHead>
                 )}
+                <TableHead className="px-4 py-3">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedRows.map((row, index) => (
+              {paginatedRows.map((row) => (
                 <TableRow
                   key={row.id}
                   className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
                 >
                   <TableCell className="px-4 py-3">
-                    <Badge variant="outline" className="text-xs font-medium">
-                      {row.type}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs font-medium">
+                        {row.type}
+                      </Badge>
+                      {row.isComplex && (
+                        <Badge variant="secondary" className="text-xs">
+                          Complex
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="px-4 py-3">
                     <span className="text-sm font-medium text-gray-900">
                       {row.assignee}
                     </span>
                   </TableCell>
-                  <TableCell className="px-4 py-3">
-                    {row.completedLines !== null && row.totalLines !== null ? (
-                      <span className="text-sm text-gray-600">
-                        <span className="font-medium text-gray-900">
-                          {row.completedLines}
+                  {showProgress && (
+                    <TableCell className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${row.progress}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-xs text-gray-600 min-w-[3rem]">
+                          {row.progress}%
                         </span>
-                        <span className="text-gray-400 mx-1">/</span>
-                        <span>{row.totalLines}</span>
-                      </span>
-                    ) : row.totalLines === 0 ? (
-                      <span className="text-sm text-gray-400">No Lines</span>
-                    ) : (
-                      <span className="text-sm text-gray-400">—</span>
-                    )}
-                  </TableCell>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {row.completedItems}/{row.totalItems} items
+                      </div>
+                    </TableCell>
+                  )}
                   {showCurrentWork && (
                     <TableCell className="px-4 py-3">
-                      <button
-                        onClick={() =>
-                          onViewCurrentWork?.(row.id, row.assigneeId)
-                        }
-                        className="text-sm text-blue-600 hover:text-blue-700 hover:underline transition-colors"
-                      >
-                        {row.currentWork}
-                      </button>
+                      {onViewCurrentWork ? (
+                        <button
+                          onClick={() =>
+                            onViewCurrentWork(row.id, row.assigneeId)
+                          }
+                          className="text-sm text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
+                          title={getCurrentWork(
+                            tasks.find((t) => t.id === row.id)!
+                          )}
+                        >
+                          {row.currentWork}
+                        </button>
+                      ) : (
+                        <span
+                          className="text-sm text-gray-600"
+                          title={getCurrentWork(
+                            tasks.find((t) => t.id === row.id)!
+                          )}
+                        >
+                          {row.currentWork}
+                        </span>
+                      )}
                     </TableCell>
                   )}
                   <TableCell className="px-4 py-3">
@@ -580,7 +614,7 @@ const TaskTable: React.FC<TaskTableProps> = ({
                         className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                         disabled={!onViewComments}
                       >
-                        Comments
+                        <MessageSquare className="h-3 w-3 mr-1" />
                         {row.comments.length > 0 && (
                           <Badge variant="secondary" className="ml-1 text-xs">
                             {row.comments.length}
@@ -589,6 +623,37 @@ const TaskTable: React.FC<TaskTableProps> = ({
                       </Button>
                     </TableCell>
                   )}
+                  <TableCell className="px-4 py-3">
+                    <div className="flex gap-1">
+                      {showCurrentWork && onViewCurrentWork && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            onViewCurrentWork(row.id, row.assigneeId)
+                          }
+                          className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        >
+                          <Eye className="h-3 w-3" />
+                        </Button>
+                      )}
+
+                      {onSelectTaskForRetract && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const fullTask = tasks.find((t) => t.id === row.id);
+                            onSelectTaskForRetract(fullTask || null);
+                          }}
+                          className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                          disabled={loading || row.status === "Completed"}
+                        >
+                          Retract
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -609,11 +674,11 @@ const TaskTable: React.FC<TaskTableProps> = ({
           </Button>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">
-              {currentPage} of {totalPages}
+              Page {currentPage} of {totalPages}
             </span>
             <span className="text-xs text-gray-400">•</span>
             <span className="text-xs text-gray-400">
-              {sortedRows.length} tasks
+              {sortedRows.length} tasks total
             </span>
           </div>
           <Button

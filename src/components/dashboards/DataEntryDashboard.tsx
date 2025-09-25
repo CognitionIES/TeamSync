@@ -306,7 +306,8 @@ const DataEntryDashboard = () => {
             project_id: selectedProject,
           }));
 
-          // Batch API call to create all lines at once
+          console.log("Line Data being sent:", lineData); // Debug log
+
           await axios.post(
             `${API_URL}/lines/batch`,
             { lines: lineData },
@@ -326,15 +327,20 @@ const DataEntryDashboard = () => {
       pidForm.reset();
     } catch (error: any) {
       console.error("Error submitting P&ID:", error);
+      const axiosError = error as AxiosError<{
+        error: string;
+        message: string;
+      }>;
       const errorMessage =
-        error.response?.data?.message ||
+        axiosError.response?.data?.message ||
+        axiosError.response?.data?.error ||
         "Failed to add P&ID and lines. Please try again.";
       toast.error(errorMessage);
-      if (error.response?.status === 403) {
-        toast.error(
-          "You are not authorized to create P&IDs or lines. Please contact an admin."
-        );
-        navigate("/login", { replace: true });
+      if (axiosError.response?.status === 500) {
+        console.log("Server response:", axiosError.response.data);
+        toast.error("A server error occurred. Check logs or contact support.");
+      } else if (axiosError.response?.status === 400) {
+        toast.error("Invalid data submitted. Please check your input.");
       }
     } finally {
       setIsSubmittingPID(false);
