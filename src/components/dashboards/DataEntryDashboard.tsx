@@ -40,6 +40,7 @@ import { Progress } from "@/components/ui/progress";
 import BackgroundEffect from "../landing/BackgroundEffect";
 import FeatureHighlight from "../landing/FeatureHighlight";
 
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 const DataEntryDashboard = () => {
@@ -55,6 +56,7 @@ const DataEntryDashboard = () => {
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isSubmittingPID, setIsSubmittingPID] = useState(false);
   const [submissionProgress, setSubmissionProgress] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const pidForm = useForm({
     defaultValues: {
@@ -261,6 +263,7 @@ const DataEntryDashboard = () => {
   };
 
   const onPIDSubmit = async (values: any) => {
+    if (isSubmitting) return; // Prevent double submissions
     if (!isProjectSelected) {
       toast.error("Please select a project first");
       return;
@@ -270,6 +273,7 @@ const DataEntryDashboard = () => {
       toast.error("Area Number is required");
       return;
     }
+    setIsSubmitting(true);
 
     try {
       setIsSubmittingPID(true);
@@ -301,7 +305,7 @@ const DataEntryDashboard = () => {
           const lineData = lines.map((lineNumber: string) => ({
             line_number: lineNumber,
             description: `Line ${lineNumber}`,
-            type_id: 1,
+            type_id: 4,
             pid_id: pidId,
             project_id: selectedProject,
           }));
@@ -345,6 +349,7 @@ const DataEntryDashboard = () => {
     } finally {
       setIsSubmittingPID(false);
       setSubmissionProgress(0);
+      setIsSubmitting(false);
     }
   };
 

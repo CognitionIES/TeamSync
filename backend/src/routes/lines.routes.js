@@ -57,6 +57,9 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
 // @desc    Create multiple lines in a batch
 // @route   POST /api/lines/batch
 // @access  Private
+// @desc    Create multiple lines in a batch (OPTIMIZED)
+// @route   POST /api/lines/batch
+// @access  Private
 router.post("/batch", protect, async (req, res) => {
   try {
     const { lines } = req.body;
@@ -67,77 +70,145 @@ router.post("/batch", protect, async (req, res) => {
         .json({ message: "Lines array is required and must not be empty" });
     }
 
-    await db.query("BEGIN");
+    // Pre-validate all data before starting transaction
+    const validationErrors = [];
+    const processedLines = [];
 
-    const createdLines = [];
-    const auditLogEntries = [];
-    const now = new Date();
-
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const { line_number, description, type_id, pid_id, project_id } = line;
 
       if (!line_number || !pid_id || !project_id) {
-        await db.query("ROLLBACK");
-        return res.status(400).json({
-          message:
-            "Line number, P&ID ID, and project ID are required for each line",
-        });
+        validationErrors.push(`Line ${i + 1}: Missing required fields`);
+        continue;
       }
 
       const projectIdNum = parseInt(project_id, 10);
       const pidIdNum = parseInt(pid_id, 10);
-      const typeIdNum = parseInt(type_id, 10);
+      const typeIdNum = type_id ? parseInt(type_id, 10) : null;
 
-      if (isNaN(projectIdNum) || isNaN(pidIdNum) || isNaN(typeIdNum)) {
-        await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({ message: "Invalid numeric fields in one of the lines" });
+      if (
+        isNaN(projectIdNum) ||
+        isNaN(pidIdNum) ||
+        (type_id && isNaN(typeIdNum))
+      ) {
+        validationErrors.push(`Line ${i + 1}: Invalid numeric fields`);
+        continue;
       }
 
-      const projectCheck = await db.query(
-        "SELECT id FROM projects WHERE id = $1",
-        [projectIdNum]
-      );
-      if (projectCheck.rows.length === 0) {
-        await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({ message: "Invalid project ID in one of the lines" });
-      }
-
-      const pidCheck = await db.query(
-        "SELECT id FROM pids WHERE id = $1 AND project_id = $2",
-        [pidIdNum, projectIdNum]
-      );
-      if (pidCheck.rows.length === 0) {
-        await db.query("ROLLBACK");
-        return res.status(400).json({
-          message: "Invalid P&ID ID for this project in one of the lines",
-        });
-      }
-
-      const { rows } = await db.query(
-        "INSERT INTO lines (line_number, description, type_id, pid_id, project_id, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
-        [line_number, description, typeIdNum, pidIdNum, projectIdNum, now]
-      );
-
-      createdLines.push(rows[0]);
-
-      if (req.user) {
-        auditLogEntries.push([
-          "Line Creation",
-          line_number,
-          req.user.id,
-          `Line ${line_number}`,
-          now,
-        ]);
-      }
+      processedLines.push({
+        line_number,
+        description,
+        type_id: typeIdNum,
+        pid_id: pidIdNum,
+        project_id: projectIdNum,
+        index: i + 1,
+      });
     }
 
-    // Batch insert audit logs
-    if (auditLogEntries.length > 0) {
-      const values = auditLogEntries
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: "Validation errors",
+        errors: validationErrors,
+      });
+    }
+
+    await db.query("BEGIN");
+
+    // Batch validate foreign keys
+    const projectIds = [...new Set(processedLines.map((l) => l.project_id))];
+    const pidIds = [...new Set(processedLines.map((l) => l.pid_id))];
+    const typeIds = [
+      ...new Set(processedLines.map((l) => l.type_id).filter(Boolean)),
+    ];
+
+    // Validate projects exist
+    const projectCheck = await db.query(
+      `SELECT id FROM projects WHERE id = ANY($1)`,
+      [projectIds]
+    );
+    const validProjectIds = new Set(projectCheck.rows.map((r) => r.id));
+
+    // Validate PIDs exist and belong to correct projects
+    const pidCheck = await db.query(
+      `SELECT id, project_id FROM pids WHERE id = ANY($1)`,
+      [pidIds]
+    );
+    const validPidMap = new Map(pidCheck.rows.map((r) => [r.id, r.project_id]));
+
+    // Validate line types exist (if any)
+    let validTypeIds = new Set();
+    if (typeIds.length > 0) {
+      const typeCheck = await db.query(
+        `SELECT id FROM line_types WHERE id = ANY($1)`,
+        [typeIds]
+      );
+      validTypeIds = new Set(typeCheck.rows.map((r) => r.id));
+    }
+
+    // Final validation
+    const finalValidationErrors = [];
+    processedLines.forEach((line) => {
+      if (!validProjectIds.has(line.project_id)) {
+        finalValidationErrors.push(
+          `Line ${line.index}: Invalid project ID ${line.project_id}`
+        );
+      }
+      if (!validPidMap.has(line.pid_id)) {
+        finalValidationErrors.push(
+          `Line ${line.index}: Invalid PID ID ${line.pid_id}`
+        );
+      } else if (validPidMap.get(line.pid_id) !== line.project_id) {
+        finalValidationErrors.push(
+          `Line ${line.index}: PID ${line.pid_id} doesn't belong to project ${line.project_id}`
+        );
+      }
+      if (line.type_id && !validTypeIds.has(line.type_id)) {
+        finalValidationErrors.push(
+          `Line ${line.index}: Invalid type ID ${line.type_id}`
+        );
+      }
+    });
+
+    if (finalValidationErrors.length > 0) {
+      await db.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Validation errors",
+        errors: finalValidationErrors,
+      });
+    }
+
+    // Bulk insert using VALUES with multiple rows
+    const now = new Date();
+    const values = processedLines
+      .map(
+        (_, i) =>
+          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${
+            i * 6 + 5
+          }, $${i * 6 + 6})`
+      )
+      .join(", ");
+
+    const flatValues = processedLines.flatMap((line) => [
+      line.line_number,
+      line.description,
+      line.type_id,
+      line.pid_id,
+      line.project_id,
+      now,
+    ]);
+
+    const insertQuery = `
+      INSERT INTO lines (line_number, description, type_id, pid_id, project_id, created_at) 
+      VALUES ${values} 
+      RETURNING *
+    `;
+
+    const { rows: createdLines } = await db.query(insertQuery, flatValues);
+
+    // Batch insert audit logs if needed
+    if (req.user && createdLines.length > 0) {
+      const auditValues = createdLines
         .map(
           (_, i) =>
             `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${
@@ -145,15 +216,26 @@ router.post("/batch", protect, async (req, res) => {
             })`
         )
         .join(", ");
-      const flatValues = auditLogEntries.flat();
+
+      const auditFlatValues = createdLines.flatMap((line) => [
+        "Line Creation",
+        line.line_number,
+        req.user.id,
+        `Line ${line.line_number}`,
+        now,
+      ]);
+
       await db.query(
-        `INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ${values}`,
-        flatValues
+        `INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ${auditValues}`,
+        auditFlatValues
       );
     }
 
     await db.query("COMMIT");
-    res.status(201).json({ data: createdLines });
+    res.status(201).json({
+      data: createdLines,
+      message: `Successfully created ${createdLines.length} lines`,
+    });
   } catch (error) {
     await db.query("ROLLBACK");
     console.error("Error creating lines batch:", error.stack);
