@@ -6,14 +6,18 @@ const { protect } = require("../middleware/auth");
 // @desc    Fetch unassigned non-inline instruments for a project
 // @route   GET /api/non-inline-instruments/unassigned/:projectId
 // @access  Private
+// The unassigned route already exists, just add the taskType filter:
+// In non-inline-instruments.routes.js, update the /unassigned/:projectId route:
 router.get("/unassigned/:projectId", protect, async (req, res) => {
   try {
     const projectId = parseInt(req.params.projectId);
+    const { taskType } = req.query; // NEW
+
     if (isNaN(projectId)) {
       return res.status(400).json({ message: "Invalid project ID" });
     }
 
-    const query = `
+    let query = `
       SELECT 
         ni.id,
         ni.instrument_tag,
@@ -26,21 +30,25 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
         AND ti.id IS NULL
         AND ni.assigned_to IS NULL
     `;
+
+    // NEW: Filter by UPV completion for QC
+    if (taskType === "QC") {
+      query += ` AND ni.upv_completed = true`;
+    }
+
     const { rows } = await db.query(query, [projectId]);
-    console.log(
-      `Fetched unassigned non-inline instruments for project ${projectId}:`,
-      rows
-    );
+
+    if (rows.length === 0) {
+      const message =
+        taskType === "QC"
+          ? "No UPV-completed non-inline instruments available for QC."
+          : "No unassigned non-inline instruments found.";
+      return res.status(200).json({ data: [], message });
+    }
 
     res.status(200).json({ data: rows });
   } catch (error) {
-    console.error("Error fetching unassigned non-inline instruments:", {
-      message: error.message,
-      stack: error.stack,
-      code: error.code,
-      detail: error.detail,
-      hint: error.hint,
-    });
+    console.error("Error fetching unassigned non-inline instruments:", error);
     res.status(500).json({
       message: "Failed to fetch unassigned non-inline instruments",
       error: error.message,

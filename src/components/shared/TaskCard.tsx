@@ -220,6 +220,7 @@ const TaskCard = ({
         <div className="space-y-3">
           {task.items.map((item) => {
             const [blocks, setBlocks] = useState(item.blocks || 0);
+            const [isCheckboxUpdating, setIsCheckboxUpdating] = useState(false); // NEW
             const isEditable = task.status === "In Progress" && !item.completed;
             const isCheckable = isEditable && blocks > 0;
             const category = getCategory(item.type, task.type);
@@ -239,20 +240,26 @@ const TaskCard = ({
                           checked={item.completed}
                           disabled={
                             isUpdating ||
+                            isCheckboxUpdating || // NEW
                             item.completed ||
                             (task.status !== "In Progress" &&
                               !item.completed) ||
                             !isCheckable
                           }
-                          onCheckedChange={(checked: boolean) => {
+                          onCheckedChange={async (checked: boolean) => {
                             if (checked && !item.completed) {
-                              handleItemToggle(
-                                task.id,
-                                item.id,
-                                true,
-                                category,
-                                blocks
-                              );
+                              setIsCheckboxUpdating(true); // NEW - Disable immediately
+                              try {
+                                await handleItemToggle(
+                                  task.id,
+                                  item.id,
+                                  true,
+                                  category,
+                                  blocks
+                                );
+                              } finally {
+                                setIsCheckboxUpdating(false); // NEW
+                              }
                             }
                           }}
                           className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
@@ -260,11 +267,18 @@ const TaskCard = ({
                         <label
                           htmlFor={`item-${item.id}`}
                           className={cn(
-                            "text-sm text-gray-800",
+                            "text-sm text-gray-800 flex-1",
                             item.completed && "line-through text-gray-400"
                           )}
                         >
                           {item.type}: {item.name}
+                          {/* NEW - Show block count */}
+                          {item.blocks > 0 && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              ({item.blocks}{" "}
+                              {item.blocks === 1 ? "block" : "blocks"})
+                            </span>
+                          )}
                         </label>
                       </div>
                     </TooltipTrigger>

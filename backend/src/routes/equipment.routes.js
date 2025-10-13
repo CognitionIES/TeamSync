@@ -141,12 +141,10 @@ router.post("/batch", protect, async (req, res) => {
 
       if (!equipmentNumber || !areaId || !projectId) {
         await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            message:
-              "equipmentNumber, areaId, and projectId are required for each equipment",
-          });
+        return res.status(400).json({
+          message:
+            "equipmentNumber, areaId, and projectId are required for each equipment",
+        });
       }
 
       const { rows: projectRows } = await db.query(
@@ -166,11 +164,9 @@ router.post("/batch", protect, async (req, res) => {
       );
       if (areaRows.length === 0) {
         await db.query("ROLLBACK");
-        return res
-          .status(404)
-          .json({
-            message: `Area with ID ${areaId} not found in project ${projectId}`,
-          });
+        return res.status(404).json({
+          message: `Area with ID ${areaId} not found in project ${projectId}`,
+        });
       }
 
       const { rows: existingEquipment } = await db.query(
@@ -179,11 +175,9 @@ router.post("/batch", protect, async (req, res) => {
       );
       if (existingEquipment.length > 0) {
         await db.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            message: `Equipment number ${equipmentNumber} already exists in project ${projectId}`,
-          });
+        return res.status(400).json({
+          message: `Equipment number ${equipmentNumber} already exists in project ${projectId}`,
+        });
       }
 
       const { rows: newEquipmentRows } = await db.query(
@@ -236,5 +230,79 @@ router.post("/batch", protect, async (req, res) => {
       .json({ message: "Failed to add equipment", error: error.message });
   }
 });
+// @desc    Get all unassigned equipment for a project
+// @route   GET /api/equipment/unassigned/:projectId
+// @access  Private (Team Lead)
+// In equipment.routes.js, update the /unassigned/:projectId route:
+router.get("/unassigned/:projectId", protect, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { taskType } = req.query;
 
+    const projectIdNum = parseInt(projectId, 10);
+    if (isNaN(projectIdNum)) {
+      return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    if (req.user.role !== "Team Lead") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to view unassigned equipment`,
+      });
+    }
+
+    const projectCheck = await db.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [projectIdNum]
+    );
+    if (projectCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    // Build query based on table structure
+    let query = `
+      SELECT e.id, e.equipment_number, e.area_id, e.project_id
+      FROM equipment e
+      LEFT JOIN task_items ti ON e.id = ti.item_id AND ti.item_type = 'Equipment'
+      WHERE e.project_id = $1 AND ti.id IS NULL
+    `;
+
+    // Filter by UPV completion for QC tasks (only if column exists)
+    if (taskType === "QC") {
+      // Check if upv_completed column exists
+      const columnCheck = await db.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'equipment' AND column_name = 'upv_completed'
+      `);
+
+      if (columnCheck.rows.length > 0) {
+        query += ` AND e.upv_completed = true`;
+      }
+    }
+
+    const { rows } = await db.query(query, [projectIdNum]);
+
+    if (rows.length === 0) {
+      const message =
+        taskType === "QC"
+          ? "No UPV-completed equipment available for QC assignment."
+          : "No unassigned equipment found.";
+      return res.status(200).json({ data: [], message });
+    }
+
+    res.status(200).json({ data: rows });
+  } catch (error) {
+    console.error("Error fetching unassigned equipment:", {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      detail: error.detail,
+    });
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+      detail: error.detail,
+    });
+  }
+});
 module.exports = router;

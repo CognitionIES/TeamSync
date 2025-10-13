@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -60,7 +61,7 @@ const TeamMemberDashboard = () => {
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
 
   const token = localStorage.getItem("teamsync_token");
-  const currentDate = formatDate(new Date().toISOString());
+  const currentDate = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
     if (!isAuthenticated || !token) {
@@ -80,10 +81,13 @@ const TeamMemberDashboard = () => {
     try {
       setIsLoading(true);
       const response = await axios.get<{ data: any[] }>(
-        `${API_URL}/tasks`, // Remove the assigneeId query param as the backend already filters by user
+        `${API_URL}/tasks`,
         getAuthHeaders()
       );
-      console.log("Raw tasks data:", response.data.data); // Debug log
+      console.log(
+        "Raw tasks data from API:",
+        JSON.stringify(response.data.data, null, 2)
+      ); // Debug raw response
 
       const tasksData = response.data.data
         .map((task) => ({
@@ -100,19 +104,28 @@ const TeamMemberDashboard = () => {
           projectId: task.project_id?.toString() || "Unknown",
           projectName: task.project_name || "Unknown",
           areaNumber: task.area_name || "N/A",
-          items: (task.items || []).map((item) => ({
-            id: item.id.toString(),
-            name: item.name || "Unnamed Item",
-            type: item.item_type || "Unknown",
-            completed: item.completed || false,
-            entityId:
-              item.line_id ||
-              (item.item_type.toLowerCase().includes("line") ||
-              item.item_type === "NonInlineInstrument"
-                ? 1
-                : null),
-            blocks: item.blocks || 0,
-          })),
+          pidNumber: task.pid_number ?? "",
+          items: (task.items || []).map((item) => {
+            const blocks =
+              item.blocks !== undefined && item.blocks !== null
+                ? Number(item.blocks)
+                : 0;
+            console.log(`Mapping item ${item.id}: blocks=${blocks}`); // Debug each item
+            return {
+              id: item.id.toString(),
+              name: item.name || "Unnamed Item",
+              type: item.item_type || "Unknown",
+              completed: item.completed || false,
+              completedAt: item.completed_at || null,
+              entityId:
+                item.line_id ||
+                (item.item_type.toLowerCase().includes("line") ||
+                item.item_type === "NonInlineInstrument"
+                  ? 1
+                  : null),
+              blocks, // Ensure blocks is set
+            };
+          }),
           comments: (task.comments || []).map((comment) => ({
             id: comment.id.toString(),
             userId: comment.user_id.toString(),
@@ -122,7 +135,6 @@ const TeamMemberDashboard = () => {
             createdAt: comment.created_at,
           })),
           description: task.description || "",
-          pidNumber: task.pid_number ?? "",
           lines: (task.items || [])
             .filter((item) => item.type === "Line" || item.type === "Line Item")
             .map((item) => ({
@@ -132,10 +144,9 @@ const TeamMemberDashboard = () => {
               completed: item.completed,
             })),
         }))
-        // FIXED: Only filter by assigneeId, don't exclude "Assigned" status
         .filter((task) => task.assigneeId === user?.id?.toString());
 
-      console.log("Processed tasks data:", tasksData); // Debug log
+      console.log("Processed tasks data:", JSON.stringify(tasksData, null, 2)); // Debug processed data
       setTasks(tasksData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -147,14 +158,10 @@ const TeamMemberDashboard = () => {
       setIsLoading(false);
     }
   };
-
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
       fetchTasks();
       fetchMetrics();
-      // Increased polling frequency to catch new assignments quickly
-      const interval = setInterval(fetchTasks, 10000); // Poll every 10 seconds
-      return () => clearInterval(interval);
     }
   }, [isAuthenticated, user, token]);
 
@@ -163,7 +170,7 @@ const TeamMemberDashboard = () => {
       const response = await axios.get<{
         data: { item_type: string; count: number; blocks: number }[];
       }>(
-        `${API_URL}/metrics/daily?userId=${user?.id}&date=${currentDate}`,
+        `${API_URL}/metrics/individual/all?date=${currentDate}`,
         getAuthHeaders()
       );
       setMetrics(response.data.data);
@@ -174,13 +181,6 @@ const TeamMemberDashboard = () => {
       );
     }
   };
-
-  useEffect(() => {
-    if (isAuthenticated && user?.role === "Team Member" && token) {
-      fetchTasks();
-      fetchMetrics();
-    }
-  }, [isAuthenticated, user, token]);
 
   const handleRefresh = () => {
     fetchTasks().catch(() => toast.error("Failed to refresh tasks"));
@@ -215,17 +215,10 @@ const TeamMemberDashboard = () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
+
       const effectiveBlocks = blocks !== undefined && blocks >= 0 ? blocks : 0;
-      const response = await axios.patch(
-        `${API_URL}/tasks/${taskId}/items/${itemId}`,
-        { completed, blocks: effectiveBlocks },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Cache-Control": "no-cache",
-          },
-        }
-      );
+
+      // IMMEDIATE optimistic update to prevent double-click
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId
@@ -240,20 +233,31 @@ const TeamMemberDashboard = () => {
             : task
         )
       );
-      await fetchMetrics(); // Refresh metrics after item toggle
+
+      const response = await axios.patch(
+        `${API_URL}/tasks/${taskId}/items/${itemId}`,
+        { completed, blocks: effectiveBlocks },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      // Refresh after successful update
+      await fetchTasks();
+      await fetchMetrics();
       toast.success("Task item updated successfully");
     } catch (error) {
+      // Revert on error
+      await fetchTasks();
       const axiosError = error as AxiosError<{ message?: string }>;
-      console.error(
-        "Axios error details:",
-        axiosError.response?.data || axiosError
-      );
       toast.error(
         axiosError.response?.data?.message || "Failed to update task item"
       );
     }
   };
-
   const handleOpenComments = (task: Task) => {
     setSelectedTask(task);
     setIsCommentsOpen(true);
@@ -275,15 +279,23 @@ const TeamMemberDashboard = () => {
 
   if (!isAuthenticated || user?.role !== "Team Member" || !token) return null;
 
-  const assignedTasks = tasks.filter(
-    (task) => task.status === "Assigned" // Use exact match for consistency
-  );
+  const assignedTasks = tasks.filter((task) => task.status === "Assigned");
   const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
-  const completedTasks = tasks.filter((task) => task.status === "Completed");
+  const completedTasks = tasks
+    .filter((task) => task.status === "Completed")
+    .sort(
+      (a, b) =>
+        new Date(b.completedAt || 0).getTime() -
+        new Date(a.completedAt || 0).getTime()
+    );
   const taskCounts = {
     assigned: assignedTasks.length,
     inProgress: inProgressTasks.length,
     completed: completedTasks.length,
+  };
+
+  const getTotalBlocks = (task: Task) => {
+    return task.items.reduce((sum, item) => sum + (item.blocks || 0), 0);
   };
 
   return (
@@ -308,7 +320,6 @@ const TeamMemberDashboard = () => {
               {getRandomMessage("general") || "Stay on top of your tasks!"}
             </AlertDescription>
           </div>
-          {/* Debug info - remove in production */}
           {process.env.NODE_ENV === "development" && (
             <div className="mt-2 text-xs text-gray-500">
               Total tasks loaded: {tasks.length} | User ID: {user?.id} | Last
@@ -330,7 +341,6 @@ const TeamMemberDashboard = () => {
           </Alert>
         )}
 
-        {/* Metrics Display */}
         <div className="mb-6">
           <h2 className="text-lg font-semibold mb-4">Daily Metrics</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -350,7 +360,6 @@ const TeamMemberDashboard = () => {
           </div>
         </div>
 
-        {/* Mobile view tabs */}
         <div className="block md:hidden mb-6">
           <Tabs defaultValue="assigned">
             <TabsList className="grid grid-cols-3 mb-4">
@@ -374,21 +383,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   ) : (
@@ -396,21 +391,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   )
@@ -431,22 +412,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   ) : (
@@ -454,22 +420,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   )
@@ -484,21 +435,50 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : completedTasks.length > 0 ? (
-                completedTasks.map((task) =>
-                  task.type === "Redline" ? (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                completedTasks.map((task) => (
+                  <Collapsible key={task.id} defaultOpen={false}>
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        className="flex w-full justify-between items-center h-[60px] p-3 bg-green-50 hover:bg-green-100 rounded-lg shadow-sm transition-all duration-200"
+                      >
+                        <div className="flex flex-col items-start text-left">
+                          <span className="font-semibold text-sm text-green-800 truncate">
+                            {task.type} - {task.projectName} - Area No:{" "}
+                            {task.areaNumber} - Blocks: {getTotalBlocks(task)}
+                          </span>
+                          <div className="text-xs text-gray-600 mt-1">
+                            <span>Assigned: {formatDate(task.createdAt)}</span>
+                            {task.completedAt && (
+                              <span className="ml-2">
+                                Completed: {formatDate(task.completedAt)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <ChevronDown className="h-4 w-4 CollapsibleChevron text-green-600" />
+                          <ChevronUp className="h-4 w-4 hidden CollapsibleChevron text-green-600" />
+                        </div>
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
+                      <div className="border-l-2 border-green-200 pl-4">
+                        {task.type === "Redline" ? (
+                          <RedlineTaskCard
+                            task={task}
+                            onOpenComments={handleOpenComments}
+                          />
+                        ) : (
+                          <TaskCard
+                            task={task}
+                            onOpenComments={handleOpenComments}
+                          />
+                        )}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                ))
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No completed tasks"}
@@ -508,7 +488,6 @@ const TeamMemberDashboard = () => {
           </Tabs>
         </div>
 
-        {/* Desktop view - rest remains the same */}
         <div className="hidden md:grid md:grid-cols-3 gap-6">
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
@@ -525,21 +504,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   ) : (
@@ -547,21 +512,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   )
@@ -588,22 +539,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   ) : (
@@ -611,22 +547,7 @@ const TeamMemberDashboard = () => {
                       key={task.id}
                       task={task}
                       onStatusChange={handleStatusChange}
-                      onItemToggle={(
-                        taskId,
-                        itemId,
-                        completed,
-                        category,
-                        blocks
-                      ) =>
-                        handleItemToggle(
-                          taskId,
-                          task.items.find((i) => i.id === itemId)?.item_id ||
-                            itemId,
-                          completed,
-                          category,
-                          blocks
-                        )
-                      }
+                      onItemToggle={handleItemToggle}
                       onOpenComments={handleOpenComments}
                     />
                   )
@@ -657,7 +578,7 @@ const TeamMemberDashboard = () => {
                         <div className="flex flex-col items-start text-left">
                           <span className="font-semibold text-sm text-green-800 truncate">
                             {task.type} - {task.projectName} - Area No:{" "}
-                            {task.areaNumber}
+                            {task.areaNumber} - Blocks: {getTotalBlocks(task)}
                           </span>
                           <div className="text-xs text-gray-600 mt-1">
                             <span>Assigned: {formatDate(task.createdAt)}</span>

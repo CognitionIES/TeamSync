@@ -28,6 +28,7 @@ router.get("/role/:role", getUsersByRole);
 router.use(protect);
 
 // Fetch team members (for Team Lead dashboard dropdown)
+// In users.routes.js, replace the /team-members route (lines 26-56):
 router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
@@ -39,7 +40,9 @@ router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
 
     console.log("Fetching team members for Team Lead ID:", req.user.id);
     console.log("User role:", req.user.role);
-    const { rows } = await db.query(
+
+    // Fetch team members
+    const { rows: memberRows } = await db.query(
       `
       SELECT u.id, u.name, u.role
       FROM users u
@@ -51,16 +54,31 @@ router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
       `,
       [req.user.id]
     );
-    console.log("Team members fetched:", rows);
-    if (rows.length === 0) {
-      console.log("No team members found for Team Lead ID:", req.user.id);
+
+    // Fetch the team lead themselves
+    const { rows: leadRows } = await db.query(
+      `
+      SELECT id, name, role
+      FROM users
+      WHERE id = $1
+      `,
+      [req.user.id]
+    );
+
+    // Combine team lead + team members
+    const allMembers = [...leadRows, ...memberRows];
+
+    console.log("Team members + lead fetched:", allMembers);
+
+    if (allMembers.length === 1) {
+      // Only the lead, no team members
       return res.status(200).json({
-        data: [],
-        message:
-          "No team members found for this Team Lead. Please contact an Admin to assign team members.",
+        data: allMembers,
+        message: "No team members found. You can assign tasks to yourself.",
       });
     }
-    res.status(200).json({ data: rows });
+
+    res.status(200).json({ data: allMembers });
   } catch (error) {
     console.error("Error fetching team members:", error.message, error.stack);
     res.status(500).json({
@@ -130,22 +148,22 @@ router.get("/", async (req, res) => {
   }
 });
 
-// New route: Fetch assigned items for a specific user
 // Fetch assigned items for a specific user
-// Fetch assigned items for a specific user
-router.get("/:userId/assigned-items/:taskId", async (req, res) => {
+router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
   console.log(
     `Received request for /api/users/${req.params.userId}/assigned-items/${req.params.taskId}`
   );
+  console.log(`Logged in user: ${req.user.id}, role: ${req.user.role}`);
+  console.log(`Requested user: ${req.params.userId}`);
+
   try {
-    // Role-based access control
+    // Allow Team Lead, Admin, Project Manager
     if (!["Team Lead", "Admin", "Project Manager"].includes(req.user.role)) {
       return res
         .status(403)
         .json({ message: "Not authorized to view assigned items" });
     }
 
-    // Validate userId and taskId
     const userId = parseInt(req.params.userId, 10);
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -156,32 +174,45 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       return res.status(400).json({ message: "Invalid task ID" });
     }
 
-    // Team Lead access control: ensure user is a team member under this lead
+    // Team Lead access control
     if (req.user.role === "Team Lead") {
       console.log(
-        `Checking team member relationship: member_id=${userId}, lead_id=${req.user.id}`
+        `Checking access: userId=${userId}, req.user.id=${req.user.id}`
       );
-      const { rows: teamMemberCheck } = await db.query(
-        "SELECT 1 FROM team_members WHERE member_id = $1 AND lead_id = $2",
-        [userId, req.user.id]
-      );
-      if (teamMemberCheck.length === 0) {
-        return res
-          .status(403)
-          .json({ message: "User is not a team member under this lead" });
+
+      // Allow if viewing own tasks OR team member's tasks
+      if (userId.toString() !== req.user.id.toString()) {
+        console.log(`Not viewing own tasks, checking team membership`);
+        const { rows: teamMemberCheck } = await db.query(
+          "SELECT 1 FROM team_members WHERE member_id = $1 AND lead_id = $2",
+          [userId, req.user.id]
+        );
+
+        console.log(`Team member check result:`, teamMemberCheck);
+
+        if (teamMemberCheck.length === 0) {
+          console.log(
+            `Access denied: user ${userId} is not a team member of lead ${req.user.id}`
+          );
+          return res.status(403).json({
+            message: "User is not a team member under this lead",
+          });
+        }
+      } else {
+        console.log(`Viewing own tasks - access granted`);
       }
     }
 
-    // Fetch the specific task for the user
+    // Rest of the code continues unchanged...
     const { rows: tasks } = await db.query(
       "SELECT id, type FROM tasks WHERE assignee_id = $1 AND id = $2",
       [userId, taskId]
     );
+
     if (tasks.length === 0) {
       return res.status(404).json({ message: "Task not found for this user" });
     }
 
-    // Initialize response structure
     const response = {
       data: {
         upvLines: { count: 0, items: [] },
@@ -192,7 +223,6 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       },
     };
 
-    // Process the single task
     const task = tasks[0];
     const taskIdFromTask = task.id;
     const taskType = task.type;
@@ -201,20 +231,16 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       `Fetching items for task ${taskIdFromTask} (type: ${taskType})`
     );
 
-    // Fetch items based on task type using JOINs to include project_name and area_number
     if (taskType === "Redline") {
       const { rows: pidRows } = await db.query(
-        `
-        SELECT p.id, p.pid_number, p.project_id, pr.name AS project_name, a.name AS area_number
-        FROM task_items ti
-        JOIN pids p ON ti.item_id = p.id
-        JOIN projects pr ON p.project_id = pr.id
-        LEFT JOIN areas a ON p.area_id = a.id
-        WHERE ti.task_id = $1 AND ti.item_type = 'PID'
-      `,
+        `SELECT p.id, p.pid_number, p.project_id, pr.name AS project_name, a.name AS area_number
+         FROM task_items ti
+         JOIN pids p ON ti.item_id = p.id
+         JOIN projects pr ON p.project_id = pr.id
+         LEFT JOIN areas a ON p.area_id = a.id
+         WHERE ti.task_id = $1 AND ti.item_type = 'PID'`,
         [taskIdFromTask]
       );
-      console.log("Raw pidRows:", pidRows); // Debug log
       response.data.redlinePIDs.items = pidRows.map((pid) => ({
         id: pid.id.toString(),
         pid_number: pid.pid_number,
@@ -225,18 +251,14 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       response.data.redlinePIDs.count = pidRows.length;
     } else if (taskType === "UPV") {
       const { rows: lineRows } = await db.query(
-        `
-        SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
-        FROM task_items ti
-        JOIN lines l ON ti.item_id = l.id
-        JOIN projects pr ON l.project_id = pr.id
-        LEFT JOIN pids p ON l.pid_id = p.id
-        LEFT JOIN areas a ON p.area_id = a.id
-        WHERE ti.task_id = $1 AND ti.item_type = 'Line'
-      `,
+        `SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
+         FROM task_items ti
+         JOIN lines l ON ti.item_id = l.id
+         JOIN projects pr ON l.project_id = pr.id
+         LEFT JOIN areas a ON l.area_id = a.id
+         WHERE ti.task_id = $1 AND ti.item_type = 'Line'`,
         [taskIdFromTask]
       );
-      console.log("Raw lineRows (UPV):", lineRows); // Debug log
       response.data.upvLines.items = lineRows.map((line) => ({
         id: line.id.toString(),
         line_number: line.line_number,
@@ -247,17 +269,14 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       response.data.upvLines.count = lineRows.length;
 
       const { rows: equipRows } = await db.query(
-        `
-        SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
-        FROM task_items ti
-        JOIN equipment e ON ti.item_id = e.id
-        JOIN projects pr ON e.project_id = pr.id
-        LEFT JOIN areas a ON e.area_id = a.id
-        WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
-      `,
+        `SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
+         FROM task_items ti
+         JOIN equipment e ON ti.item_id = e.id
+         JOIN projects pr ON e.project_id = pr.id
+         LEFT JOIN areas a ON e.area_id = a.id
+         WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'`,
         [taskIdFromTask]
       );
-      console.log("Raw equipRows (UPV):", equipRows); // Debug log
       response.data.upvEquipment.items = equipRows.map((equip) => ({
         id: equip.id.toString(),
         equipment_name: equip.equipment_name,
@@ -268,18 +287,14 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       response.data.upvEquipment.count = equipRows.length;
     } else if (taskType === "QC") {
       const { rows: lineRows } = await db.query(
-        `
-        SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
-        FROM task_items ti
-        JOIN lines l ON ti.item_id = l.id
-        JOIN projects pr ON l.project_id = pr.id
-        LEFT JOIN pids p ON l.pid_id = p.id
-        LEFT JOIN areas a ON p.area_id = a.id
-        WHERE ti.task_id = $1 AND ti.item_type = 'Line'
-      `,
+        `SELECT l.id, l.line_number, l.project_id, pr.name AS project_name, a.name AS area_number
+         FROM task_items ti
+         JOIN lines l ON ti.item_id = l.id
+         JOIN projects pr ON l.project_id = pr.id
+         LEFT JOIN areas a ON l.area_id = a.id
+         WHERE ti.task_id = $1 AND ti.item_type = 'Line'`,
         [taskIdFromTask]
       );
-      console.log("Raw lineRows (QC):", lineRows); // Debug log
       response.data.qcLines.items = lineRows.map((line) => ({
         id: line.id.toString(),
         line_number: line.line_number,
@@ -290,17 +305,14 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       response.data.qcLines.count = lineRows.length;
 
       const { rows: equipRows } = await db.query(
-        `
-        SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
-        FROM task_items ti
-        JOIN equipment e ON ti.item_id = e.id
-        JOIN projects pr ON e.project_id = pr.id
-        LEFT JOIN areas a ON e.area_id = a.id
-        WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'
-      `,
+        `SELECT e.id, e.equipment_number AS equipment_name, e.project_id, pr.name AS project_name, a.name AS area_number
+         FROM task_items ti
+         JOIN equipment e ON ti.item_id = e.id
+         JOIN projects pr ON e.project_id = pr.id
+         LEFT JOIN areas a ON e.area_id = a.id
+         WHERE ti.task_id = $1 AND ti.item_type = 'Equipment'`,
         [taskIdFromTask]
       );
-      console.log("Raw equipRows (QC):", equipRows); // Debug log
       response.data.qcEquipment.items = equipRows.map((equip) => ({
         id: equip.id.toString(),
         equipment_name: equip.equipment_name,
@@ -311,7 +323,7 @@ router.get("/:userId/assigned-items/:taskId", async (req, res) => {
       response.data.qcEquipment.count = equipRows.length;
     }
 
-    console.log("Final API Response:", response); // Debug log
+    console.log("Final API Response:", response);
     res.status(200).json(response);
   } catch (error) {
     console.error("Error fetching assigned items:", error.message, error.stack);

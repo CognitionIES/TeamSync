@@ -405,6 +405,9 @@ const TeamLeadDashboard = () => {
   const fetchLines = async () => {
     if (!selectedProject) return;
     try {
+      // NEW: Add taskType query param for QC filtering
+      const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
+
       const response = await axios.get<{
         data: {
           id: number;
@@ -412,7 +415,11 @@ const TeamLeadDashboard = () => {
           pid_id: number;
           pid_number: string;
         }[];
-      }>(`${API_URL}/lines/unassigned/${selectedProject}`, getAuthHeaders());
+      }>(
+        `${API_URL}/lines/unassigned/${selectedProject}${taskTypeParam}`,
+        getAuthHeaders()
+      );
+
       const linesData = response.data.data
         .filter(
           (line) =>
@@ -424,13 +431,18 @@ const TeamLeadDashboard = () => {
           name: line.line_number,
           pidId: line.pid_id.toString(),
         }));
-      console.log(`Fetched lines for project ${selectedProject}:`, linesData);
+
       setLines(linesData);
       setSelectedLines((prev) =>
         prev.filter((lineId) => linesData.some((line) => line.id === lineId))
       );
+
       if (linesData.length === 0) {
-        toast.info("No unassigned lines available for this project.");
+        const message =
+          taskType === "QC"
+            ? "No UPV-completed lines available for QC assignment."
+            : "No unassigned lines available for this project.";
+        toast.info(message);
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -446,6 +458,8 @@ const TeamLeadDashboard = () => {
   const fetchEquipment = async () => {
     if (!selectedProject) return;
     try {
+      const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
+
       const response = await axios.get<{
         data: {
           id: number;
@@ -453,9 +467,12 @@ const TeamLeadDashboard = () => {
           area_id?: number;
           project_id: number;
         }[];
-      }>(`${API_URL}/equipment`, getAuthHeaders());
+      }>(
+        `${API_URL}/equipment/unassigned/${selectedProject}${taskTypeParam}`,
+        getAuthHeaders()
+      );
+
       const equipmentData = response.data.data
-        .filter((equip) => equip.project_id.toString() === selectedProject)
         .filter(
           (equip) =>
             !assignedItemsForDuplicates.upvEquipment.includes(
@@ -470,14 +487,20 @@ const TeamLeadDashboard = () => {
           name: equip.equipment_number,
           areaId: equip.area_id?.toString() || "",
         }));
+
       setEquipment(equipmentData);
       setSelectedEquipment((prev) =>
         prev.filter((equipId) =>
           equipmentData.some((equip) => equip.id === equipId)
         )
       );
+
       if (equipmentData.length === 0) {
-        toast.info("No unassigned equipment available for this project.");
+        const message =
+          taskType === "QC"
+            ? "No UPV-completed equipment available for QC assignment."
+            : "No unassigned equipment available for this project.";
+        toast.info(message);
       }
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -490,6 +513,49 @@ const TeamLeadDashboard = () => {
     }
   };
 
+  const fetchNonInlineInstruments = async () => {
+    if (!selectedProject) return;
+    try {
+      const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
+
+      const response = await axios.get<{
+        data: { id: number; instrument_tag: string; description: string }[];
+      }>(
+        `${API_URL}/non-inline-instruments/unassigned/${selectedProject}${taskTypeParam}`,
+        getAuthHeaders()
+      );
+
+      const instrumentsData = response.data.data.map((instrument) => ({
+        id: instrument.id.toString(),
+        instrumentTag: instrument.instrument_tag,
+        description: instrument.description,
+      }));
+
+      setNonInlineInstruments(instrumentsData);
+      setSelectedNonInlineInstruments((prev) =>
+        prev.filter((id) =>
+          instrumentsData.some((instrument) => instrument.id === id)
+        )
+      );
+
+      if (instrumentsData.length === 0) {
+        const message =
+          taskType === "QC"
+            ? "No UPV-completed non-inline instruments available for QC assignment."
+            : "No unassigned non-inline instruments available for this project.";
+        toast.info(message);
+      }
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching non-inline instruments:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message ||
+          "Failed to fetch non-inline instruments"
+      );
+      setNonInlineInstruments([]);
+      setSelectedNonInlineInstruments([]);
+    }
+  };
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
@@ -716,7 +782,7 @@ const TeamLeadDashboard = () => {
   }, [isAuthenticated, user, token]);
 
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedProject && taskType) {
       Promise.all([
         fetchPIDs(),
         fetchLines(),
@@ -728,7 +794,7 @@ const TeamLeadDashboard = () => {
         toast.error("Failed to load dashboard data");
       });
     }
-  }, [selectedProject]);
+  }, [selectedProject, taskType]);
 
   useEffect(() => {
     const upvLines: string[] = [];
@@ -1168,41 +1234,37 @@ const TeamLeadDashboard = () => {
       }
     }
   };
-
+  // const lineCount = 10;
   // Handler for group selection of Lines
   const handleLineCheckboxChange = (
     lineId: string,
     index: number,
     checked: boolean
   ) => {
-    if (groupSelectCount > 1) {
-      const startIndex = index;
-      const endIndex = Math.min(startIndex + groupSelectCount, lines.length);
-      const linesToSelect = lines
-        .slice(startIndex, endIndex)
-        .map((line) => line.id);
+    setSelectedLines((prev) => {
+      let newSelected = [...prev];
       if (checked) {
-        const newSelectedLines = [
-          ...new Set([...selectedLines, ...linesToSelect]),
-        ];
-        setSelectedLines(newSelectedLines);
-        toast.success(`Selected ${linesToSelect.length} lines`);
+        if (!newSelected.includes(lineId)) {
+          newSelected.push(lineId);
+          // Auto-select next N-1 lines based on groupSelectCount
+          const remainingCount = groupSelectCount - 1; // Changed from lineCount
+          if (remainingCount > 0) {
+            const availableLines = lines
+              .slice(index + 1)
+              .filter((line) => !newSelected.includes(line.id))
+              .slice(0, remainingCount);
+            newSelected = [
+              ...newSelected,
+              ...availableLines.map((line) => line.id),
+            ];
+          }
+        }
       } else {
-        const newSelectedLines = selectedLines.filter(
-          (id) => !linesToSelect.includes(id)
-        );
-        setSelectedLines(newSelectedLines);
-        toast.success(`Deselected ${linesToSelect.length} lines`);
+        newSelected = newSelected.filter((id) => id !== lineId);
       }
-    } else {
-      if (checked) {
-        setSelectedLines([...selectedLines, lineId]);
-      } else {
-        setSelectedLines(selectedLines.filter((id) => id !== lineId));
-      }
-    }
+      return newSelected;
+    });
   };
-
   // Handler for group selection of Equipment
   const handleEquipmentCheckboxChange = (
     equipId: string,
@@ -1240,135 +1302,97 @@ const TeamLeadDashboard = () => {
     }
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (tasks.length === 0) {
       toast.error("No tasks available to export.");
       return;
     }
 
-    // Define CSV headers
-    const headers = [
-      "Task ID",
-      "Task Type",
-      "Assignee",
-      "Completed / Total",
-      "Status",
-      "Assigned On",
-      "Completed On",
-      "Comments",
-    ];
+    try {
+      // Fetch detailed task data with blocks
+      const csvData: any[] = [];
 
-    // Map tasks to CSV rows
-    const csvRows = tasks.map((task) => {
-      const lineItems = task.items.filter((item) => item.type === "Line");
-      const completedLines = lineItems.filter((item) => item.completed).length;
-      const totalLines = lineItems.length;
-      const completedTotal =
-        lineItems.length > 0 ? `${completedLines} / ${totalLines}` : "N/A";
-
-      // Format comments into a single string
-      const commentsString =
-        task.comments.length > 0
-          ? task.comments
-              .map((comment) => {
-                const timestamp = new Date(comment.createdAt).toLocaleString(
-                  "en-IN",
-                  {
-                    timeZone: "Asia/Kolkata",
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }
-                );
-                return `${comment.userName} (${comment.userRole}) at ${timestamp}: ${comment.comment}`;
-              })
-              .join(" | ")
-          : "No comments";
-
-      return [
-        task.id,
-        task.type,
-        task.assignee || "N/A",
-        completedTotal,
-        task.status,
-        new Date(task.createdAt).toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
-          dateStyle: "medium",
-          timeStyle: "short",
-        }),
-        task.completedAt
-          ? new Date(task.completedAt).toLocaleString("en-IN", {
+      for (const task of tasks) {
+        for (const item of task.items) {
+          const row = {
+            "Area No": task.areaNumber || "N/A",
+            "PID No": task.pidNumber || "N/A",
+            "Line/Equipment/Instrument": item.name,
+            Type: item.type,
+            "Block Count": item.blocks || 0,
+            Completed: item.completed ? "Yes" : "No",
+            "QC Done By": item.completed ? task.assignee : "N/A",
+            "Task Type": task.type,
+            Project: task.projectName,
+            Status: task.status,
+            "Assigned On": new Date(task.createdAt).toLocaleString("en-IN", {
               timeZone: "Asia/Kolkata",
               dateStyle: "medium",
               timeStyle: "short",
-            })
-          : "Not Completed",
-        `"${commentsString.replace(/"/g, '""')}"`, // Escape quotes in comments
-      ];
-    });
-
-    // Combine headers and rows
-    const csvContent = [headers, ...csvRows]
-      .map((row) => row.join(","))
-      .join("\n");
-
-    // Create a Blob and download the file
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `team_lead_tasks_${new Date().toISOString()}.csv`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast.success("Tasks exported successfully as CSV!");
-  };
-
-  const fetchNonInlineInstruments = async () => {
-    if (!selectedProject) return;
-    try {
-      const response = await axios.get<{
-        data: { id: number; instrument_tag: string; description: string }[];
-      }>(
-        `${API_URL}/non-inline-instruments/unassigned/${selectedProject}`,
-        getAuthHeaders()
-      );
-      const instrumentsData = response.data.data.map((instrument) => ({
-        id: instrument.id.toString(),
-        instrumentTag: instrument.instrument_tag,
-        description: instrument.description,
-      }));
-      console.log(
-        `Fetched non-inline instruments for project ${selectedProject}:`,
-        instrumentsData
-      );
-      setNonInlineInstruments(instrumentsData);
-      setSelectedNonInlineInstruments((prev) =>
-        prev.filter((id) =>
-          instrumentsData.some((instrument) => instrument.id === id)
-        )
-      );
-      if (instrumentsData.length === 0) {
-        toast.info(
-          "No unassigned non-inline instruments available for this project."
-        );
+            }),
+            "Completed On": item.completedAt
+              ? new Date(item.completedAt).toLocaleString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })
+              : "Not Completed",
+          };
+          csvData.push(row);
+        }
       }
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching non-inline instruments:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message ||
-          "Failed to fetch non-inline instruments"
+
+      // Create CSV headers
+      const headers = [
+        "Area No",
+        "PID No",
+        "Line/Equipment/Instrument",
+        "Type",
+        "Block Count",
+        "Completed",
+        "QC Done By",
+        "Task Type",
+        "Project",
+        "Status",
+        "Assigned On",
+        "Completed On",
+      ];
+
+      // Convert to CSV
+      const csvRows = csvData.map((row) =>
+        headers.map((header) => {
+          const value = row[header] || "";
+          // Escape quotes and wrap in quotes if contains comma
+          return value.toString().includes(",")
+            ? `"${value.toString().replace(/"/g, '""')}"`
+            : value;
+        })
       );
-      setNonInlineInstruments([]);
-      setSelectedNonInlineInstruments([]);
+
+      const csvContent = [headers, ...csvRows]
+        .map((row) => row.join(","))
+        .join("\n");
+
+      // Download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute(
+        "download",
+        `task_details_${new Date().toISOString().split("T")[0]}.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("CSV exported successfully!");
+    } catch (error) {
+      console.error("Error exporting CSV:", error);
+      toast.error("Failed to export CSV");
     }
   };
-
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
     return null;
   }
@@ -1520,8 +1544,10 @@ const TeamLeadDashboard = () => {
               </SelectContent>
             </Select>
             {hasCompletedWork && !newAssigneeId && (
-              <p className="text-sm text-red-600 mt-1">
-                A new assignee is required when there is completed work.
+              <p className="text-sm text-yellow-600 mt-1">
+                ⚠️ Completed work will remain with{" "}
+                {selectedTaskForRetract.assignee}. Incomplete items will return
+                to the unassigned pool.
               </p>
             )}
           </div>
@@ -1529,17 +1555,16 @@ const TeamLeadDashboard = () => {
           <div className="flex gap-3 pt-4 border-t">
             <Button
               onClick={() => handleRetractTask(selectedTaskForRetract.id)}
-              disabled={isLoading || (hasCompletedWork && !newAssigneeId)}
+              disabled={isLoading}
               className="flex-1 bg-red-600 hover:bg-red-700 text-white"
             >
               {isLoading
                 ? "Processing..."
-                : hasCompletedWork
-                ? "Retract & Reassign"
                 : newAssigneeId
                 ? "Retract & Reassign"
-                : "Retract Task"}
+                : "Retract Only"}
             </Button>
+
             <Button
               variant="outline"
               onClick={() => {
@@ -1563,15 +1588,40 @@ const TeamLeadDashboard = () => {
 
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold">Team Lead Dashboard</h1>
-          <p className="text-gray-500">Assign and manage tasks for your team</p>
-          {generalMessage && (
-            <p className="text-sm text-gray-600 italic mt-2">
-              "{generalMessage}"
-            </p>
-          )}
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold">Team Lead Dashboard</h1>
+              <p className="text-gray-500">
+                Assign and manage tasks for your team
+              </p>
+              {generalMessage && (
+                <p className="text-sm text-gray-600 italic mt-2">
+                  "{generalMessage}"
+                </p>
+              )}
+            </div>
+            {/* NEW BUTTON */}
+            <Button
+              onClick={() => navigate("/my-tasks")}
+              className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
+              </svg>
+              View My Tasks
+            </Button>
+          </div>
         </header>
-
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Task Assignment</CardTitle>
@@ -1762,7 +1812,7 @@ const TeamLeadDashboard = () => {
                             ? equipment.length
                             : assignmentType === "NonInlineInstrument"
                             ? nonInlineInstruments.length
-                            : 0 // Fallback // Add support for NonInlineInstrument
+                            : 0
                         }
                         className="border rounded px-2 py-1 w-20"
                       />
@@ -1842,36 +1892,67 @@ const TeamLeadDashboard = () => {
                               acc[pidNumber].push(line);
                               return acc;
                             }, {} as { [key: string]: Line[] })
-                          ).map(([pidNumber, pidLines], pidIndex) => (
-                            <div key={pidNumber + pidIndex}>
-                              <div className="border-t border-gray-300 my-4">
-                                <h4 className="text-sm font-semibold text-gray-700 mt-2">
-                                  Lines from PID {pidNumber}
-                                </h4>
-                              </div>
-                              {pidLines.map((line, index) => (
-                                <div
-                                  key={line.id}
-                                  className="flex items-center space-x-2"
-                                >
-                                  <Checkbox
-                                    id={line.id}
-                                    checked={selectedLines.includes(line.id)}
-                                    onCheckedChange={(checked) =>
-                                      handleLineCheckboxChange(
-                                        line.id,
-                                        index,
-                                        checked as boolean
-                                      )
-                                    }
-                                  />
-                                  <label htmlFor={line.id} className="text-sm">
-                                    {line.name}
-                                  </label>
+                          ).map(([pidNumber, pidLines], pidIndex) => {
+                            const previousPids = Object.entries(
+                              lines.reduce((acc, line) => {
+                                const pid = pids.find(
+                                  (p) => p.id === line.pidId
+                                );
+                                const pidNumber = pid
+                                  ? pid.name
+                                  : "Unknown PID";
+                                if (!acc[pidNumber]) acc[pidNumber] = [];
+                                acc[pidNumber].push(line);
+                                return acc;
+                              }, {} as { [key: string]: Line[] })
+                            ).slice(0, pidIndex);
+                            const globalStartIndex = previousPids.reduce(
+                              (sum, [, lines]) => sum + lines.length,
+                              0
+                            );
+                            return (
+                              <div key={pidNumber + pidIndex}>
+                                <div className="border-t border-gray-300 my-4">
+                                  <h4 className="text-sm font-semibold text-gray-700 mt-2">
+                                    Lines from PID {pidNumber}
+                                  </h4>
                                 </div>
-                              ))}
-                            </div>
-                          ))}
+                                {pidLines.map((line, localIndex) => {
+                                  const globalIndex =
+                                    globalStartIndex + localIndex;
+                                  return (
+                                    <div
+                                      key={line.id}
+                                      className="flex items-center space-x-2"
+                                    >
+                                      <Checkbox
+                                        id={line.id}
+                                        checked={selectedLines.includes(
+                                          line.id
+                                        )}
+                                        onCheckedChange={(checked) =>
+                                          handleLineCheckboxChange(
+                                            line.id,
+                                            globalIndex,
+                                            checked as boolean
+                                          )
+                                        }
+                                      />
+                                      <label
+                                        htmlFor={line.id}
+                                        className="text-sm"
+                                      >
+                                        {line.name}
+                                      </label>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                          <p className="text-sm text-gray-600 mt-2">
+                            Selected Lines: {selectedLines.length}
+                          </p>
                         </div>
                       )}{" "}
                       {assignmentType === "Line" &&
@@ -1946,7 +2027,7 @@ const TeamLeadDashboard = () => {
                                   console.log(
                                     `Checkbox for instrument ${instrument.id} changed to:`,
                                     checked
-                                  ); // Add this log
+                                  );
                                   console.log(
                                     "Current selectedNonInlineInstruments:",
                                     selectedNonInlineInstruments

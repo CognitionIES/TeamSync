@@ -232,10 +232,39 @@ const createTask = async (req, res) => {
       await db.query("ROLLBACK");
       return res.status(400).json({ message: "Project not found" });
     }
+    let areaId = null;
+    if (type !== "Misc" && items && items.length > 0) {
+      const firstItem = items[0];
 
-    console.log("Creating task in database with description:", description);
+      if (firstItem.itemType === "Line") {
+        const { rows: lineRows } = await db.query(
+          "SELECT area_id FROM lines WHERE id = $1",
+          [firstItem.itemId]
+        );
+        areaId = lineRows.length > 0 ? lineRows[0].area_id : null;
+      } else if (firstItem.itemType === "Equipment") {
+        const { rows: equipRows } = await db.query(
+          "SELECT area_id FROM equipment WHERE id = $1",
+          [firstItem.itemId]
+        );
+        areaId = equipRows.length > 0 ? equipRows[0].area_id : null;
+      } else if (firstItem.itemType === "PID") {
+        const { rows: pidRows } = await db.query(
+          "SELECT area_id FROM pids WHERE id = $1",
+          [firstItem.itemId]
+        );
+        areaId = pidRows.length > 0 ? pidRows[0].area_id : null;
+      } else if (firstItem.itemType === "NonInlineInstrument") {
+        const { rows: instrRows } = await db.query(
+          "SELECT area_id FROM non_inline_instruments WHERE id = $1",
+          [firstItem.itemId]
+        );
+        areaId = instrRows.length > 0 ? instrRows[0].area_id : null;
+      }
+    }
+    console.log("Creating task in database with area_id:", areaId);
     const { rows: taskRows } = await db.query(
-      "INSERT INTO tasks (type, assignee_id, is_complex, status, progress, project_id, description) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+      "INSERT INTO tasks (type, assignee_id, is_complex, status, progress, project_id, description, area_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
       [
         type,
         assigneeId,
@@ -244,6 +273,7 @@ const createTask = async (req, res) => {
         0,
         projectId,
         type === "Misc" ? description : null,
+        areaId, // NEW
       ]
     );
 

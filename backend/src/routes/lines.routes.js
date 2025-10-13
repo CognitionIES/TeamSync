@@ -6,9 +6,11 @@ const { protect } = require("../middleware/auth");
 // @desc    Get all unassigned lines for a project
 // @route   GET /api/lines/unassigned/:projectId
 // @access  Private (Team Lead)
+// Replace the entire /unassigned/:projectId route in lines.routes.js:
 router.get("/unassigned/:projectId", protect, async (req, res) => {
   try {
     const { projectId } = req.params;
+    const { taskType } = req.query; // NEW: Get taskType from query params
 
     const projectIdNum = parseInt(projectId, 10);
     if (isNaN(projectIdNum)) {
@@ -31,20 +33,26 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    const { rows } = await db.query(
-      `
+    let query = `
       SELECT lines.*, pids.pid_number AS pid_number
       FROM lines
       JOIN pids ON lines.pid_id = pids.id
       WHERE lines.project_id = $1 AND lines.assigned_to_id IS NULL
-      `,
-      [projectIdNum]
-    );
+    `;
+
+    // NEW: Filter by UPV completion status for QC tasks
+    if (taskType === "QC") {
+      query += ` AND lines.upv_completed = true`;
+    }
+
+    const { rows } = await db.query(query, [projectIdNum]);
 
     if (rows.length === 0) {
-      return res
-        .status(200)
-        .json({ data: [], message: "No unassigned lines found" });
+      const message =
+        taskType === "QC"
+          ? "No UPV-completed lines available for QC assignment."
+          : "No unassigned lines found.";
+      return res.status(200).json({ data: [], message });
     }
 
     res.status(200).json({ data: rows });
@@ -53,7 +61,6 @@ router.get("/unassigned/:projectId", protect, async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-
 // @desc    Create multiple lines in a batch
 // @route   POST /api/lines/batch
 // @access  Private

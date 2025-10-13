@@ -82,8 +82,8 @@ interface User {
   name: string;
   role: "Team Member" | "Team Lead";
   projectId?: string;
-  teamLead?: string; // Added for team assignment
-  password?: string; // Add password as optional
+  teamLead?: string; 
+  password?: string; 
 }
 
 const AdminDashboard = () => {

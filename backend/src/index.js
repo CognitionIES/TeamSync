@@ -41,6 +41,8 @@ try {
 }
 app.use("/api/project-stats", require("./routes/projectStats.routes"));
 app.use("/api/task-status", require("./routes/taskStatus.routes"));
+const blockCountsRoutes = require("./routes/block-counts.routes");
+app.use("/api/block-counts", blockCountsRoutes);
 app.use(
   "/api/non-inline-instruments",
   require("./routes/non-inline-instruments.routes")

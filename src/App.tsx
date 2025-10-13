@@ -5,12 +5,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
-import { Analytics } from "@vercel/analytics/react"; // Updated import
+import { Analytics } from "@vercel/analytics/react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import DashboardRouter from "./components/dashboards/DashboardRouter";
 import LoginForm from "@/components/login/LoginForm";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import TeamLeadMemberView from "@/components/dashboards/TeamLeadMemberView"; // NEW IMPORT
 import axios from "axios";
 
 // Configure axios defaults
@@ -63,6 +64,15 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <DashboardRouter />
+                </ProtectedRoute>
+              }
+            />
+            {/* NEW ROUTE FOR TEAM LEAD MY TASKS */}
+            <Route
+              path="/my-tasks"
+              element={
+                <ProtectedRoute>
+                  <TeamLeadMemberView />
                 </ProtectedRoute>
               }
             />
