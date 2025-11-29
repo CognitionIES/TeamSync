@@ -9,12 +9,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+interface MetricCount {
+  completed?: number;
+  skipped?: number;
+}
+
 interface Metric {
   userId: string;
   date?: string;
   week_start?: string;
   month_start?: string;
-  counts: { [key: string]: { [key: string]: number } | number };
+  counts: {
+    [itemType: string]: {
+      [taskType: string]: number | MetricCount
+    } | number
+  };
   totalBlocks: number;
 }
 
@@ -61,16 +70,22 @@ export const MetricsTable: React.FC<MetricsTableProps> = ({
         (m) => m.userId === userIdString
       );
 
-      const aggregated = {
+      const aggregated: {
+        userId: string;
+        name: string;
+        [key: string]: string | number | { completed: number; skipped: number };
+        blocks: number;
+        totalBlocks: number;
+      } = {
         userId: userIdString,
         name: user.name,
-        "Redline PIDs": 0,
-        "UPV Equipment": 0,
-        "QC Equipment": 0,
-        "UPV Lines": 0,
-        "QC Lines": 0,
-        "UPV Non-Inline": 0,
-        "QC Non-Inline": 0,
+        "Redline PIDs": { completed: 0, skipped: 0 },
+        "UPV Equipment": { completed: 0, skipped: 0 },
+        "QC Equipment": { completed: 0, skipped: 0 },
+        "UPV Lines": { completed: 0, skipped: 0 },
+        "QC Lines": { completed: 0, skipped: 0 },
+        "UPV Non-Inline": { completed: 0, skipped: 0 },
+        "QC Non-Inline": { completed: 0, skipped: 0 },
         blocks: 0,
         totalBlocks: 0,
       };
@@ -88,14 +103,24 @@ export const MetricsTable: React.FC<MetricsTableProps> = ({
               typeof itemCounts === "object" &&
               col.taskType in itemCounts
             ) {
-              const count = itemCounts[col.taskType];
-              if (typeof count === "number") {
-                aggregated[col.key] += count;
-                console.log(`Added ${count} to ${col.key} for ${user.name}`);
+              const countData = itemCounts[col.taskType];
+
+              // Handle both old format (number) and new format (object with completed/skipped)
+              if (typeof countData === "number") {
+                const currentVal = aggregated[col.key] as { completed: number; skipped: number };
+                currentVal.completed += countData;
+                console.log(`Added ${countData} to ${col.key} (completed) for ${user.name}`);
+              } else if (typeof countData === "object" && countData !== null) {
+                const currentVal = aggregated[col.key] as { completed: number; skipped: number };
+                currentVal.completed += (countData as MetricCount).completed || 0;
+                currentVal.skipped += (countData as MetricCount).skipped || 0;
+                console.log(
+                  `Added ${(countData as MetricCount).completed || 0} completed, ${(countData as MetricCount).skipped || 0} skipped to ${col.key} for ${user.name}`
+                );
               } else {
                 console.warn(
                   `Invalid count for ${col.key} in ${user.name}:`,
-                  count
+                  countData
                 );
               }
             } else {
@@ -122,13 +147,23 @@ export const MetricsTable: React.FC<MetricsTableProps> = ({
   }, [metrics, blockTotals, users, period]);
 
   const totals = useMemo(() => {
-    return columns.reduce((acc, col) => {
-      acc[col.key] = aggregatedMetrics.reduce(
-        (sum, row) => sum + (row[col.key] || 0),
-        0
+    const result: { [key: string]: { completed: number; skipped: number } } = {};
+
+    columns.forEach((col) => {
+      result[col.key] = aggregatedMetrics.reduce(
+        (acc, row) => {
+          const rowData = row[col.key];
+          if (typeof rowData === "object" && rowData !== null && "completed" in rowData) {
+            acc.completed += rowData.completed || 0;
+            acc.skipped += rowData.skipped || 0;
+          }
+          return acc;
+        },
+        { completed: 0, skipped: 0 }
       );
-      return acc;
-    }, {} as { [key: string]: number });
+    });
+
+    return result;
   }, [aggregatedMetrics, columns]);
 
   const totalBlocks = aggregatedMetrics.reduce(
@@ -142,9 +177,14 @@ export const MetricsTable: React.FC<MetricsTableProps> = ({
         <TableRow>
           <TableHead>Name</TableHead>
           {columns.map((col) => (
-            <TableHead key={col.key}>{col.key}</TableHead>
+            <TableHead key={col.key} className="text-center">
+              <div>{col.key}</div>
+              <div className="text-xs font-normal text-gray-500 mt-1">
+                Completed / Skipped
+              </div>
+            </TableHead>
           ))}
-          <TableHead>Total Blocks</TableHead>
+          <TableHead className="text-center">Total Blocks</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -168,30 +208,70 @@ export const MetricsTable: React.FC<MetricsTableProps> = ({
           </TableRow>
         ) : (
           <>
-            {aggregatedMetrics.map((row) => (
-              <TableRow key={`${row.userId}-${period}`}>
-                <TableCell className="font-medium">
-                  {row.name || "Unknown"}
-                </TableCell>
-                {columns.map((col) => (
-                  <TableCell key={col.key} className="text-center">
-                    {row[col.key] || 0}
+            {aggregatedMetrics.map((row) => {
+              const rowData = row as {
+                userId: string;
+                name: string;
+                [key: string]: string | number | { completed: number; skipped: number };
+                totalBlocks: number;
+              };
+
+              return (
+                <TableRow key={`${rowData.userId}-${period}`}>
+                  <TableCell className="font-medium">
+                    {rowData.name || "Unknown"}
                   </TableCell>
-                ))}
-                <TableCell className="text-center font-medium">
-                  {row.totalBlocks}
-                </TableCell>
-              </TableRow>
-            ))}
+                  {columns.map((col) => {
+                    const cellData = rowData[col.key];
+                    const completed = typeof cellData === "object" && cellData !== null && "completed" in cellData
+                      ? cellData.completed
+                      : 0;
+                    const skipped = typeof cellData === "object" && cellData !== null && "skipped" in cellData
+                      ? cellData.skipped
+                      : 0;
+
+                    return (
+                      <TableCell key={col.key} className="text-center">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="font-medium text-green-600">
+                            {completed}
+                          </span>
+                          {skipped > 0 && (
+                            <span className="text-xs text-gray-500">
+                              ({skipped} skipped)
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell className="text-center font-medium">
+                    {rowData.totalBlocks}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             <TableRow className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
               <TableCell>
                 <strong>Total</strong>
               </TableCell>
-              {columns.map((col) => (
-                <TableCell key={col.key} className="text-center">
-                  <strong>{totals[col.key] || 0}</strong>
-                </TableCell>
-              ))}
+              {columns.map((col) => {
+                const colTotal = totals[col.key];
+                return (
+                  <TableCell key={col.key} className="text-center">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <strong className="text-green-600">
+                        {colTotal.completed || 0}
+                      </strong>
+                      {colTotal.skipped > 0 && (
+                        <span className="text-xs text-gray-500 font-normal">
+                          ({colTotal.skipped} skipped)
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                );
+              })}
               <TableCell className="text-center">
                 <strong>{totalBlocks}</strong>
               </TableCell>

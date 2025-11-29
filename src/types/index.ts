@@ -87,6 +87,10 @@ export enum ItemType {
 }
 
 export interface Task {
+  originalId: string;
+  isPIDBased: boolean;
+  pidGroups: PIDGroup[];
+  pidWorkItems: any[];
   lines: any;
   id: string;
   type: TaskType; // Use enum
@@ -99,6 +103,7 @@ export interface Task {
   completedAt: string | null;
   progress: number;
   items: Array<{
+    completedAt: any;
     item_id: string;
     blocks: number;
     id: string;
@@ -133,4 +138,26 @@ export interface MockData {
   users: Record<UserRole, string[]>;
   projects: Project[];
   tasks: Task[];
+}
+export type PIDWorkItem = {
+  id: string;
+  pidId: string;
+  pidNumber: string;
+  lineId?: string;
+  lineNumber?: string;
+  equipmentId?: string;
+  equipmentNumber?: string;
+  status: "Pending" | "In Progress" | "Completed" | "Skipped";
+  completedAt?: string;
+  remarks?: string;
+  blocks: number;
+};
+
+export interface PIDGroup {
+  pidId: string;
+  pidNumber: string;
+  items: PIDWorkItem[];
+  completedCount: number;
+  totalCount: number;
+  allCompleted: boolean;
 }

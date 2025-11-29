@@ -215,13 +215,13 @@ const transformTask = (apiTask: ApiTask): Task => {
   console.log("Raw Comments:", apiTask.comments);
   const transformedComments = Array.isArray(apiTask.comments)
     ? apiTask.comments.map((comment) => ({
-        id: comment.id,
-        userId: comment.user_id,
-        userName: comment.user_name,
-        userRole: comment.user_role as UserRole,
-        comment: comment.comment,
-        createdAt: comment.created_at,
-      }))
+      id: comment.id,
+      userId: comment.user_id,
+      userName: comment.user_name,
+      userRole: comment.user_role as UserRole,
+      comment: comment.comment,
+      createdAt: comment.created_at,
+    }))
     : [];
   console.log("Transformed Comments:", transformedComments);
   if (
@@ -272,6 +272,7 @@ const transformTask = (apiTask: ApiTask): Task => {
         })) || undefined,
   };
 };
+
 const ProjectManagerDashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
@@ -583,7 +584,7 @@ const ProjectManagerDashboard = () => {
       });
       setIndividualMetricsError(
         axiosError.response?.data?.message ||
-          "Failed to fetch individual metrics"
+        "Failed to fetch individual metrics"
       );
       setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
     }
@@ -710,8 +711,7 @@ const ProjectManagerDashboard = () => {
       const usersText = await usersResponse.text();
       if (!usersResponse.ok) {
         throw new Error(
-          `Users API error: ${usersResponse.status} ${
-            usersResponse.statusText
+          `Users API error: ${usersResponse.status} ${usersResponse.statusText
           } - ${usersText.substring(0, 100)}`
         );
       }
@@ -769,6 +769,50 @@ const ProjectManagerDashboard = () => {
       setIsLoading(false);
     }
   };
+  const fetchTeamMetrics = async () => {
+    try {
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      const formattedDate = format(selectedDate, "yyyy-MM-dd");
+      console.log("Fetching team metrics for date:", formattedDate);
+
+      const response = await axios.get<MetricsData>(
+        `${API_URL}/metrics/team/all?date=${formattedDate}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      console.log("Team metrics response:", response.data);
+
+      setTeamMetrics({
+        daily: response.data.daily || [],
+        weekly: response.data.weekly || [],
+        monthly: response.data.monthly || [],
+      });
+      setTeamMetricsError(null);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching team metrics:", {
+        message: axiosError.message,
+        response: axiosError.response?.data,
+      });
+      setTeamMetricsError(
+        axiosError.response?.data?.message || "Failed to fetch team metrics"
+      );
+      setTeamMetrics({ daily: [], weekly: [], monthly: [] });
+    }
+  };
+  useEffect(() => {
+    fetchIndividualMetrics();
+    fetchBlockTotals();
+    fetchTeamMetrics(); // Changed from calculateTeamMetrics
+    fetchAreaProgress();
+  }, [selectedDate]);
   useEffect(() => {
     fetchData();
   }, []);
@@ -911,6 +955,123 @@ const ProjectManagerDashboard = () => {
       console.error("API test error:", error);
     }
   };
+  const handleExportPIDProgress = async () => {
+    try {
+      setIsExporting(true);
+      const token = localStorage.getItem("teamsync_token");
+      if (!token) throw new Error("No authentication token found");
+
+      // Fetch PID work items summary
+      const response = await axios.get(
+        `${API_URL}/tasks/pid-work-items/summary`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Cache-Control": "no-cache",
+          },
+        }
+      );
+
+      const data = response.data.data;
+
+      if (!data || data.length === 0) {
+        toast.error("No PID progress data available to export");
+        return;
+      }
+
+      // Create Excel-friendly headers
+      const headers = [
+        "User Name",
+        "PID Number",
+        "Task Type",
+        "Assigned Date",
+        "Status",
+        "Total Items",
+        "Completed Items",
+        "Skipped Items",
+        "Pending Items",
+        "Total Blocks",
+        "Progress %",
+        "Completion Date"
+      ];
+
+      // Map data to rows
+      const rows = data.map((item: any) => {
+        const completedItems = parseInt(item.completed_items) || 0;
+        const skippedItems = parseInt(item.skipped_items) || 0;
+        const totalItems = parseInt(item.total_items) || 0;
+        const pendingItems = totalItems - completedItems - skippedItems;
+        const progressPercent = totalItems > 0
+          ? Math.round(((completedItems + skippedItems) / totalItems) * 100)
+          : 0;
+
+        return [
+          item.user_name || "Unknown",
+          item.pid_number || "N/A",
+          item.task_type || "N/A",
+          item.assigned_date
+            ? new Date(item.assigned_date).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "2-digit",
+            })
+            : "N/A",
+          item.status || "In Progress",
+          totalItems,
+          completedItems,
+          skippedItems,
+          pendingItems,
+          parseInt(item.total_blocks) || 0,
+          `${progressPercent}%`,
+          item.completion_date
+            ? new Date(item.completion_date).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "2-digit",
+            })
+            : "Not Completed"
+        ];
+      });
+
+      // Convert to CSV
+      const escapeCsvValue = (value: any) => {
+        const str = String(value);
+        if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      const csvContent = [
+        headers.map(escapeCsvValue).join(","),
+        ...rows.map(row => row.map(escapeCsvValue).join(","))
+      ].join("\n");
+
+      // Download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute(
+        "download",
+        `pid_progress_${new Date().toISOString().split("T")[0]}.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("PID progress exported successfully!");
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error exporting PID progress:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to export PID progress"
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Call this in useEffect temporarily
   useEffect(() => {
@@ -997,7 +1158,7 @@ const ProjectManagerDashboard = () => {
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2"
-                onClick={handleExport}
+                onClick={handleExportPIDProgress}
                 disabled={isExporting || isLoading}
               >
                 <Download size={16} />
@@ -1123,8 +1284,8 @@ const ProjectManagerDashboard = () => {
             <Card className="shadow-md">
               <CardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <Users size={18} className="text-purple-600" />
+                  <div className="p-2 bg-slate-100 rounded-lg">
+                    <Users size={18} className="text-slate-600" />
                   </div>
                   <div>
                     <CardTitle>Team Composition</CardTitle>
@@ -1447,7 +1608,7 @@ const ProjectManagerDashboard = () => {
                   Team Metrics
                 </CardTitle>
                 <CardDescription>
-                  Metrics for teams daily by item and task type
+                  Metrics for teams by item and task type
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
@@ -1462,6 +1623,7 @@ const ProjectManagerDashboard = () => {
                     <TabsTrigger value="weekly">Weekly</TabsTrigger>
                     <TabsTrigger value="monthly">Monthly</TabsTrigger>
                   </TabsList>
+
                   <TabsContent value="daily">
                     <Table>
                       <TableHeader>
@@ -1474,174 +1636,205 @@ const ProjectManagerDashboard = () => {
                           <TableHead>Equipment (QC)</TableHead>
                           <TableHead>Equipment (Redline)</TableHead>
                           <TableHead>P&IDs (Redline)</TableHead>
+                          <TableHead>Total Blocks</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
                             <TableCell
-                              colSpan={8}
+                              colSpan={9}
                               className="text-center text-gray-500"
                             >
                               Loading...
                             </TableCell>
                           </TableRow>
+                        ) : teamMetrics.daily.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={9}
+                              className="text-center text-gray-500"
+                            >
+                              No team metrics data available.
+                            </TableCell>
+                          </TableRow>
                         ) : (
-                          teamLeads.map((team) => {
-                            const dailyMetric = teamMetrics.daily.find(
-                              (m) => m.userId === team.id
-                            ) || {
-                              counts: {
-                                [ItemType.Line]: { UPV: 0, QC: 0, Redline: 0 },
-                                [ItemType.Equipment]: {
-                                  UPV: 0,
-                                  QC: 0,
-                                  Redline: 0,
-                                },
-                                [ItemType.PID]: { Redline: 0 },
-                                [ItemType.NonInlineInstrument]: {
-                                  UPV: 0,
-                                  QC: 0,
-                                  Redline: 0,
-                                },
-                              },
-                            };
-                            return (
-                              <TableRow key={team.id}>
-                                <TableCell>{team.name}</TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Line].UPV || 0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Line].QC || 0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Line].Redline ||
-                                    0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Equipment].UPV ||
-                                    0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Equipment].QC ||
-                                    0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.Equipment]
-                                    .Redline || 0}
-                                </TableCell>
-                                <TableCell>
-                                  {dailyMetric.counts[ItemType.PID].Redline ||
-                                    0}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
+                          teamMetrics.daily.map((metric) => (
+                            <TableRow key={metric.teamId}>
+                              <TableCell className="font-medium">
+                                {metric.teamName}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.PID?.Redline || 0}
+                              </TableCell>
+                              <TableCell className="font-semibold">
+                                {metric.totalBlocks || 0}
+                              </TableCell>
+                            </TableRow>
+                          ))
                         )}
                       </TableBody>
                     </Table>
+                    <div className="mt-4 text-sm text-gray-500">
+                      Selected Date: {format(selectedDate, "PPP")}
+                    </div>
                   </TabsContent>
+
                   <TabsContent value="weekly">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>P&IDs</TableHead>
+                          <TableHead>Lines (UPV)</TableHead>
+                          <TableHead>Lines (QC)</TableHead>
+                          <TableHead>Lines (Redline)</TableHead>
+                          <TableHead>Equipment (UPV)</TableHead>
+                          <TableHead>Equipment (QC)</TableHead>
+                          <TableHead>Equipment (Redline)</TableHead>
+                          <TableHead>P&IDs (Redline)</TableHead>
+                          <TableHead>Total Blocks</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
                             <TableCell
-                              colSpan={4}
+                              colSpan={9}
                               className="text-center text-gray-500"
                             >
                               Loading...
                             </TableCell>
                           </TableRow>
+                        ) : teamMetrics.weekly.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={9}
+                              className="text-center text-gray-500"
+                            >
+                              No weekly data available.
+                            </TableCell>
+                          </TableRow>
                         ) : (
-                          teamMetrics.weekly.map((metric, index) => {
-                            const team = teamLeads.find(
-                              (t) => t.id === metric.userId
-                            );
-                            return (
-                              <TableRow key={index}>
-                                <TableCell>{team?.name || "Unknown"}</TableCell>
-                                <TableCell>
-                                  {(metric.counts?.[ItemType.Line]?.UPV || 0) +
-                                    (metric.counts?.[ItemType.Line]?.QC || 0) +
-                                    (metric.counts?.[ItemType.Line]?.Redline ||
-                                      0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.[ItemType.Equipment]?.UPV ||
-                                    0) +
-                                    (metric.counts?.[ItemType.Equipment]?.QC ||
-                                      0) +
-                                    (metric.counts?.[ItemType.Equipment]
-                                      ?.Redline || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {metric.counts?.[ItemType.PID]?.Redline || 0}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
+                          teamMetrics.weekly.map((metric) => (
+                            <TableRow key={metric.teamId}>
+                              <TableCell className="font-medium">
+                                {metric.teamName}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.PID?.Redline || 0}
+                              </TableCell>
+                              <TableCell className="font-semibold">
+                                {metric.totalBlocks || 0}
+                              </TableCell>
+                            </TableRow>
+                          ))
                         )}
                       </TableBody>
                     </Table>
                   </TabsContent>
+
                   <TabsContent value="monthly">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Team Name</TableHead>
-                          <TableHead>Lines</TableHead>
-                          <TableHead>Equipment</TableHead>
-                          <TableHead>P&IDs</TableHead>
+                          <TableHead>Lines (UPV)</TableHead>
+                          <TableHead>Lines (QC)</TableHead>
+                          <TableHead>Lines (Redline)</TableHead>
+                          <TableHead>Equipment (UPV)</TableHead>
+                          <TableHead>Equipment (QC)</TableHead>
+                          <TableHead>Equipment (Redline)</TableHead>
+                          <TableHead>P&IDs (Redline)</TableHead>
+                          <TableHead>Total Blocks</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {isLoading ? (
                           <TableRow>
                             <TableCell
-                              colSpan={4}
+                              colSpan={9}
                               className="text-center text-gray-500"
                             >
                               Loading...
                             </TableCell>
                           </TableRow>
+                        ) : teamMetrics.monthly.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={9}
+                              className="text-center text-gray-500"
+                            >
+                              No monthly data available.
+                            </TableCell>
+                          </TableRow>
                         ) : (
-                          teamMetrics.monthly.map((metric, index) => {
-                            const team = teamLeads.find(
-                              (t) => t.id === metric.userId
-                            );
-                            return (
-                              <TableRow key={index}>
-                                <TableCell>{team?.name || "Unknown"}</TableCell>
-                                <TableCell>
-                                  {(metric.counts?.[ItemType.Line]?.UPV || 0) +
-                                    (metric.counts?.[ItemType.Line]?.QC || 0) +
-                                    (metric.counts?.[ItemType.Line]?.Redline ||
-                                      0)}
-                                </TableCell>
-                                <TableCell>
-                                  {(metric.counts?.[ItemType.Equipment]?.UPV ||
-                                    0) +
-                                    (metric.counts?.[ItemType.Equipment]?.QC ||
-                                      0) +
-                                    (metric.counts?.[ItemType.Equipment]
-                                      ?.Redline || 0)}
-                                </TableCell>
-                                <TableCell>
-                                  {metric.counts?.[ItemType.PID]?.Redline || 0}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
+                          teamMetrics.monthly.map((metric) => (
+                            <TableRow key={metric.teamId}>
+                              <TableCell className="font-medium">
+                                {metric.teamName}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Line?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.UPV || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.QC || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.Equipment?.Redline || 0}
+                              </TableCell>
+                              <TableCell>
+                                {metric.counts?.PID?.Redline || 0}
+                              </TableCell>
+                              <TableCell className="font-semibold">
+                                {metric.totalBlocks || 0}
+                              </TableCell>
+                            </TableRow>
+                          ))
                         )}
                       </TableBody>
                     </Table>
@@ -1649,9 +1842,10 @@ const ProjectManagerDashboard = () => {
                 </Tabs>
               </CardContent>
             </Card>
-            <Card className="shadow-md border-purple-200">
-              <CardHeader className="bg-gradient-to-r from-purple-50 to-transparent border-b border-purple-100">
-                <CardTitle className="text-lg text-purple-800">
+
+            <Card className="shadow-md border-slate-200">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-transparent border-b border-slate-100">
+                <CardTitle className="text-lg text-slate-800">
                   Project Progress
                 </CardTitle>
                 <CardDescription>
@@ -1783,17 +1977,17 @@ const ProjectManagerDashboard = () => {
                         {comment.userRole} •{" "}
                         {comment.createdAt
                           ? new Date(comment.createdAt).toLocaleString(
-                              "en-IN",
-                              {
-                                timeZone: "Asia/Kolkata",
-                                year: "numeric",
-                                month: "short",
-                                day: "2-digit",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: true,
-                              }
-                            )
+                            "en-IN",
+                            {
+                              timeZone: "Asia/Kolkata",
+                              year: "numeric",
+                              month: "short",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: true,
+                            }
+                          )
                           : "Unknown Date"}
                       </p>
                     </div>

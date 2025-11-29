@@ -11,8 +11,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Navbar from "../shared/Navbar";
 import TaskCard from "../shared/TaskCard";
 import RedlineTaskCard from "../shared/RedlineTaskCard";
+import PIDBasedTaskCard from "../shared/PIDBasedTaskCard";
 import { Button } from "@/components/ui/button";
-import { Task, TaskItem, TaskComment, TaskType, TaskStatus } from "@/types";
+import { Task, TaskType, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import TaskComments from "../shared/TaskComments";
 import { InfoIcon } from "lucide-react";
@@ -29,16 +30,6 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
-// Format time and date
-const formatTime = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  });
-};
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return date.toLocaleDateString("en-US", {
@@ -62,6 +53,14 @@ const TeamMemberDashboard = () => {
 
   const token = localStorage.getItem("teamsync_token");
   const currentDate = new Date().toISOString().split("T")[0];
+  
+  const isTaskPIDBased = (task: Task): boolean => {
+    return task.isPIDBased === true || (
+      task.pidWorkItems !== undefined &&
+      Array.isArray(task.pidWorkItems) &&
+      task.pidWorkItems.length > 0
+    );
+  };
 
   useEffect(() => {
     if (!isAuthenticated || !token) {
@@ -77,20 +76,28 @@ const TeamMemberDashboard = () => {
     headers: { Authorization: `Bearer ${token}` },
   });
 
-  const fetchTasks = async () => {
-    try {
-      setIsLoading(true);
-      const response = await axios.get<{ data: any[] }>(
-        `${API_URL}/tasks`,
-        getAuthHeaders()
-      );
-      console.log(
-        "Raw tasks data from API:",
-        JSON.stringify(response.data.data, null, 2)
-      ); // Debug raw response
+  //   FIXED: Simplified fetchTasks - no more splitting or virtual tasks
+// Only showing the fetchTasks function - replace your existing one
 
-      const tasksData = response.data.data
-        .map((task) => ({
+const fetchTasks = async () => {
+  try {
+    setIsLoading(true);
+    const response = await axios.get<{ data: any[] }>(
+      `${API_URL}/tasks`,
+      getAuthHeaders()
+    );
+
+    console.log("🔄 Fetching tasks from API...");
+
+    //   SIMPLIFIED: No more splitting, no more deduplication!
+    const tasksData = response.data.data
+      .map((task) => {
+        const hasPIDWorkItems =
+          task.pid_work_items &&
+          Array.isArray(task.pid_work_items) &&
+          task.pid_work_items.length > 0;
+
+        return {
           id: task.id.toString(),
           type: task.type as TaskType,
           assignee: task.assignee || "Unknown",
@@ -105,27 +112,21 @@ const TeamMemberDashboard = () => {
           projectName: task.project_name || "Unknown",
           areaNumber: task.area_name || "N/A",
           pidNumber: task.pid_number ?? "",
-          items: (task.items || []).map((item) => {
-            const blocks =
-              item.blocks !== undefined && item.blocks !== null
-                ? Number(item.blocks)
-                : 0;
-            console.log(`Mapping item ${item.id}: blocks=${blocks}`); // Debug each item
-            return {
-              id: item.id.toString(),
-              name: item.name || "Unnamed Item",
-              type: item.item_type || "Unknown",
-              completed: item.completed || false,
-              completedAt: item.completed_at || null,
-              entityId:
-                item.line_id ||
-                (item.item_type.toLowerCase().includes("line") ||
-                item.item_type === "NonInlineInstrument"
-                  ? 1
-                  : null),
-              blocks, // Ensure blocks is set
-            };
-          }),
+          isPIDBased: hasPIDWorkItems,
+          
+          //   Just use what backend gives us - it's already filtered by task_id
+          pidWorkItems: task.pid_work_items || [],
+
+          items: (task.items || []).map((item) => ({
+            id: item.id.toString(),
+            name: item.name || "Unnamed Item",
+            type: item.item_type || "Unknown",
+            completed: item.completed || false,
+            completedAt: item.completed_at || null,
+            entityId: item.line_id || null,
+            blocks: item.blocks !== undefined ? Number(item.blocks) : 0,
+          })),
+
           comments: (task.comments || []).map((comment) => ({
             id: comment.id.toString(),
             userId: comment.user_id.toString(),
@@ -134,30 +135,29 @@ const TeamMemberDashboard = () => {
             comment: comment.comment || "",
             createdAt: comment.created_at,
           })),
-          description: task.description || "",
-          lines: (task.items || [])
-            .filter((item) => item.type === "Line" || item.type === "Line Item")
-            .map((item) => ({
-              id: item.id,
-              name: item.name,
-              pidId: task.items.find((i) => i.type === "PID")?.id || "",
-              completed: item.completed,
-            })),
-        }))
-        .filter((task) => task.assigneeId === user?.id?.toString());
 
-      console.log("Processed tasks data:", JSON.stringify(tasksData, null, 2)); // Debug processed data
-      setTasks(tasksData);
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching tasks:", axiosError);
-      toast.error(
-        axiosError.response?.data?.message || "Failed to fetch tasks"
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
+          description: task.description || "",
+          lines: task.lines || [],
+        };
+      })
+      .filter((task) => task.assigneeId === user?.id?.toString());
+
+    console.log(`📊 Processed ${tasksData.length} tasks (no modifications)`);
+    
+    //   Just set it directly - that's it!
+    setTasks(tasksData);
+    
+  } catch (error) {
+    const axiosError = error as AxiosError<{ message: string }>;
+    console.error("❌ Error fetching tasks:", axiosError);
+    toast.error(
+      axiosError.response?.data?.message || "Failed to fetch tasks"
+    );
+  } finally {
+    setIsLoading(false);
+  }
+};
+
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
       fetchTasks();
@@ -188,19 +188,36 @@ const TeamMemberDashboard = () => {
     toast.success("Refreshing tasks...");
   };
 
+  //   FIX: Properly handle status changes for PID-based tasks
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    // Use the task ID directly (no originalId needed anymore)
+    setTasks((prevTasks) =>
+      prevTasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              status: newStatus,
+              ...(newStatus === "Completed" && { completedAt: new Date().toISOString() }),
+            }
+          : task
+      )
+    );
+
     try {
       await axios.patch(
         `${API_URL}/tasks/${taskId}/status`,
         { status: newStatus },
         getAuthHeaders()
       );
-      await fetchTasks();
       toast.success(
         newStatus === "In Progress" ? "Task started" : "Task completed"
       );
-    } catch {
+      
+      //   Refetch to sync with server
+      await fetchTasks();
+    } catch (error) {
       toast.error("Failed to update task status");
+      await fetchTasks(); // Revert on error
     }
   };
 
@@ -218,7 +235,7 @@ const TeamMemberDashboard = () => {
 
       const effectiveBlocks = blocks !== undefined && blocks >= 0 ? blocks : 0;
 
-      // IMMEDIATE optimistic update to prevent double-click
+      // Optimistic update
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId
@@ -234,7 +251,7 @@ const TeamMemberDashboard = () => {
         )
       );
 
-      const response = await axios.patch(
+      await axios.patch(
         `${API_URL}/tasks/${taskId}/items/${itemId}`,
         { completed, blocks: effectiveBlocks },
         {
@@ -245,19 +262,18 @@ const TeamMemberDashboard = () => {
         }
       );
 
-      // Refresh after successful update
-      await fetchTasks();
       await fetchMetrics();
       toast.success("Task item updated successfully");
+      
     } catch (error) {
-      // Revert on error
-      await fetchTasks();
+      await fetchTasks(); // Revert on error
       const axiosError = error as AxiosError<{ message?: string }>;
       toast.error(
         axiosError.response?.data?.message || "Failed to update task item"
       );
     }
   };
+
   const handleOpenComments = (task: Task) => {
     setSelectedTask(task);
     setIsCommentsOpen(true);
@@ -288,6 +304,7 @@ const TeamMemberDashboard = () => {
         new Date(b.completedAt || 0).getTime() -
         new Date(a.completedAt || 0).getTime()
     );
+
   const taskCounts = {
     assigned: assignedTasks.length,
     inProgress: inProgressTasks.length,
@@ -295,7 +312,42 @@ const TeamMemberDashboard = () => {
   };
 
   const getTotalBlocks = (task: Task) => {
+    if (task.isPIDBased) {
+      return task.pidWorkItems?.reduce((sum, item) => sum + (item.blocks || 0), 0) || 0;
+    }
     return task.items.reduce((sum, item) => sum + (item.blocks || 0), 0);
+  };
+
+  const renderTaskCard = (task: Task) => {
+    if (isTaskPIDBased(task)) {
+      return (
+        <PIDBasedTaskCard 
+          key={task.id} 
+          task={task} 
+          onStatusChange={handleStatusChange} 
+          onItemToggle={handleItemToggle} 
+          onOpenComments={handleOpenComments} 
+          onUpdate={fetchTasks}
+        />
+      );
+    }
+    return task.type === "Redline" ? (
+      <RedlineTaskCard
+        key={task.id}
+        task={task}
+        onStatusChange={handleStatusChange}
+        onItemToggle={handleItemToggle}
+        onOpenComments={handleOpenComments}
+      />
+    ) : (
+      <TaskCard
+        key={task.id}
+        task={task}
+        onStatusChange={handleStatusChange}
+        onItemToggle={handleItemToggle}
+        onOpenComments={handleOpenComments}
+      />
+    );
   };
 
   return (
@@ -320,12 +372,6 @@ const TeamMemberDashboard = () => {
               {getRandomMessage("general") || "Stay on top of your tasks!"}
             </AlertDescription>
           </div>
-          {process.env.NODE_ENV === "development" && (
-            <div className="mt-2 text-xs text-gray-500">
-              Total tasks loaded: {tasks.length} | User ID: {user?.id} | Last
-              refresh: {new Date().toLocaleTimeString()}
-            </div>
-          )}
         </header>
 
         {assignedTasks.length > 0 && (
@@ -360,6 +406,7 @@ const TeamMemberDashboard = () => {
           </div>
         </div>
 
+        {/* Mobile View */}
         <div className="block md:hidden mb-6">
           <Tabs defaultValue="assigned">
             <TabsList className="grid grid-cols-3 mb-4">
@@ -370,32 +417,14 @@ const TeamMemberDashboard = () => {
                 In Progress ({inProgressTasks.length})
               </TabsTrigger>
               <TabsTrigger value="completed">
-                Completed ({completedTasks.length})
+                Completed ({taskCounts.completed})
               </TabsTrigger>
             </TabsList>
             <TabsContent value="assigned" className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map((task) =>
-                  task.type === "Redline" ? (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                assignedTasks.map(renderTaskCard)
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No assigned tasks"}
@@ -406,25 +435,7 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map((task) =>
-                  task.type === "Redline" ? (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                inProgressTasks.map(renderTaskCard)
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No in-progress tasks"}
@@ -464,17 +475,7 @@ const TeamMemberDashboard = () => {
                     </CollapsibleTrigger>
                     <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
                       <div className="border-l-2 border-green-200 pl-4">
-                        {task.type === "Redline" ? (
-                          <RedlineTaskCard
-                            task={task}
-                            onOpenComments={handleOpenComments}
-                          />
-                        ) : (
-                          <TaskCard
-                            task={task}
-                            onOpenComments={handleOpenComments}
-                          />
-                        )}
+                        {renderTaskCard(task)}
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
@@ -488,6 +489,7 @@ const TeamMemberDashboard = () => {
           </Tabs>
         </div>
 
+        {/* Desktop View */}
         <div className="hidden md:grid md:grid-cols-3 gap-6">
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
@@ -498,25 +500,7 @@ const TeamMemberDashboard = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : assignedTasks.length > 0 ? (
-                assignedTasks.map((task) =>
-                  task.type === "Redline" ? (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                assignedTasks.map(renderTaskCard)
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No assigned tasks"}
@@ -526,32 +510,14 @@ const TeamMemberDashboard = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
-              <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>In
-              Progress
+              <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
+              In Progress ({inProgressTasks.length})
             </h2>
             <div className="space-y-4">
               {isLoading ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
               ) : inProgressTasks.length > 0 ? (
-                inProgressTasks.map((task) =>
-                  task.type === "Redline" ? (
-                    <RedlineTaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  ) : (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onStatusChange={handleStatusChange}
-                      onItemToggle={handleItemToggle}
-                      onOpenComments={handleOpenComments}
-                    />
-                  )
-                )
+                inProgressTasks.map(renderTaskCard)
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   {getRandomMessage("noTasks") || "No in-progress tasks"}
@@ -562,7 +528,7 @@ const TeamMemberDashboard = () => {
           <div>
             <h2 className="text-lg font-semibold mb-4 flex items-center">
               <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-              Completed
+              Completed ({completedTasks.length})
             </h2>
             <div className="space-y-4">
               {isLoading ? (
@@ -597,17 +563,7 @@ const TeamMemberDashboard = () => {
                     </CollapsibleTrigger>
                     <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
                       <div className="border-l-2 border-green-200 pl-4">
-                        {task.type === "Redline" ? (
-                          <RedlineTaskCard
-                            task={task}
-                            onOpenComments={handleOpenComments}
-                          />
-                        ) : (
-                          <TaskCard
-                            task={task}
-                            onOpenComments={handleOpenComments}
-                          />
-                        )}
+                        {renderTaskCard(task)}
                       </div>
                     </CollapsibleContent>
                   </Collapsible>

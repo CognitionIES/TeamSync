@@ -122,75 +122,75 @@ router.get("/", protect, async (req, res) => {
       console.log("Fetching tasks for Team Lead ID:", req.user.id);
       try {
         const query = `
-SELECT 
-  t.id, 
-  t.type, 
-  u.name as assignee, 
-  t.assignee_id, 
-  t.status, 
-  t.is_complex,
-  t.created_at, 
-  t.updated_at, 
-  t.completed_at, 
-  t.progress, 
-  t.project_id,
-  t.description,
-  p.name as project_name,
-  COALESCE(a.name, 'N/A') as area_name,
-  COALESCE((
-    SELECT pid.pid_number
-    FROM task_items ti
-    JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
-    WHERE ti.task_id = t.id
-    LIMIT 1
-  ), 'N/A') as pid_number,
-  COALESCE((
-    SELECT json_agg(json_build_object(
-      'id', ti.id,
-      'name', ti.name,
-      'item_type', ti.item_type,
-      'completed', ti.completed,
-      'completed_at', ti.completed_at,
-      'blocks', COALESCE(ti.blocks, 0)
-    ))
-    FROM task_items ti
-    WHERE t.id = ti.task_id AND ti.id IS NOT NULL
-  ), '[]') as items,
-  COALESCE((
-    SELECT json_agg(json_build_object(
-      'id', tc.id,
-      'user_id', tc.user_id,
-      'user_name', tc.user_name,
-      'user_role', tc.user_role,
-      'comment', tc.comment,
-      'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-    ))
-    FROM task_comments tc
-    WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
-  ), '[]') as comments
-FROM tasks t
-LEFT JOIN users u ON t.assignee_id = u.id
-LEFT JOIN projects p ON t.project_id = p.id
-LEFT JOIN areas a ON t.area_id = a.id
-WHERE t.assignee_id IN (
-  SELECT member_id FROM team_members WHERE lead_id = $1
-) OR t.assignee_id = $1
-GROUP BY 
-  t.id, 
-  t.type, 
-  t.assignee_id, 
-  t.status, 
-  t.is_complex,
-  t.created_at, 
-  t.updated_at, 
-  t.completed_at, 
-  t.progress, 
-  t.project_id,
-  t.description,
-  u.name,
-  p.name,
-  a.name
-    `;
+        SELECT 
+          t.id, 
+          t.type, 
+          u.name as assignee, 
+          t.assignee_id, 
+          t.status, 
+          t.is_complex,
+          t.created_at, 
+          t.updated_at, 
+          t.completed_at, 
+          t.progress, 
+          t.project_id,
+          t.description,
+          p.name as project_name,
+          COALESCE(a.name, 'N/A') as area_name,
+          COALESCE((
+            SELECT pid.pid_number
+            FROM task_items ti
+            JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+            WHERE ti.task_id = t.id
+            LIMIT 1
+          ), 'N/A') as pid_number,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', ti.id,
+              'name', ti.name,
+              'item_type', ti.item_type,
+              'completed', ti.completed,
+              'completed_at', ti.completed_at,
+              'blocks', COALESCE(ti.blocks, 0)
+            ))
+            FROM task_items ti
+            WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+          ), '[]') as items,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', tc.id,
+              'user_id', tc.user_id,
+              'user_name', tc.user_name,
+              'user_role', tc.user_role,
+              'comment', tc.comment,
+              'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            ))
+            FROM task_comments tc
+            WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+          ), '[]') as comments
+        FROM tasks t
+        LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
+        LEFT JOIN areas a ON t.area_id = a.id
+        WHERE t.assignee_id IN (
+          SELECT member_id FROM team_members WHERE lead_id = $1
+        ) OR t.assignee_id = $1
+        GROUP BY 
+          t.id, 
+          t.type, 
+          t.assignee_id, 
+          t.status, 
+          t.is_complex,
+          t.created_at, 
+          t.updated_at, 
+          t.completed_at, 
+          t.progress, 
+          t.project_id,
+          t.description,
+          u.name,
+          p.name,
+          a.name
+        `;
         const { rows } = await db.query(query, [req.user.id]);
         console.log("Tasks fetched for Team Lead:", rows);
         res.status(200).json({ data: rows });
@@ -210,73 +210,108 @@ GROUP BY
       console.log("Fetching tasks for Team Member ID:", req.user.id);
       try {
         const query = `
-      SELECT 
-        t.id, 
-        t.type, 
-        u.name as assignee, 
-        t.assignee_id, 
-        t.status, 
-        t.is_complex,
-        t.created_at, 
-        t.updated_at, 
-        t.completed_at, 
-        t.progress, 
-        t.project_id,
-        t.description,
-        p.name as project_name,
-        COALESCE(a.name, 'N/A') as area_name,
-        COALESCE((
-          SELECT pid.pid_number
-          FROM task_items ti
-          JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
-          WHERE ti.task_id = t.id
-          LIMIT 1
-        ), 'N/A') as pid_number,
-        COALESCE((
-          SELECT json_agg(json_build_object(
-            'id', ti.id,
-            'name', ti.name,
-            'item_type', ti.item_type,
-            'completed', ti.completed,
-            'completed_at', ti.completed_at,
-            'blocks', COALESCE(ti.blocks, 0)
-          ))
-          FROM task_items ti
-          WHERE t.id = ti.task_id AND ti.id IS NOT NULL
-        ), '[]') as items,
-        COALESCE((
-          SELECT json_agg(json_build_object(
-            'id', tc.id,
-            'user_id', tc.user_id,
-            'user_name', tc.user_name,
-            'user_role', tc.user_role,
-            'comment', tc.comment,
-            'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-          ))
-          FROM task_comments tc
-          WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
-        ), '[]') as comments
-      FROM tasks t
-      LEFT JOIN users u ON t.assignee_id = u.id
-      LEFT JOIN projects p ON t.project_id = p.id
-      LEFT JOIN areas a ON t.area_id = a.id
-      WHERE t.assignee_id = $1
-      GROUP BY 
-        t.id, 
-        t.type, 
-        t.assignee_id, 
-        t.status, 
-        t.is_complex,
-        t.created_at, 
-        t.updated_at, 
-        t.completed_at, 
-        t.progress, 
-        t.project_id,
-        t.description,
-        u.name,
-        p.name,
-        a.name
+SELECT
+  t.id,
+  t.type,
+  u.name as assignee,
+  t.assignee_id,
+  t.status,
+  t.is_complex,
+  t.created_at,
+  t.updated_at,
+  t.completed_at,
+  t.progress,
+  t.project_id,
+  t.description,
+  t.is_pid_based,
+  p.name as project_name,
+  COALESCE(a.name, 'N/A') as area_name,
+  
+  -- Get first PID number for display
+  COALESCE((
+    SELECT pids.pid_number
+    FROM pid_work_items pwi
+    JOIN pids ON pwi.pid_id = pids.id
+    WHERE pwi.task_id = t.id
+    ORDER BY pwi.created_at ASC
+    LIMIT 1
+  ), COALESCE((
+    SELECT pid.pid_number
+    FROM task_items ti
+    JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+    WHERE ti.task_id = t.id
+    LIMIT 1
+  ), 'N/A')) as pid_number,
+ 
+  -- ✅ CRITICAL FIX: Only get work items for THIS task
+  CASE 
+    WHEN t.is_pid_based = true 
+    THEN COALESCE((
+      SELECT json_agg(json_build_object(
+        'id', pwi.id,
+        'pid_id', pwi.pid_id,
+        'pid_number', pids.pid_number,
+        'line_id', pwi.line_id,
+        'line_number', l.line_number,
+        'equipment_id', pwi.equipment_id,
+        'equipment_number', e.equipment_number,
+        'status', pwi.status,
+        'completed_at', pwi.completed_at,
+        'remarks', pwi.remarks,
+        'blocks', COALESCE(pwi.blocks, 0)
+      ) ORDER BY pids.pid_number, l.line_number, e.equipment_number)
+      FROM pid_work_items pwi
+      LEFT JOIN pids ON pwi.pid_id = pids.id
+      LEFT JOIN lines l ON pwi.line_id = l.id
+      LEFT JOIN equipment e ON pwi.equipment_id = e.id
+      WHERE pwi.task_id = t.id
+    ), '[]')
+    ELSE '[]'
+  END as pid_work_items,
+ 
+  -- Regular task items (for non-PID tasks)
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'id', ti.id,
+      'name', ti.name,
+      'item_type', ti.item_type,
+      'completed', ti.completed,
+      'completed_at', ti.completed_at,
+      'blocks', COALESCE(ti.blocks, 0)
+    ))
+    FROM task_items ti
+    WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+  ), '[]') as items,
+ 
+  -- Comments
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'id', tc.id,
+      'user_id', tc.user_id,
+      'user_name', tc.user_name,
+      'user_role', tc.user_role,
+      'comment', tc.comment,
+      'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    ))
+    FROM task_comments tc
+    WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
+  ), '[]') as comments
+  
+FROM tasks t
+LEFT JOIN users u ON t.assignee_id = u.id
+LEFT JOIN projects p ON t.project_id = p.id
+LEFT JOIN areas a ON t.area_id = a.id
+WHERE t.assignee_id = $1
+ORDER BY 
+  CASE t.status 
+    WHEN 'Assigned' THEN 1 
+    WHEN 'In Progress' THEN 2 
+    WHEN 'Completed' THEN 3 
+  END,
+  t.created_at DESC
     `;
+
+
         const { rows } = await db.query(query, [req.user.id]);
         console.log("Tasks fetched for Team Member:", rows);
         res.status(200).json({ data: rows });
@@ -1062,11 +1097,11 @@ router.patch("/:id/retract", protect, async (req, res) => {
             originalTask:
               completedItems.length > 0
                 ? {
-                    id: task.id,
-                    status: "Completed",
-                    assignee: task.assignee,
-                    completedItems: completedItems.length,
-                  }
+                  id: task.id,
+                  status: "Completed",
+                  assignee: task.assignee,
+                  completedItems: completedItems.length,
+                }
                 : null,
             newTask: {
               id: newTask.id,

@@ -48,6 +48,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import LoginAnimation from "../landing/LoginAnimation";
+import TaskTypeIndicator from "../shared/TaskTypeIndicator";
 
 // API URL
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
@@ -82,8 +83,8 @@ interface User {
   name: string;
   role: "Team Member" | "Team Lead";
   projectId?: string;
-  teamLead?: string; 
-  password?: string; 
+  teamLead?: string;
+  password?: string;
 }
 
 const AdminDashboard = () => {
@@ -361,13 +362,19 @@ const AdminDashboard = () => {
           "Content-Type": "application/json",
         },
       };
-      const userData = {
+      const userData: {
+        name: string;
+        role: "Team Member" | "Team Lead";
+        password: string;
+        projectId?: string;
+        teamLead?: string;
+      } = {
         name: newUserName,
         role: newUserRole,
         password: newUserPassword,
       };
       if (newUserProject !== "none") userData.projectId = newUserProject;
-      if (newTeamForUser !== "none") userData.teamLead = newTeamForUser; 
+      if (newTeamForUser !== "none") userData.teamLead = newTeamForUser;
       console.log(
         "Posting to URL:",
         `${API_URL}/users`,
@@ -428,7 +435,24 @@ const AdminDashboard = () => {
       setIsAddingTeam(false);
     }
   };
+  const handleArrowBack = async () => {
+    if (!newTaskType) {
+      toast.error("clash royal!!");
+      return;
+    }
+    try {
+      const config = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      };
+      const authType = { task: newTaskType };
+      const response = await axios.post(`${API_URL}/pid-work.js`, TaskTypeIndicator)
+    } catch (error) {
 
+    }
+  }
   const handleAddTaskType = async () => {
     if (!newTaskType) {
       toast.error("Please provide a task type");
@@ -608,9 +632,8 @@ const AdminDashboard = () => {
               <CardTitle>
                 {selectedProject === "all"
                   ? "Overall Project Metrics"
-                  : `Project Metrics for ${
-                      projects.find((p) => p.id === selectedProject)?.name
-                    }`}
+                  : `Project Metrics for ${projects.find((p) => p.id === selectedProject)?.name
+                  }`}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">

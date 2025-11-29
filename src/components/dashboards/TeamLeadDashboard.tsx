@@ -22,45 +22,36 @@ import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
 import { Progress } from "@/components/ui/progress";
 import AssignedItemsModal from "../shared/AssignedItemsModal";
-
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
-
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
-
 interface User {
   role: string;
   id: string;
   name: string;
 }
-
 interface TeamMember {
   id: string;
   name: string;
 }
-
 interface Project {
   id: string;
   name: string;
 }
-
 interface PID {
   id: string;
   name: string;
 }
-
 interface Line {
   id: string;
   name: string;
   pidId: string;
 }
-
 interface Equipment {
   id: string;
   name: string;
   areaId: string;
 }
-
 interface AssignedItems {
   upvLines: string[];
   upvEquipment: string[];
@@ -68,7 +59,6 @@ interface AssignedItems {
   qcEquipment: string[];
   redlinePIDs: string[];
 }
-
 interface FetchedAssignedItems {
   pids: any;
   lines: any;
@@ -124,7 +114,6 @@ interface FetchedAssignedItems {
     }[];
   };
 }
-
 const TeamLeadDashboard = () => {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
@@ -161,6 +150,7 @@ const TeamLeadDashboard = () => {
   const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(
     null
   );
+  const [usePIDBasedAssignment, setUsePIDBasedAssignment] = useState(false);
   const [description, setDescription] = useState("");
   const [selectedItemType, setSelectedItemType] = useState<
     "PID" | "Line" | "Equipment" | null
@@ -193,9 +183,10 @@ const TeamLeadDashboard = () => {
     useState<Task | null>(null);
   const [newAssigneeId, setNewAssigneeId] = useState<string>("");
   const [retractModalOpen, setRetractModalOpen] = useState(false);
-
   const token = localStorage.getItem("teamsync_token");
-
+  const isTaskPIDBased = (task: Task) => {
+    return task.isPIDBased === true; // New field from backend
+  };
   const handleSelectTaskForRetract = (task: Task | null) => {
     console.log("Select Task for Retract:", task);
     setSelectedTaskForRetract(task);
@@ -205,7 +196,6 @@ const TeamLeadDashboard = () => {
       setRetractModalOpen(false);
     }
   };
-
   const handleRetractTask = async (taskId: string) => {
     console.log("Retracting Task:", taskId);
     const task = tasks.find((t) => t.id === taskId);
@@ -213,37 +203,29 @@ const TeamLeadDashboard = () => {
       toast.error("Task not found");
       return;
     }
-
     // Check if task has completed items
     const completedItems = task.items.filter((item) => item.completed);
     const hasCompletedWork = completedItems.length > 0;
-
     if (hasCompletedWork && !newAssigneeId) {
       toast.error(
         "This task has completed work. Please select a new assignee to reassign incomplete items."
       );
       return;
     }
-
     try {
       setIsLoading(true);
       const payload: { newAssigneeId?: string } = {};
-
       if (newAssigneeId) {
         payload.newAssigneeId = newAssigneeId;
       }
-
       const response = await axios.patch(
         `${API_URL}/tasks/${taskId}/retract`,
         payload,
         getAuthHeaders()
       );
-
       console.log("Retract response:", response.data);
-
       // Refresh tasks to sync with backend
       await fetchTasks();
-
       if (response.data.data.newTask) {
         toast.success(
           `Task ${taskId} retracted and reassigned to new task #${response.data.data.newTask.id}`
@@ -251,7 +233,6 @@ const TeamLeadDashboard = () => {
       } else {
         toast.success(`Task ${taskId} retracted successfully`);
       }
-
       setSelectedTaskForRetract(null);
       setNewAssigneeId("");
       setRetractModalOpen(false);
@@ -265,7 +246,6 @@ const TeamLeadDashboard = () => {
       setIsLoading(false);
     }
   };
-
   const handleReassign = (assigneeId: string) => {
     setNewAssigneeId(assigneeId);
   };
@@ -278,7 +258,6 @@ const TeamLeadDashboard = () => {
       navigate("/", { replace: true });
     }
   }, [isAuthenticated, user, token, navigate]);
-
   const getAuthHeaders = () => {
     const token = localStorage.getItem("teamsync_token");
     if (!token) {
@@ -291,7 +270,6 @@ const TeamLeadDashboard = () => {
       },
     };
   };
-
   const fetchProjects = async () => {
     try {
       const response = await axios.get<{
@@ -327,7 +305,6 @@ const TeamLeadDashboard = () => {
       }
     }
   };
-
   const fetchTeamMembers = async () => {
     setIsTeamMembersLoading(true);
     try {
@@ -367,7 +344,6 @@ const TeamLeadDashboard = () => {
       setIsTeamMembersLoading(false);
     }
   };
-
   const fetchPIDs = async () => {
     if (!selectedProject) return;
     try {
@@ -401,13 +377,11 @@ const TeamLeadDashboard = () => {
       setSelectedPIDs([]);
     }
   };
-
   const fetchLines = async () => {
     if (!selectedProject) return;
     try {
       // NEW: Add taskType query param for QC filtering
       const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
-
       const response = await axios.get<{
         data: {
           id: number;
@@ -419,7 +393,6 @@ const TeamLeadDashboard = () => {
         `${API_URL}/lines/unassigned/${selectedProject}${taskTypeParam}`,
         getAuthHeaders()
       );
-
       const linesData = response.data.data
         .filter(
           (line) =>
@@ -431,12 +404,10 @@ const TeamLeadDashboard = () => {
           name: line.line_number,
           pidId: line.pid_id.toString(),
         }));
-
       setLines(linesData);
       setSelectedLines((prev) =>
         prev.filter((lineId) => linesData.some((line) => line.id === lineId))
       );
-
       if (linesData.length === 0) {
         const message =
           taskType === "QC"
@@ -454,12 +425,10 @@ const TeamLeadDashboard = () => {
       setSelectedLines([]);
     }
   };
-
   const fetchEquipment = async () => {
     if (!selectedProject) return;
     try {
       const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
-
       const response = await axios.get<{
         data: {
           id: number;
@@ -471,7 +440,6 @@ const TeamLeadDashboard = () => {
         `${API_URL}/equipment/unassigned/${selectedProject}${taskTypeParam}`,
         getAuthHeaders()
       );
-
       const equipmentData = response.data.data
         .filter(
           (equip) =>
@@ -487,14 +455,12 @@ const TeamLeadDashboard = () => {
           name: equip.equipment_number,
           areaId: equip.area_id?.toString() || "",
         }));
-
       setEquipment(equipmentData);
       setSelectedEquipment((prev) =>
         prev.filter((equipId) =>
           equipmentData.some((equip) => equip.id === equipId)
         )
       );
-
       if (equipmentData.length === 0) {
         const message =
           taskType === "QC"
@@ -512,32 +478,27 @@ const TeamLeadDashboard = () => {
       setSelectedEquipment([]);
     }
   };
-
   const fetchNonInlineInstruments = async () => {
     if (!selectedProject) return;
     try {
       const taskTypeParam = taskType === "QC" ? "?taskType=QC" : "";
-
       const response = await axios.get<{
         data: { id: number; instrument_tag: string; description: string }[];
       }>(
         `${API_URL}/non-inline-instruments/unassigned/${selectedProject}${taskTypeParam}`,
         getAuthHeaders()
       );
-
       const instrumentsData = response.data.data.map((instrument) => ({
         id: instrument.id.toString(),
         instrumentTag: instrument.instrument_tag,
         description: instrument.description,
       }));
-
       setNonInlineInstruments(instrumentsData);
       setSelectedNonInlineInstruments((prev) =>
         prev.filter((id) =>
           instrumentsData.some((instrument) => instrument.id === id)
         )
       );
-
       if (instrumentsData.length === 0) {
         const message =
           taskType === "QC"
@@ -550,7 +511,7 @@ const TeamLeadDashboard = () => {
       console.error("Error fetching non-inline instruments:", axiosError);
       toast.error(
         axiosError.response?.data?.message ||
-          "Failed to fetch non-inline instruments"
+        "Failed to fetch non-inline instruments"
       );
       setNonInlineInstruments([]);
       setSelectedNonInlineInstruments([]);
@@ -566,7 +527,6 @@ const TeamLeadDashboard = () => {
         getAuthHeaders()
       );
       console.log("Tasks API response:", response.data);
-
       const tasksData = response.data.data
         .filter((task) => {
           const matchesProject =
@@ -606,7 +566,6 @@ const TeamLeadDashboard = () => {
             }
           });
           const uniqueComments = Array.from(commentMap.values());
-
           const mappedItems = (task.items || [])
             .map((item) => {
               if (!item || !item.id) {
@@ -622,7 +581,6 @@ const TeamLeadDashboard = () => {
               };
             })
             .filter((item) => item !== null);
-
           // Add lines property as required by Task type
           return {
             id: task.id.toString(),
@@ -645,7 +603,6 @@ const TeamLeadDashboard = () => {
             lines: task.lines || [], // <-- Ensure lines property exists
           };
         });
-
       console.log("Processed tasks data:", tasksData);
       setTasks(tasksData);
     } catch (error) {
@@ -658,13 +615,12 @@ const TeamLeadDashboard = () => {
       });
       toast.error(
         axiosError.response?.data?.message ||
-          "Failed to fetch tasks. Please try again."
+        "Failed to fetch tasks. Please try again."
       );
     } finally {
       setIsLoading(false);
     }
   };
-
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     try {
       const response = await axios.get<{ data: FetchedAssignedItems }>(
@@ -672,7 +628,6 @@ const TeamLeadDashboard = () => {
         getAuthHeaders()
       );
       const data = response.data.data;
-
       // Map project_id to project_name using the projects array
       const mapProjectName = (items: any[]) =>
         items.map((item) => ({
@@ -680,7 +635,6 @@ const TeamLeadDashboard = () => {
           project_name:
             projects.find((p) => p.id === item.project_id)?.name || "Unknown",
         }));
-
       return {
         upvLines: {
           count: data.upvLines.count,
@@ -722,7 +676,6 @@ const TeamLeadDashboard = () => {
         setSelectedTaskType(null);
         setSelectedItemType(null);
       }
-
       const items = await fetchAssignedItems(userId, taskId);
       setAssignedItems({
         pids: [],
@@ -744,7 +697,6 @@ const TeamLeadDashboard = () => {
       setLoadingItems(false);
     }
   };
-
   const closeModal = () => {
     setModalIsOpen(false);
     setAssignedItems(null);
@@ -752,7 +704,6 @@ const TeamLeadDashboard = () => {
     setSelectedTaskType(null);
     setSelectedItemType(null);
   };
-
   const handleViewComments = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
@@ -762,17 +713,14 @@ const TeamLeadDashboard = () => {
       toast.error("Task not found");
     }
   };
-
   const closeCommentsModal = () => {
     setCommentsModalIsOpen(false);
     setSelectedTaskForComments(null);
   };
-
   const handleAssigneeChange = (value: string) => {
     console.log("Selected assignee:", value); // Add logging for debugging
     setAssignee(value);
   };
-
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Lead" && token) {
       fetchProjects();
@@ -780,7 +728,6 @@ const TeamLeadDashboard = () => {
       setGeneralMessage(getRandomMessage("general"));
     }
   }, [isAuthenticated, user, token]);
-
   useEffect(() => {
     if (selectedProject && taskType) {
       Promise.all([
@@ -795,14 +742,12 @@ const TeamLeadDashboard = () => {
       });
     }
   }, [selectedProject, taskType]);
-
   useEffect(() => {
     const upvLines: string[] = [];
     const upvEquipment: string[] = [];
     const qcLines: string[] = [];
     const qcEquipment: string[] = [];
     const redlinePIDs: string[] = [];
-
     tasks.forEach((task) => {
       task.items.forEach((item) => {
         if (task.type === "Redline" && item.type === "PID") {
@@ -816,7 +761,6 @@ const TeamLeadDashboard = () => {
         }
       });
     });
-
     setAssignedItemsForDuplicates({
       upvLines,
       upvEquipment,
@@ -825,7 +769,6 @@ const TeamLeadDashboard = () => {
       redlinePIDs,
     });
   }, [tasks]);
-
   const handleTaskTypeChange = (value: string) => {
     setTaskType(value as TaskType);
     setAssignmentType("");
@@ -833,7 +776,6 @@ const TeamLeadDashboard = () => {
     setSelectedLines([]);
     setSelectedEquipment([]);
   };
-
   const handleAssignmentTypeChange = (value: string) => {
     console.log("Assignment type changed to:", value); // Add this log
     if (
@@ -850,7 +792,6 @@ const TeamLeadDashboard = () => {
       setSelectedNonInlineInstruments([]); // Reset non-inline instruments selection
     }
   };
-
   const handleRefresh = () => {
     if (!selectedProject) {
       toast.error("Please select a project first.");
@@ -872,212 +813,23 @@ const TeamLeadDashboard = () => {
         toast.error("Failed to refresh data");
       });
   };
-
   const handleAssign = async () => {
     if (!taskType || !assignee || !selectedProject) {
       toast.error("Please select task type, assignee, and project");
       return;
     }
-
     const assigneeId = parseInt(assignee);
     if (isNaN(assigneeId)) {
       toast.error("Invalid assignee selected");
       return;
     }
-
     const project = projects.find((p) => p.id === selectedProject);
     if (!project) {
       toast.error("Selected project not found. Please refresh and try again.");
       return;
     }
-
-    let selectedItems: {
-      itemId: string;
-      itemType: string;
-      itemName: string;
-    }[] = [];
-
-    if (taskType === "Misc") {
-      if (
-        !description ||
-        typeof description !== "string" ||
-        description.trim().length === 0
-      ) {
-        toast.error("Please provide a description for the miscellaneous task");
-        return;
-      }
-    } else {
-      let validSelection = false;
-
-      if (taskType === "Redline" && assignmentType === "PID") {
-        if (selectedPIDs.length > 0) {
-          validSelection = true;
-          selectedItems = selectedPIDs
-            .map((pid) => {
-              const pidObj = pids.find((p) => p.id === pid);
-              if (!pidObj) {
-                console.warn(`PID with ID ${pid} not found in pids array`);
-                return null;
-              }
-              return {
-                itemId: pid,
-                itemType: "PID",
-                itemName: pidObj.name || pid,
-              };
-            })
-            .filter((item) => item !== null);
-        }
-      } else if (taskType === "UPV") {
-        if (assignmentType === "Line" && selectedLines.length > 0) {
-          validSelection = true;
-          selectedItems = selectedLines
-            .map((line) => {
-              const lineObj = lines.find((l) => l.id === line);
-              if (!lineObj) {
-                console.warn(`Line with ID ${line} not found in lines array`);
-                return null;
-              }
-              return {
-                itemId: line,
-                itemType: "Line",
-                itemName: lineObj.name || line,
-              };
-            })
-            .filter((item) => item !== null);
-        } else if (
-          assignmentType === "Equipment" &&
-          selectedEquipment.length > 0
-        ) {
-          validSelection = true;
-          selectedItems = selectedEquipment
-            .map((equip) => {
-              const equipObj = equipment.find((e) => e.id === equip);
-              if (!equipObj) {
-                console.warn(
-                  `Equipment with ID ${equip} not found in equipment array`
-                );
-                return null;
-              }
-              return {
-                itemId: equip,
-                itemType: "Equipment",
-                itemName: equipObj.name || equip,
-              };
-            })
-            .filter((item) => item !== null);
-        } else if (
-          assignmentType === "NonInlineInstrument" &&
-          selectedNonInlineInstruments.length > 0
-        ) {
-          validSelection = true;
-          selectedItems = selectedNonInlineInstruments
-            .map((instrumentId) => {
-              const instrumentObj = nonInlineInstruments.find(
-                (i) => i.id === instrumentId
-              );
-              if (!instrumentObj) {
-                console.warn(
-                  `Non-inline instrument with ID ${instrumentId} not found`
-                );
-                return null;
-              }
-              return {
-                itemId: instrumentId,
-                itemType: "NonInlineInstrument",
-                itemName: instrumentObj.instrumentTag,
-              };
-            })
-            .filter((item) => item !== null);
-        }
-      } else if (taskType === "QC") {
-        if (assignmentType === "PID" && selectedPIDs.length > 0) {
-          validSelection = true;
-          selectedItems = selectedPIDs
-            .map((pid) => {
-              const pidObj = pids.find((p) => p.id === pid);
-              if (!pidObj) {
-                console.warn(`PID with ID ${pid} not found in pids array`);
-                return null;
-              }
-              return {
-                itemId: pid,
-                itemType: "PID",
-                itemName: pidObj.name || pid,
-              };
-            })
-            .filter((item) => item !== null);
-        } else if (assignmentType === "Line" && selectedLines.length > 0) {
-          validSelection = true;
-          selectedItems = selectedLines
-            .map((line) => {
-              const lineObj = lines.find((l) => l.id === line);
-              if (!lineObj) {
-                console.warn(`Line with ID ${line} not found in lines array`);
-                return null;
-              }
-              return {
-                itemId: line,
-                itemType: "Line",
-                itemName: lineObj.name || line,
-              };
-            })
-            .filter((item) => item !== null);
-        } else if (
-          assignmentType === "Equipment" &&
-          selectedEquipment.length > 0
-        ) {
-          validSelection = true;
-          selectedItems = selectedEquipment
-            .map((equip) => {
-              const equipObj = equipment.find((e) => e.id === equip);
-              if (!equipObj) {
-                console.warn(
-                  `Equipment with ID ${equip} not found in equipment array`
-                );
-                return null;
-              }
-              return {
-                itemId: equip,
-                itemType: "Equipment",
-                itemName: equipObj.name || equip,
-              };
-            })
-            .filter((item) => item !== null);
-        } else if (
-          assignmentType === "NonInlineInstrument" &&
-          selectedNonInlineInstruments.length > 0
-        ) {
-          validSelection = true;
-          selectedItems = selectedNonInlineInstruments
-            .map((instrumentId) => {
-              const instrumentObj = nonInlineInstruments.find(
-                (i) => i.id === instrumentId
-              );
-              if (!instrumentObj) {
-                console.warn(
-                  `Non-inline instrument with ID ${instrumentId} not found`
-                );
-                return null;
-              }
-              return {
-                itemId: instrumentId,
-                itemType: "NonInlineInstrument",
-                itemName: instrumentObj.instrumentTag,
-              };
-            })
-            .filter((item) => item !== null);
-        }
-      }
-
-      if (!validSelection || selectedItems.length === 0) {
-        toast.error("Please select at least one valid item to assign");
-        return;
-      }
-    }
-
     setIsSubmitting(true);
     setSubmissionProgress(0);
-
     try {
       const authHeaders = getAuthHeaders();
       const assigneeMember = teamMembers.find(
@@ -1086,7 +838,274 @@ const TeamLeadDashboard = () => {
       if (!assigneeMember) {
         throw new Error("Assignee not found");
       }
+      if (
+        taskType === "UPV" &&
+        usePIDBasedAssignment &&
+        selectedPIDs.length > 0
+      ) {
+        console.log("Using PID-based assignment workflow");
+        console.log("Token being sent:", token);
 
+        //   FIXED: Changed from /api/pid-work/tasks/assign-pid to /api/tasks/assign-pid
+        const pidAssignmentPromises = selectedPIDs.map((pidId) => {
+          const payload = {
+            pid_id: parseInt(pidId),
+            user_id: assigneeId,
+            task_type: "UPV",
+            estimated_blocks: 0,
+            project_id: selectedProject
+
+          };
+
+          console.log(`---> Assigning PID ${pidId} with payload:`, payload);
+
+          return axios.post(
+            `${API_URL}/tasks/assign-pid`,
+            payload,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Cache-Control": "no-cache",
+              },
+            }
+          );
+        });
+        try {
+          const results = await Promise.all(pidAssignmentPromises);
+          console.log("--->  PID assignment results:", results);
+
+          setSubmissionProgress(100);
+
+          // Refresh data
+          await Promise.all([
+            fetchTasks(),
+            fetchPIDs(),
+            fetchLines(),
+            fetchEquipment(),
+          ]);
+
+          // Clear form
+          setTaskType("");
+          setAssignmentType("");
+          setSelectedPIDs([]);
+          setAssignee("");
+          setUsePIDBasedAssignment(false);
+
+          toast.success(
+            `${selectedPIDs.length} PID(s) assigned to ${assigneeMember.name} using PID-based workflow. ${getRandomMessage("completion")}`
+          );
+          return;
+        } catch (error) {
+          const axiosError = error as AxiosError<{ message: string }>;
+          console.error("<---Error in PID assignment:", {
+            message: axiosError.message,
+            response: axiosError.response?.data,
+            status: axiosError.response?.status,
+          });
+          throw error; // Re-throw to be caught by outer catch
+        }
+      }
+      // EXISTING: Legacy line-based assignment continues below...
+      let selectedItems: {
+        itemId: string;
+        itemType: string;
+        itemName: string;
+      }[] = [];
+      let validSelection = false;
+      if (taskType === "Misc") {
+        if (
+          !description ||
+          typeof description !== "string" ||
+          description.trim().length === 0
+        ) {
+          toast.error(
+            "Please provide a description for the miscellaneous task"
+          );
+          return;
+        }
+      } else {
+        // ... rest of existing validation logic ...
+        if (taskType === "Redline" && assignmentType === "PID") {
+          if (selectedPIDs.length > 0) {
+            validSelection = true;
+            selectedItems = selectedPIDs
+              .map((pid) => {
+                const pidObj = pids.find((p) => p.id === pid);
+                if (!pidObj) {
+                  console.warn(`PID with ID ${pid} not found in pids array`);
+                  return null;
+                }
+                return {
+                  itemId: pid,
+                  itemType: "PID",
+                  itemName: pidObj.name || pid,
+                };
+              })
+              .filter((item) => item !== null);
+          }
+        } else if (taskType === "UPV") {
+          if (assignmentType === "Line" && selectedLines.length > 0) {
+            validSelection = true;
+            selectedItems = selectedLines
+              .map((line) => {
+                const lineObj = lines.find((l) => l.id === line);
+                if (!lineObj) {
+                  console.warn(`Line with ID ${line} not found in lines array`);
+                  return null;
+                }
+                return {
+                  itemId: line,
+                  itemType: "Line",
+                  itemName: lineObj.name || line,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (
+            assignmentType === "Equipment" &&
+            selectedEquipment.length > 0
+          ) {
+            validSelection = true;
+            selectedItems = selectedEquipment
+              .map((equip) => {
+                const equipObj = equipment.find((e) => e.id === equip);
+                if (!equipObj) {
+                  console.warn(
+                    `Equipment with ID ${equip} not found in equipment array`
+                  );
+                  return null;
+                }
+                return {
+                  itemId: equip,
+                  itemType: "Equipment",
+                  itemName: equipObj.name || equip,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (assignmentType === "PID" && selectedPIDs.length > 0) {
+            validSelection = true;
+            selectedItems = selectedPIDs
+              .map((pid) => {
+                const pidObj = pids.find((p) => p.id === pid);
+                if (!pidObj) {
+                  console.warn(`PID with ID ${pid} not found in pids array`);
+                  return null;
+                }
+                return {
+                  itemId: pid,
+                  itemType: "PID",
+                  itemName: pidObj.name || pid,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (
+            assignmentType === "NonInlineInstrument" &&
+            selectedNonInlineInstruments.length > 0
+          ) {
+            validSelection = true;
+            selectedItems = selectedNonInlineInstruments
+              .map((instrumentId) => {
+                const instrumentObj = nonInlineInstruments.find(
+                  (i) => i.id === instrumentId
+                );
+                if (!instrumentObj) {
+                  console.warn(
+                    `Non-inline instrument with ID ${instrumentId} not found`
+                  );
+                  return null;
+                }
+                return {
+                  itemId: instrumentId,
+                  itemType: "NonInlineInstrument",
+                  itemName: instrumentObj.instrumentTag,
+                };
+              })
+              .filter((item) => item !== null);
+          }
+        } else if (taskType === "QC") {
+          if (assignmentType === "PID" && selectedPIDs.length > 0) {
+            validSelection = true;
+            selectedItems = selectedPIDs
+              .map((pid) => {
+                const pidObj = pids.find((p) => p.id === pid);
+                if (!pidObj) {
+                  console.warn(`PID with ID ${pid} not found in pids array`);
+                  return null;
+                }
+                return {
+                  itemId: pid,
+                  itemType: "PID",
+                  itemName: pidObj.name || pid,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (assignmentType === "Line" && selectedLines.length > 0) {
+            validSelection = true;
+            selectedItems = selectedLines
+              .map((line) => {
+                const lineObj = lines.find((l) => l.id === line);
+                if (!lineObj) {
+                  console.warn(`Line with ID ${line} not found in lines array`);
+                  return null;
+                }
+                return {
+                  itemId: line,
+                  itemType: "Line",
+                  itemName: lineObj.name || line,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (
+            assignmentType === "Equipment" &&
+            selectedEquipment.length > 0
+          ) {
+            validSelection = true;
+            selectedItems = selectedEquipment
+              .map((equip) => {
+                const equipObj = equipment.find((e) => e.id === equip);
+                if (!equipObj) {
+                  console.warn(
+                    `Equipment with ID ${equip} not found in equipment array`
+                  );
+                  return null;
+                }
+                return {
+                  itemId: equip,
+                  itemType: "Equipment",
+                  itemName: equipObj.name || equip,
+                };
+              })
+              .filter((item) => item !== null);
+          } else if (
+            assignmentType === "NonInlineInstrument" &&
+            selectedNonInlineInstruments.length > 0
+          ) {
+            validSelection = true;
+            selectedItems = selectedNonInlineInstruments
+              .map((instrumentId) => {
+                const instrumentObj = nonInlineInstruments.find(
+                  (i) => i.id === instrumentId
+                );
+                if (!instrumentObj) {
+                  console.warn(
+                    `Non-inline instrument with ID ${instrumentId} not found`
+                  );
+                  return null;
+                }
+                return {
+                  itemId: instrumentId,
+                  itemType: "NonInlineInstrument",
+                  itemName: instrumentObj.instrumentTag,
+                };
+              })
+              .filter((item) => item !== null);
+          }
+        }
+        if (!validSelection || selectedItems.length === 0) {
+          toast.error("Please select at least one valid item to assign");
+          return;
+        }
+      }
+      // Legacy task creation
       const newTask = {
         type: taskType,
         assigneeId,
@@ -1108,7 +1127,6 @@ const TeamLeadDashboard = () => {
       );
       const taskId = response.data.data.id;
       setSubmissionProgress(50);
-
       if (assignmentType === "Line" && taskType !== "Misc") {
         const lineIds = selectedItems.map((item) => parseInt(item.itemId));
         await axios.put(
@@ -1143,9 +1161,7 @@ const TeamLeadDashboard = () => {
           authHeaders
         );
       }
-
       setSubmissionProgress(100);
-
       await Promise.all([
         fetchTasks(),
         fetchPIDs(),
@@ -1153,7 +1169,6 @@ const TeamLeadDashboard = () => {
         fetchEquipment(),
         fetchNonInlineInstruments(),
       ]);
-
       setTaskType("");
       setAssignmentType("");
       setSelectedPIDs([]);
@@ -1163,7 +1178,6 @@ const TeamLeadDashboard = () => {
       setAssignee("");
       setIsComplex(false);
       setDescription("");
-
       toast.success(
         `Task assigned to ${assigneeMember.name}. ${getRandomMessage(
           "completion"
@@ -1195,12 +1209,11 @@ const TeamLeadDashboard = () => {
         assignmentType === "PID"
           ? pids.length
           : assignmentType === "Line"
-          ? lines.length
-          : equipment.length;
+            ? lines.length
+            : equipment.length;
       setGroupSelectCount(Math.min(count, maxCount));
     }
   };
-
   // Handler for group selection of PIDs
   const handlePIDCheckboxChange = (
     pidId: string,
@@ -1301,17 +1314,14 @@ const TeamLeadDashboard = () => {
       }
     }
   };
-
   const handleExportCSV = async () => {
     if (tasks.length === 0) {
       toast.error("No tasks available to export.");
       return;
     }
-
     try {
       // Fetch detailed task data with blocks
       const csvData: any[] = [];
-
       for (const task of tasks) {
         for (const item of task.items) {
           const row = {
@@ -1332,16 +1342,15 @@ const TeamLeadDashboard = () => {
             }),
             "Completed On": item.completedAt
               ? new Date(item.completedAt).toLocaleString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })
+                timeZone: "Asia/Kolkata",
+                dateStyle: "medium",
+                timeStyle: "short",
+              })
               : "Not Completed",
           };
           csvData.push(row);
         }
       }
-
       // Create CSV headers
       const headers = [
         "Area No",
@@ -1357,7 +1366,6 @@ const TeamLeadDashboard = () => {
         "Assigned On",
         "Completed On",
       ];
-
       // Convert to CSV
       const csvRows = csvData.map((row) =>
         headers.map((header) => {
@@ -1368,11 +1376,9 @@ const TeamLeadDashboard = () => {
             : value;
         })
       );
-
       const csvContent = [headers, ...csvRows]
         .map((row) => row.join(","))
         .join("\n");
-
       // Download
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -1386,7 +1392,6 @@ const TeamLeadDashboard = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-
       toast.success("CSV exported successfully!");
     } catch (error) {
       console.error("Error exporting CSV:", error);
@@ -1396,14 +1401,12 @@ const TeamLeadDashboard = () => {
   if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
     return null;
   }
-
   const selectedUser = teamMembers.find(
     (member) => member.id === selectedUserId
   );
   const userName = selectedUser ? selectedUser.name : "";
   const RetractTaskModal = () => {
     if (!selectedTaskForRetract) return null;
-
     const completedItems = selectedTaskForRetract.items.filter(
       (item) => item.completed
     );
@@ -1411,7 +1414,6 @@ const TeamLeadDashboard = () => {
       (item) => !item.completed
     );
     const hasCompletedWork = completedItems.length > 0;
-
     return (
       <Modal
         isOpen={retractModalOpen}
@@ -1473,7 +1475,6 @@ const TeamLeadDashboard = () => {
               </svg>
             </button>
           </div>
-
           <div className="bg-gray-50 p-3 rounded-md">
             <h3 className="font-medium text-gray-800 mb-2">Task Details:</h3>
             <p className="text-sm text-gray-600">
@@ -1489,7 +1490,6 @@ const TeamLeadDashboard = () => {
               Progress: {selectedTaskForRetract.progress}%
             </p>
           </div>
-
           {hasCompletedWork && (
             <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-md">
               <h3 className="font-medium text-yellow-800 mb-2">
@@ -1507,7 +1507,6 @@ const TeamLeadDashboard = () => {
               </p>
             </div>
           )}
-
           {!hasCompletedWork && (
             <div className="bg-blue-50 border border-blue-200 p-3 rounded-md">
               <p className="text-sm text-blue-700">
@@ -1516,7 +1515,6 @@ const TeamLeadDashboard = () => {
               </p>
             </div>
           )}
-
           <div>
             <label className="block text-sm font-medium mb-2">
               {hasCompletedWork
@@ -1551,7 +1549,6 @@ const TeamLeadDashboard = () => {
               </p>
             )}
           </div>
-
           <div className="flex gap-3 pt-4 border-t">
             <Button
               onClick={() => handleRetractTask(selectedTaskForRetract.id)}
@@ -1561,10 +1558,9 @@ const TeamLeadDashboard = () => {
               {isLoading
                 ? "Processing..."
                 : newAssigneeId
-                ? "Retract & Reassign"
-                : "Retract Only"}
+                  ? "Retract & Reassign"
+                  : "Retract Only"}
             </Button>
-
             <Button
               variant="outline"
               onClick={() => {
@@ -1585,7 +1581,6 @@ const TeamLeadDashboard = () => {
   return (
     <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
-
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <div className="flex justify-between items-center">
@@ -1648,7 +1643,6 @@ const TeamLeadDashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
-
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Task Type
@@ -1670,7 +1664,6 @@ const TeamLeadDashboard = () => {
                   </p>
                 )}
               </div>
-
               {taskType && taskType !== "Misc" && (
                 <div>
                   <label className="block text-sm font-medium mb-1">
@@ -1699,14 +1692,13 @@ const TeamLeadDashboard = () => {
                           Non-inline Instrument
                         </SelectItem>
                       )}
-                      {taskType === "QC" && (
+                      {(taskType === "UPV" || taskType === "QC") && (
                         <SelectItem value="PID">P&ID</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
                 </div>
               )}
-
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Assign To
@@ -1760,7 +1752,6 @@ const TeamLeadDashboard = () => {
                 </Button>
               </div>
             </div>
-
             {taskType &&
               (taskType === "Misc" ? (
                 <div className="border p-4 rounded-md">
@@ -1784,11 +1775,76 @@ const TeamLeadDashboard = () => {
                       {assignmentType === "PID"
                         ? "P&IDs"
                         : assignmentType === "Line"
-                        ? "Lines"
-                        : assignmentType === "Equipment"
-                        ? "Equipment"
-                        : "Non-inline Instruments"}
+                          ? "Lines"
+                          : assignmentType === "Equipment"
+                            ? "Equipment"
+                            : "Non-inline Instruments"}
                     </h3>
+                    {taskType === "UPV" && assignmentType === "PID" && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h3 className="font-medium text-blue-900 mb-3 flex items-center gap-2">
+                          <svg
+                            className="h-5 w-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M13 10V3L4 14h7v7l9-11h-7z"
+                            />
+                          </svg>
+                          UPV Assignment Method
+                        </h3>
+                        <div className="space-y-3">
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="upvAssignmentMethod"
+                              checked={usePIDBasedAssignment}
+                              onChange={() => setUsePIDBasedAssignment(true)}
+                              className="mt-1"
+                            />
+                            <div>
+                              <span className="font-medium text-sm text-gray-900">
+                                🆕 PID-Based Assignment (Recommended)
+                              </span>
+                              <p className="text-xs text-gray-600 mt-1">
+                                Assign entire P&IDs to users. System
+                                auto-populates all lines/equipment in each PID.
+                                User completes items within PID context.{" "}
+                                <strong>
+                                  Supports multiple users working on same line
+                                  in different PIDs.
+                                </strong>
+                              </p>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="upvAssignmentMethod"
+                              checked={!usePIDBasedAssignment}
+                              onChange={() => setUsePIDBasedAssignment(false)}
+                              className="mt-1"
+                            />
+                            <div>
+                              <span className="font-medium text-sm text-gray-700">
+                               Line-Based Assignment (Legacy)
+                              </span>
+                              <p className="text-xs text-gray-600 mt-1">
+                                Traditional method: Assign individual
+                                lines/equipment. Each item can only be assigned
+                                once.
+                              </p>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                     {/* Group Select Control */}
                     <div className="mb-4 flex items-center">
                       <label
@@ -1807,12 +1863,12 @@ const TeamLeadDashboard = () => {
                           assignmentType === "PID"
                             ? pids.length
                             : assignmentType === "Line"
-                            ? lines.length
-                            : assignmentType === "Equipment"
-                            ? equipment.length
-                            : assignmentType === "NonInlineInstrument"
-                            ? nonInlineInstruments.length
-                            : 0
+                              ? lines.length
+                              : assignmentType === "Equipment"
+                                ? equipment.length
+                                : assignmentType === "NonInlineInstrument"
+                                  ? nonInlineInstruments.length
+                                  : 0
                         }
                         className="border rounded px-2 py-1 w-20"
                       />
@@ -1970,8 +2026,10 @@ const TeamLeadDashboard = () => {
                                   index,
                                   checked as boolean
                                 )
-                              }
+                              }// 
+
                             />
+
                             <label htmlFor={line.id} className="text-sm">
                               {line.name}
                             </label>
@@ -2101,7 +2159,6 @@ const TeamLeadDashboard = () => {
                   </div>
                 )
               ))}
-
             {isSubmitting && (
               <div className="mt-4">
                 <Progress value={submissionProgress} className="h-2" />
@@ -2109,14 +2166,13 @@ const TeamLeadDashboard = () => {
                   {submissionProgress < 50
                     ? "Creating task..."
                     : submissionProgress < 100
-                    ? "Assigning items..."
-                    : "Finalizing..."}
+                      ? "Assigning items..."
+                      : "Finalizing..."}
                 </p>
               </div>
             )}
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <div className="flex justify-between items-center">
@@ -2190,7 +2246,6 @@ const TeamLeadDashboard = () => {
             )}
           </CardContent>
         </Card>
-
         <AssignedItemsModal
           isOpen={modalIsOpen}
           onClose={closeModal}
@@ -2263,11 +2318,10 @@ const TeamLeadDashboard = () => {
               </svg>
             </button>
           </div>
-
           {selectedTaskForComments ? (
             <div className="space-y-4">
               {selectedTaskForComments.comments &&
-              selectedTaskForComments.comments.length > 0 ? (
+                selectedTaskForComments.comments.length > 0 ? (
                 <div className="max-h-60 overflow-y-auto space-y-4">
                   {selectedTaskForComments.comments.map((comment) => (
                     <div
@@ -2311,7 +2365,6 @@ const TeamLeadDashboard = () => {
               </p>
             </div>
           )}
-
           <div className="mt-6 flex justify-end">
             <Button
               onClick={closeCommentsModal}
@@ -2326,5 +2379,4 @@ const TeamLeadDashboard = () => {
     </div>
   );
 };
-
 export default TeamLeadDashboard;

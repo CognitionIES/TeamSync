@@ -43,6 +43,7 @@ router.get("/individual/all", protect, async (req, res) => {
     } else {
       const metrics = { daily: [], weekly: [], monthly: [] };
 
+      // ========== DAILY METRICS ==========
       let dailyQuery = `
         SELECT user_id, date, item_type, task_type, 
                SUM(count) as count, SUM(blocks) as blocks
@@ -63,28 +64,75 @@ router.get("/individual/all", protect, async (req, res) => {
 
       const dailyMetricsMap = {};
       dailyResult.rows.forEach((row) => {
-        const userId = row.user_id.toString();
-        if (!dailyMetricsMap[userId]) {
-          dailyMetricsMap[userId] = {
-            userId: userId,
+        const uid = row.user_id.toString();
+        if (!dailyMetricsMap[uid]) {
+          dailyMetricsMap[uid] = {
+            userId: uid,
             date: date,
             counts: {},
             totalBlocks: 0,
           };
         }
 
-        if (!dailyMetricsMap[userId].counts[row.item_type]) {
-          dailyMetricsMap[userId].counts[row.item_type] = {};
+        if (!dailyMetricsMap[uid].counts[row.item_type]) {
+          dailyMetricsMap[uid].counts[row.item_type] = {};
         }
 
-        dailyMetricsMap[userId].counts[row.item_type][row.task_type] =
-          parseInt(row.count) || 0;
-        dailyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
+        //   FIXED: Return only completed/skipped, blocks go to totalBlocks
+        dailyMetricsMap[uid].counts[row.item_type][row.task_type] = {
+          completed: parseInt(row.count) || 0,
+          skipped: 0,  // Filled below
+        };
+        dailyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+      });
+
+      // Add skipped counts for daily
+      let skippedDailyQuery = `
+        SELECT 
+          user_id,
+          date,
+          item_type,
+          task_type,
+          COUNT(*) AS skipped
+        FROM skipped_items_tracking
+        WHERE date = $1
+      `;
+      let skippedDailyParams = [date];
+
+      if (userId && userId !== "all") {
+        skippedDailyQuery += ` AND user_id = $2`;
+        skippedDailyParams.push(userId);
+      }
+
+      skippedDailyQuery += ` GROUP BY user_id, date, item_type, task_type ORDER BY user_id`;
+
+      const skippedDailyResult = await db.query(skippedDailyQuery, skippedDailyParams);
+      skippedDailyResult.rows.forEach((row) => {
+        const uid = row.user_id.toString();
+        if (!dailyMetricsMap[uid]) {
+          dailyMetricsMap[uid] = {
+            userId: uid,
+            date: date,
+            counts: {},
+            totalBlocks: 0,
+          };
+        }
+
+        if (!dailyMetricsMap[uid].counts[row.item_type]) {
+          dailyMetricsMap[uid].counts[row.item_type] = {};
+        }
+
+        if (!dailyMetricsMap[uid].counts[row.item_type][row.task_type]) {
+          dailyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
+        }
+
+        dailyMetricsMap[uid].counts[row.item_type][row.task_type].skipped = parseInt(row.skipped) || 0;
       });
 
       metrics.daily = Object.values(dailyMetricsMap);
+      console.log("  Final daily metrics structure:", JSON.stringify(metrics.daily, null, 2));
 
-      // Weekly and monthly logic (unchanged)
+      // ========== WEEKLY METRICS ==========
       const weekStartDate = new Date(date);
       weekStartDate.setDate(weekStartDate.getDate() - 6);
 
@@ -107,24 +155,70 @@ router.get("/individual/all", protect, async (req, res) => {
       const weeklyResult = await db.query(weeklyQuery, weeklyParams);
       const weeklyMetricsMap = {};
       weeklyResult.rows.forEach((row) => {
-        const userId = row.user_id.toString();
-        if (!weeklyMetricsMap[userId]) {
-          weeklyMetricsMap[userId] = {
-            userId: userId,
+        const uid = row.user_id.toString();
+        if (!weeklyMetricsMap[uid]) {
+          weeklyMetricsMap[uid] = {
+            userId: uid,
             week_start: row.week_start,
             counts: {},
             totalBlocks: 0,
           };
         }
-        if (!weeklyMetricsMap[userId].counts[row.item_type]) {
-          weeklyMetricsMap[userId].counts[row.item_type] = {};
+        if (!weeklyMetricsMap[uid].counts[row.item_type]) {
+          weeklyMetricsMap[uid].counts[row.item_type] = {};
         }
-        weeklyMetricsMap[userId].counts[row.item_type][row.task_type] =
-          parseInt(row.count) || 0;
-        weeklyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
+        weeklyMetricsMap[uid].counts[row.item_type][row.task_type] = {
+          completed: parseInt(row.count) || 0,
+          skipped: 0,
+        };
+        weeklyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
       });
+
+      // Add skipped for weekly
+      let skippedWeeklyQuery = `
+        SELECT 
+          user_id,
+          item_type,
+          task_type,
+          COUNT(*) AS skipped
+        FROM skipped_items_tracking
+        WHERE date >= $1 AND date <= $2
+      `;
+      let skippedWeeklyParams = [weekStartDate.toISOString().split("T")[0], date];
+
+      if (userId && userId !== "all") {
+        skippedWeeklyQuery += ` AND user_id = $3`;
+        skippedWeeklyParams.push(userId);
+      }
+
+      skippedWeeklyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+
+      const skippedWeeklyResult = await db.query(skippedWeeklyQuery, skippedWeeklyParams);
+      skippedWeeklyResult.rows.forEach((row) => {
+        const uid = row.user_id.toString();
+        if (!weeklyMetricsMap[uid]) {
+          weeklyMetricsMap[uid] = {
+            userId: uid,
+            week_start: weekStartDate.toISOString().split("T")[0],
+            counts: {},
+            totalBlocks: 0,
+          };
+        }
+
+        if (!weeklyMetricsMap[uid].counts[row.item_type]) {
+          weeklyMetricsMap[uid].counts[row.item_type] = {};
+        }
+
+        if (!weeklyMetricsMap[uid].counts[row.item_type][row.task_type]) {
+          weeklyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
+        }
+
+        weeklyMetricsMap[uid].counts[row.item_type][row.task_type].skipped += parseInt(row.skipped) || 0;
+      });
+
       metrics.weekly = Object.values(weeklyMetricsMap);
 
+      // ========== MONTHLY METRICS ==========
       const monthStartDate = new Date(date);
       monthStartDate.setDate(monthStartDate.getDate() - 29);
 
@@ -147,22 +241,67 @@ router.get("/individual/all", protect, async (req, res) => {
       const monthlyResult = await db.query(monthlyQuery, monthlyParams);
       const monthlyMetricsMap = {};
       monthlyResult.rows.forEach((row) => {
-        const userId = row.user_id.toString();
-        if (!monthlyMetricsMap[userId]) {
-          monthlyMetricsMap[userId] = {
-            userId: userId,
+        const uid = row.user_id.toString();
+        if (!monthlyMetricsMap[uid]) {
+          monthlyMetricsMap[uid] = {
+            userId: uid,
             month_start: row.month_start,
             counts: {},
             totalBlocks: 0,
           };
         }
-        if (!monthlyMetricsMap[userId].counts[row.item_type]) {
-          monthlyMetricsMap[userId].counts[row.item_type] = {};
+        if (!monthlyMetricsMap[uid].counts[row.item_type]) {
+          monthlyMetricsMap[uid].counts[row.item_type] = {};
         }
-        monthlyMetricsMap[userId].counts[row.item_type][row.task_type] =
-          parseInt(row.count) || 0;
-        monthlyMetricsMap[userId].totalBlocks += parseInt(row.blocks) || 0;
+        monthlyMetricsMap[uid].counts[row.item_type][row.task_type] = {
+          completed: parseInt(row.count) || 0,
+          skipped: 0,
+        };
+        monthlyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
       });
+
+      // Add skipped for monthly
+      let skippedMonthlyQuery = `
+        SELECT 
+          user_id,
+          item_type,
+          task_type,
+          COUNT(*) AS skipped
+        FROM skipped_items_tracking
+        WHERE date >= $1 AND date <= $2
+      `;
+      let skippedMonthlyParams = [monthStartDate.toISOString().split("T")[0], date];
+
+      if (userId && userId !== "all") {
+        skippedMonthlyQuery += ` AND user_id = $3`;
+        skippedMonthlyParams.push(userId);
+      }
+
+      skippedMonthlyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+
+      const skippedMonthlyResult = await db.query(skippedMonthlyQuery, skippedMonthlyParams);
+      skippedMonthlyResult.rows.forEach((row) => {
+        const uid = row.user_id.toString();
+        if (!monthlyMetricsMap[uid]) {
+          monthlyMetricsMap[uid] = {
+            userId: uid,
+            month_start: monthStartDate.toISOString().split("T")[0],
+            counts: {},
+            totalBlocks: 0,
+          };
+        }
+
+        if (!monthlyMetricsMap[uid].counts[row.item_type]) {
+          monthlyMetricsMap[uid].counts[row.item_type] = {};
+        }
+
+        if (!monthlyMetricsMap[uid].counts[row.item_type][row.task_type]) {
+          monthlyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
+        }
+
+        monthlyMetricsMap[uid].counts[row.item_type][row.task_type].skipped += parseInt(row.skipped) || 0;
+      });
+
       metrics.monthly = Object.values(monthlyMetricsMap);
 
       console.log("Final metrics response:", {
@@ -252,8 +391,11 @@ router.get("/individual/:itemType", protect, async (req, res) => {
       const userMetric = dailyMetrics.reduce(
         (acc, r) => {
           if (!acc.counts[r.item_type]) acc.counts[r.item_type] = {};
-          acc.counts[r.item_type][r.task_type] =
-            (acc.counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+          if (!acc.counts[r.item_type][r.task_type]) {
+            acc.counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+          }
+          acc.counts[r.item_type][r.task_type].completed += (r.count || 0);
+          acc.counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
           acc.totalBlocks += r.blocks || 0;
           return acc;
         },
@@ -278,8 +420,11 @@ router.get("/individual/:itemType", protect, async (req, res) => {
             totalBlocks: 0,
           };
         if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
-        acc[key].counts[r.item_type][r.task_type] =
-          (acc[key].counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+        if (!acc[key].counts[r.item_type][r.task_type]) {
+          acc[key].counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+        }
+        acc[key].counts[r.item_type][r.task_type].completed += (r.count || 0);
+        acc[key].counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
         acc[key].totalBlocks += r.blocks || 0;
         return acc;
       }, {});
@@ -295,8 +440,11 @@ router.get("/individual/:itemType", protect, async (req, res) => {
           totalBlocks: 0,
         };
       if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
-      acc[key].counts[r.item_type][r.task_type] =
-        (acc[key].counts[r.item_type][r.task_type] || 0) + (r.count || 0);
+      if (!acc[key].counts[r.item_type][r.task_type]) {
+        acc[key].counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+      }
+      acc[key].counts[r.item_type][r.task_type].completed += (r.count || 0);
+      acc[key].counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
       acc[key].totalBlocks += r.blocks || 0;
       return acc;
     }, {});
@@ -428,17 +576,17 @@ router.get("/projects/progress", protect, async (req, res) => {
 
     const mappedItemType = itemType
       ? {
-          lines: "Line",
-          equipment: "Equipment",
-          pids: "PID",
-          non_inline_instruments: "NonInlineInstrument",
-        }[itemType.toLowerCase()]
+        lines: "Line",
+        equipment: "Equipment",
+        pids: "PID",
+        non_inline_instruments: "NonInlineInstrument",
+      }[itemType.toLowerCase()]
       : "Line";
 
     const mappedTaskType = taskType
       ? { upv: "UPV", qc: "QC", redline: "Redline", all: null }[
-          taskType.toLowerCase()
-        ]
+      taskType.toLowerCase()
+      ]
       : null;
 
     let query = "";
@@ -781,6 +929,355 @@ router.post("/individual/update", protect, async (req, res) => {
       message: "Failed to update individual metrics",
       error: error.message,
       detail: error.detail || "Check backend logs",
+    });
+  }
+});
+
+router.get("/team/all", protect, async (req, res) => {
+  try {
+    if (!["Project Manager", "Team Lead"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid date format. Use YYYY-MM-DD" });
+    }
+    console.log("Fetching team metrics for date:", date);
+
+    // Daily metrics
+    let dailyResult;
+    try {
+      dailyResult = await db.query(dailyQuery, [date]);
+      console.log("Daily query result rows:", dailyResult.rows.length);
+    } catch (dailyError) {
+      console.error("Daily query failed:", dailyError);
+      throw dailyError;  // Will go to outer catch
+    }
+
+    const dailyMetricsMap = {};
+    dailyResult.rows.forEach((row) => {
+      const teamId = row.team_id ? row.team_id.toString() : null;
+      if (!teamId) return;  // Skip if null team_id
+      if (!dailyMetricsMap[teamId]) {
+        dailyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          date: date,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const count = parseInt(row.count) || 0;
+        if (dailyMetricsMap[teamId].counts[itemType] && dailyMetricsMap[teamId].counts[itemType][taskType]) {
+          dailyMetricsMap[teamId].counts[itemType][taskType].completed += count;
+          dailyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+        }
+        dailyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
+      }
+    });
+    // ---------- ADD SKIPPED FOR TEAM DAILY ----------
+    const skippedDailyQuery = `
+      SELECT 
+        tl.id AS team_id,
+        tl.name AS team_name,
+        s.item_type,
+        s.task_type,
+        COUNT(*) AS skipped
+      FROM users tl
+      LEFT JOIN (
+        SELECT lead_id, member_id FROM team_members
+        UNION
+        SELECT id as lead_id, id as member_id FROM users WHERE role = 'Team Lead'
+      ) tm ON tl.id = tm.lead_id
+      LEFT JOIN skipped_items_tracking s ON s.user_id = tm.member_id AND s.date = $1
+      WHERE tl.role = 'Team Lead'
+      GROUP BY tl.id, tl.name, s.item_type, s.task_type
+      ORDER BY tl.id, s.item_type, s.task_type
+    `;
+
+    const skippedDailyResult = await db.query(skippedDailyQuery, [date]);
+    skippedDailyResult.rows.forEach((row) => {
+      const teamId = row.team_id.toString();
+
+      if (!dailyMetricsMap[teamId]) {
+        dailyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          date: date,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const skipped = parseInt(row.skipped) || 0;
+
+        if (dailyMetricsMap[teamId].counts[itemType]) {
+          dailyMetricsMap[teamId].counts[itemType][taskType].skipped += skipped;
+        }
+      }
+    });
+
+    // Weekly metrics
+    const weekStartDate = new Date(date);
+    weekStartDate.setDate(weekStartDate.getDate() - 6);
+    const weekStartStr = weekStartDate.toISOString().split("T")[0];
+
+    const weeklyQuery = `
+      SELECT 
+        tl.id AS team_id,
+        tl.name AS team_name,
+        dm.item_type,
+        dm.task_type,
+        SUM(dm.count) AS count,
+        SUM(dm.blocks) AS blocks
+      FROM users tl
+      LEFT JOIN (
+        SELECT lead_id, member_id FROM team_members
+        UNION
+        SELECT id as lead_id, id as member_id FROM users WHERE role = 'Team Lead'
+      ) tm ON tl.id = tm.lead_id
+      LEFT JOIN daily_metrics dm ON dm.user_id = tm.member_id AND dm.date >= $1 AND dm.date <= $2
+      WHERE tl.role = 'Team Lead'
+      GROUP BY tl.id, tl.name, dm.item_type, dm.task_type
+      ORDER BY tl.id, dm.item_type, dm.task_type
+    `;
+
+    const weeklyResult = await db.query(weeklyQuery, [weekStartStr, date]);
+    const weeklyMetricsMap = {};
+
+    weeklyResult.rows.forEach((row) => {
+      const teamId = row.team_id.toString();
+
+      if (!weeklyMetricsMap[teamId]) {
+        weeklyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          week_start: weekStartStr,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const count = parseInt(row.count) || 0;
+
+        if (weeklyMetricsMap[teamId].counts[itemType]) {
+          weeklyMetricsMap[teamId].counts[itemType][taskType].completed += count;
+          weeklyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+        }
+
+        weeklyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
+      }
+    });
+
+    // ---------- ADD SKIPPED FOR TEAM WEEKLY ----------
+    const skippedWeeklyQuery = `
+      SELECT 
+        tl.id AS team_id,
+        tl.name AS team_name,
+        s.item_type,
+        s.task_type,
+        COUNT(*) AS skipped
+      FROM users tl
+      LEFT JOIN (
+        SELECT lead_id, member_id FROM team_members
+        UNION
+        SELECT id as lead_id, id as member_id FROM users WHERE role = 'Team Lead'
+      ) tm ON tl.id = tm.lead_id
+      LEFT JOIN skipped_items_tracking s ON s.user_id = tm.member_id AND s.date >= $1 AND s.date <= $2
+      WHERE tl.role = 'Team Lead'
+      GROUP BY tl.id, tl.name, s.item_type, s.task_type
+      ORDER BY tl.id, s.item_type, s.task_type
+    `;
+
+    const skippedWeeklyResult = await db.query(skippedWeeklyQuery, [weekStartStr, date]);
+    skippedWeeklyResult.rows.forEach((row) => {
+      const teamId = row.team_id.toString();
+
+      if (!weeklyMetricsMap[teamId]) {
+        weeklyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          week_start: weekStartStr,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const skipped = parseInt(row.skipped) || 0;
+
+        if (weeklyMetricsMap[teamId].counts[itemType]) {
+          weeklyMetricsMap[teamId].counts[itemType][taskType].skipped += skipped;
+        }
+      }
+    });
+
+    // Monthly metrics
+    const monthStartDate = new Date(date);
+    monthStartDate.setDate(monthStartDate.getDate() - 29);
+    const monthStartStr = monthStartDate.toISOString().split("T")[0];
+
+    const monthlyQuery = `
+      SELECT 
+        tl.id AS team_id,
+        tl.name AS team_name,
+        dm.item_type,
+        dm.task_type,
+        SUM(dm.count) AS count,
+        SUM(dm.blocks) AS blocks
+      FROM users tl
+      LEFT JOIN (
+        SELECT lead_id, member_id FROM team_members
+        UNION
+        SELECT id as lead_id, id as member_id FROM users WHERE role = 'Team Lead'
+      ) tm ON tl.id = tm.lead_id
+      LEFT JOIN daily_metrics dm ON dm.user_id = tm.member_id AND dm.date >= $1 AND dm.date <= $2
+      WHERE tl.role = 'Team Lead'
+      GROUP BY tl.id, tl.name, dm.item_type, dm.task_type
+      ORDER BY tl.id, dm.item_type, dm.task_type
+    `;
+
+    const monthlyResult = await db.query(monthlyQuery, [monthStartStr, date]);
+    const monthlyMetricsMap = {};
+
+    monthlyResult.rows.forEach((row) => {
+      const teamId = row.team_id.toString();
+
+      if (!monthlyMetricsMap[teamId]) {
+        monthlyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          month_start: monthStartStr,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const count = parseInt(row.count) || 0;
+
+        if (monthlyMetricsMap[teamId].counts[itemType]) {
+          monthlyMetricsMap[teamId].counts[itemType][taskType].completed += count;
+          monthlyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+        }
+
+        monthlyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
+      }
+    });
+
+    // ---------- ADD SKIPPED FOR TEAM MONTHLY ----------
+    const skippedMonthlyQuery = `
+      SELECT 
+        tl.id AS team_id,
+        tl.name AS team_name,
+        s.item_type,
+        s.task_type,
+        COUNT(*) AS skipped
+      FROM users tl
+      LEFT JOIN (
+        SELECT lead_id, member_id FROM team_members
+        UNION
+        SELECT id as lead_id, id as member_id FROM users WHERE role = 'Team Lead'
+      ) tm ON tl.id = tm.lead_id
+      LEFT JOIN skipped_items_tracking s ON s.user_id = tm.member_id AND s.date >= $1 AND s.date <= $2
+      WHERE tl.role = 'Team Lead'
+      GROUP BY tl.id, tl.name, s.item_type, s.task_type
+      ORDER BY tl.id, s.item_type, s.task_type
+    `;
+
+    const skippedMonthlyResult = await db.query(skippedMonthlyQuery, [monthStartStr, date]);
+    skippedMonthlyResult.rows.forEach((row) => {
+      const teamId = row.team_id.toString();
+
+      if (!monthlyMetricsMap[teamId]) {
+        monthlyMetricsMap[teamId] = {
+          teamId: teamId,
+          teamName: row.team_name || "Unknown Team",
+          month_start: monthStartStr,
+          counts: {
+            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+          },
+          totalBlocks: 0,
+        };
+      }
+
+      if (row.item_type && row.task_type) {
+        const itemType = row.item_type;
+        const taskType = row.task_type;
+        const skipped = parseInt(row.skipped) || 0;
+
+        if (monthlyMetricsMap[teamId].counts[itemType]) {
+          monthlyMetricsMap[teamId].counts[itemType][taskType].skipped += skipped;
+        }
+      }
+    });
+
+    const metrics = {
+      daily: Object.values(dailyMetricsMap),
+      weekly: Object.values(weeklyMetricsMap),
+      monthly: Object.values(monthlyMetricsMap),
+    };
+
+    console.log("Final team metrics response:", {
+      daily: metrics.daily.length,
+      weekly: metrics.weekly.length,
+      monthly: metrics.monthly.length,
+    });
+
+    res.status(200).json(metrics);
+  } catch (error) {
+    console.error("Failed to fetch team metrics:", {
+      message: error.message,
+      stack: error.stack,
+      query: error.query,
+      pgError: error.detail || error.hint || "No detail available",
+    });
+    res.status(500).json({
+      message: "Failed to fetch team metrics",
+      error: error.message,
     });
   }
 });
