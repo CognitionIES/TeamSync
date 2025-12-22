@@ -9,33 +9,45 @@ const db = require("../config/db");
 
 const router = express.Router();
 
-// Public test route to fetch all users (no authentication required)
+// PUBLIC ROUTES (NO AUTHENTICATION REQUIRED)
+// Public test route to fetch all users
 router.get("/test", async (req, res) => {
+  console.log("=== /test route called ===");
   try {
     const { rows } = await db.query("SELECT * FROM users");
-    res.status(200).json({ message: "Database query successful", data: rows });
+    console.log(`Test route: Found ${rows.length} users`);
+    res.status(200).json({ 
+      message: "Database query successful", 
+      data: rows,
+      count: rows.length 
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Database query failed", error: error.message });
+    console.error("Test route error:", error);
+    res.status(500).json({ 
+      message: "Database query failed", 
+      error: error.message 
+    });
   }
 });
 
-// Public route to fetch users by role (needed for login page dropdown)
-router.get("/role/:role", getUsersByRole);
+router.get("/role/:role", (req, res, next) => {
+  console.log("=== /role/:role route matched ===");
+  console.log("Role parameter:", req.params.role);
+  next();
+}, getUsersByRole);
 
-// All routes below are protected
+// PROTECTED ROUTES (AUTHENTICATION REQUIRED)
+// All routes below require authentication
 router.use(protect);
 
 // Fetch team members (for Team Lead dashboard dropdown)
-// In users.routes.js, replace the /team-members route (lines 26-56):
 router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
       console.error("No user ID found in request. User:", req.user);
-      return res
-        .status(401)
-        .json({ message: "User authentication failed. Please log in again." });
+      return res.status(401).json({ 
+        message: "User authentication failed. Please log in again." 
+      });
     }
 
     console.log("Fetching team members for Team Lead ID:", req.user.id);
@@ -100,10 +112,7 @@ router.get("/", async (req, res) => {
     if (["Admin", "Project Manager"].includes(req.user.role)) {
       console.log("Fetching all users for Admin/Project Manager...");
       const { rows } = await db.query(
-        `
-        SELECT id, name, role
-        FROM users
-        `
+        `SELECT id, name, role FROM users`
       );
       console.log("Users fetched for Admin/Project Manager:", rows);
       return res.status(200).json({ data: rows });
@@ -126,11 +135,7 @@ router.get("/", async (req, res) => {
     } else if (req.user.role === "Team Member") {
       console.log("Fetching self for Team Member ID:", req.user.id);
       const { rows } = await db.query(
-        `
-        SELECT id, name, role
-        FROM users
-        WHERE id = $1
-        `,
+        `SELECT id, name, role FROM users WHERE id = $1`,
         [req.user.id]
       );
       console.log("Users fetched for Team Member:", rows);
@@ -142,9 +147,10 @@ router.get("/", async (req, res) => {
     }
   } catch (error) {
     console.error("Error fetching users:", error.message, error.stack);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch users", error: error.message });
+    res.status(500).json({ 
+      message: "Failed to fetch users", 
+      error: error.message 
+    });
   }
 });
 
@@ -159,9 +165,9 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
   try {
     // Allow Team Lead, Admin, Project Manager
     if (!["Team Lead", "Admin", "Project Manager"].includes(req.user.role)) {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to view assigned items" });
+      return res.status(403).json({ 
+        message: "Not authorized to view assigned items" 
+      });
     }
 
     const userId = parseInt(req.params.userId, 10);
@@ -203,14 +209,16 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
       }
     }
 
-    // Rest of the code continues unchanged...
+    // Fetch task
     const { rows: tasks } = await db.query(
       "SELECT id, type FROM tasks WHERE assignee_id = $1 AND id = $2",
       [userId, taskId]
     );
 
     if (tasks.length === 0) {
-      return res.status(404).json({ message: "Task not found for this user" });
+      return res.status(404).json({ 
+        message: "Task not found for this user" 
+      });
     }
 
     const response = {
@@ -333,6 +341,7 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
     });
   }
 });
+
 // Get specific user (Admin only)
 router.get("/:id", authorize(["Admin"]), getUserById);
 

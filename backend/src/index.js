@@ -46,7 +46,7 @@ if (pidWorkRoutes) {
   console.log("   - /api/tasks/pid-work-items/mark-complete");
   console.log("   - /api/tasks/assign-pid");
 } else {
-  console.error("❌ PID work routes not mounted due to loading error");
+  console.error("PID work routes not mounted due to loading error");
 }
 
 // Routes (order matters - specific routes before general ones!)
@@ -69,19 +69,19 @@ app.use(
 
 if (equipmentRoutes) {
   app.use("/api/equipment", equipmentRoutes);
-  console.log("  Mounted /api/equipment route");
+  // console.log("  Mounted /api/equipment route");
 } else {
-  console.error("❌ Equipment routes not mounted due to loading error");
+  console.error("Equipment routes not mounted due to loading error");
 }
 
 if (metricsRoutes) {
   app.use("/api/metrics", metricsRoutes);
-  console.log("  Mounted /api/metrics route");
+  // console.log("  Mounted /api/metrics route");
 } else {
-  console.error("❌ Metrics routes not mounted due to loading error");
+  console.error("Metrics routes not mounted due to loading error");
 }
 
-console.log("📋 Routes Status:", {
+console.log("Routes Status:", {
   equipment: !!equipmentRoutes,
   metrics: !!metricsRoutes,
   pidWork: !!pidWorkRoutes,
@@ -94,7 +94,7 @@ app.get("/health", (req, res) => {
 
 // 404 handler for debugging
 app.use((req, res, next) => {
-  console.log(`❌ 404 Not Found: ${req.method} ${req.originalUrl}`);
+  //console.log(`404 Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     message: "Route not found",
     path: req.originalUrl,
@@ -104,7 +104,7 @@ app.use((req, res, next) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error("❌ Server Error:", err.stack);
+  console.error("Server Error:", err.stack);
   res
     .status(500)
     .json({ message: "Something went wrong!", error: err.message });
@@ -115,8 +115,8 @@ const startServer = async () => {
   try {
     await connectDB();
     app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`\n📍 Available PID Work Routes:`);
+      console.log(` Server running on port ${PORT}`);
+      console.log(`\nAvailable PID Work Routes:`);
       console.log(`   POST /api/tasks/pid-work-items/mark-complete`);
       console.log(`   POST /api/tasks/assign-pid`);
       console.log(`   GET  /api/tasks/pid-work-items/users/:user_id/assigned-pids`);
@@ -124,7 +124,7 @@ const startServer = async () => {
       console.log(`   GET  /api/tasks/pid-work-items/summary`);
     });
   } catch (error) {
-    console.error("❌ Database connection failed:", error.message);
+    console.error("Database connection failed:", error.message);
     process.exit(1);
   }
 };

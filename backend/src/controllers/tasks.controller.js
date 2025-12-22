@@ -339,12 +339,12 @@ const createTask = async (req, res) => {
       type === "Misc"
         ? []
         : items.map((item) => ({
-            id: item.itemId,
-            item_id: item.itemId,
-            item_type: item.itemType,
-            name: item.itemName, // Changed from item_name to name
-            completed: false,
-          }));
+          id: item.itemId,
+          item_id: item.itemId,
+          item_type: item.itemType,
+          name: item.itemName, // Changed from item_name to name
+          completed: false,
+        }));
     detailedTask.comments = [];
 
     res.status(201).json({ data: detailedTask });
@@ -442,8 +442,8 @@ const updateTaskStatus = async (req, res) => {
         task.type === "Misc"
           ? `Misc Task`
           : items
-              .map((item) => `${item.item_type} ${item.item_name}`)
-              .join(", ");
+            .map((item) => `${item.item_type} ${item.item_name}`)
+            .join(", ");
       await db.query(
         "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
         [
@@ -471,11 +471,15 @@ const updateTaskStatus = async (req, res) => {
 
 // @desc    Update task item completion
 // @route   PUT /api/tasks/:taskId/items/:itemId
+// @desc    Update task item completion
+// @route   PUT /api/tasks/:taskId/items/:itemId
 const updateTaskItem = async (req, res) => {
   try {
     const { taskId, itemId } = req.params;
     const { completed } = req.body;
     const { role, id: userId } = req.user;
+
+    console.log(`Updating item ${itemId} for task ${taskId} to completed=${completed}`);
 
     // Check if task exists and user is authorized
     let query = "SELECT * FROM tasks WHERE id = $1";
@@ -492,30 +496,52 @@ const updateTaskItem = async (req, res) => {
         .json({ message: "Task not found or not authorized" });
     }
 
-    // Update the task item
-    await db.query(
+    // Update the task item - ensure itemId is treated as a number
+    const { rowCount } = await db.query(
       "UPDATE task_items SET completed = $1 WHERE task_id = $2 AND id = $3",
-      [completed, taskId, itemId]
+      [completed, parseInt(taskId), parseInt(itemId)]
     );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ message: "Task item not found" });
+    }
 
     // Recalculate progress
     const { rows: items } = await db.query(
       "SELECT * FROM task_items WHERE task_id = $1",
-      [taskId]
+      [parseInt(taskId)]
     );
 
     const completedCount = items.filter((item) => item.completed).length;
-    const progress = Math.round((completedCount / items.length) * 100);
+    const progress = items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0;
 
     const { rows: taskRows } = await db.query(
       "UPDATE tasks SET progress = $1, updated_at = $2 WHERE id = $3 RETURNING *",
-      [progress, new Date(), taskId]
+      [progress, new Date(), parseInt(taskId)]
     );
 
-    res.status(200).json({ data: { ...taskRows[0], items } });
+    // Format the response consistently
+    const formattedItems = items.map((item) => ({
+      id: item.id.toString(),
+      item_id: item.item_id.toString(),
+      item_type: item.item_type,
+      name: item.name,
+      completed: item.completed,
+      created_at: item.created_at ? item.created_at.toISOString() : null,
+    }));
+
+    res.status(200).json({
+      data: {
+        ...taskRows[0],
+        id: taskRows[0].id.toString(),
+        assignee_id: taskRows[0].assignee_id.toString(),
+        project_id: taskRows[0].project_id ? taskRows[0].project_id.toString() : null,
+        items: formattedItems
+      }
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Error updating task item:", error.message, error.stack);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 

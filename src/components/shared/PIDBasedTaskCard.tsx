@@ -78,10 +78,10 @@ const PIDBasedTaskCard = ({
   //     new Map(items.map(item => [item.id, item])).values()
   //   );
     
-  //   console.log(`🔍 [${task.id}] useMemo: Input=${items.length}, Unique=${uniqueItems.length}`);
+  //   console.log(`[${task.id}] useMemo: Input=${items.length}, Unique=${uniqueItems.length}`);
     
   //   if (items.length !== uniqueItems.length) {
-  //     console.error(`❌ [${task.id}] DUPLICATES DETECTED IN PROPS!`, {
+  //     console.error(`[${task.id}] DUPLICATES DETECTED IN PROPS!`, {
   //       total: items.length,
   //       unique: uniqueItems.length,
   //       duplicateIds: items.map(i => i.id).filter((id, idx, arr) => arr.indexOf(id) !== idx)
@@ -100,7 +100,7 @@ const pidWorkItems = task.pidWorkItems || [];
   //   });
   //   setItemBlocks(initialBlocks);
     
-  //   console.log(`🎬 [${task.id}] Initialized with ${pidWorkItems.length} items`);
+  //   console.log(`[${task.id}] Initialized with ${pidWorkItems.length} items`);
   // }, [task.id]); // Only re-init if task ID changes
 
   useEffect(() => {
@@ -166,7 +166,7 @@ const pidWorkItems = task.pidWorkItems || [];
     blocks: number
   ) => {
     if (processingItems.has(pidWorkItemId)) {
-      console.log(`⏸️ [${task.id}] Item ${pidWorkItemId} already processing`);
+      console.log(`⏸[${task.id}] Item ${pidWorkItemId} already processing`);
       return;
     }
 

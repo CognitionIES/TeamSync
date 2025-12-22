@@ -8,10 +8,29 @@ const { protect } = require("../middleware/auth");
 // @access  Private
 router.get("/", protect, async (req, res) => {
   try {
-    const { projectId, pidNumber, areaId } = req.query;
-    let query = "SELECT * FROM pids";
+    const { projectId, pidNumber, areaId, taskType } = req.query;
+
+    // ✅ NEW: Base query that excludes assigned PIDs
+    let query = `
+      SELECT p.* 
+      FROM pids p
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pid_work_items pwi
+        WHERE pwi.pid_id = p.id
+        ${taskType ? `AND pwi.task_type = $${1}` : ''}
+      )
+    `;
+
     const values = [];
-    let paramIndex = 1;
+    let paramIndex = taskType ? 2 : 1; // Start from 2 if taskType is used
+
+    // Add taskType to values if provided
+    if (taskType) {
+      if (!['UPV', 'QC', 'Redline'].includes(taskType)) {
+        return res.status(400).json({ message: "Invalid task type" });
+      }
+      values.push(taskType);
+    }
 
     const conditions = [];
 
@@ -22,13 +41,13 @@ router.get("/", protect, async (req, res) => {
           .status(400)
           .json({ message: "projectId must be a valid number" });
       }
-      conditions.push(`project_id = $${paramIndex}`);
+      conditions.push(`p.project_id = $${paramIndex}`);
       values.push(projectIdNum);
       paramIndex++;
     }
 
     if (pidNumber) {
-      conditions.push(`pid_number = $${paramIndex}`);
+      conditions.push(`p.pid_number = $${paramIndex}`);
       values.push(pidNumber);
       paramIndex++;
     }
@@ -40,16 +59,24 @@ router.get("/", protect, async (req, res) => {
           .status(400)
           .json({ message: "areaId must be a valid number" });
       }
-      conditions.push(`area_id = $${paramIndex}`);
+      conditions.push(`p.area_id = $${paramIndex}`);
       values.push(areaIdNum);
       paramIndex++;
     }
 
     if (conditions.length > 0) {
-      query += " WHERE " + conditions.join(" AND ");
+      query += " AND " + conditions.join(" AND ");
     }
 
+    query += " ORDER BY p.pid_number";
+
+    console.log("Fetching unassigned PIDs with query:", query);
+    console.log("Query values:", values);
+
     const { rows } = await db.query(query, values);
+
+    console.log(`Found ${rows.length} unassigned PIDs`);
+
     res.status(200).json({ data: rows });
   } catch (error) {
     console.error("Error fetching P&IDs:", {
@@ -65,6 +92,7 @@ router.get("/", protect, async (req, res) => {
     });
   }
 });
+
 
 // @desc    Get all P&IDs for an area
 // @route   GET /api/pids/area/:areaId

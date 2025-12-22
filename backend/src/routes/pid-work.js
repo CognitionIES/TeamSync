@@ -20,7 +20,7 @@ router.post("/mark-complete", protect, async (req, res) => {
       blocks = 0,
     } = req.body;
 
-    console.log("📝 Mark complete request:", {
+    console.log("Mark complete request:", {
       pid_id, line_id, equipment_id, user_id, task_type, status, blocks
     });
 
@@ -70,7 +70,7 @@ router.post("/mark-complete", protect, async (req, res) => {
     const taskId = existingItem.task_id;
     const taskStatus = existingItem.task_status;
 
-    console.log(`✅ Found existing work item: ID=${existingItem.id}, task_id=${taskId}`);
+    console.log(`Found existing work item: ID=${existingItem.id}, task_id=${taskId}`);
 
     // ✅ Prevent changes if already completed
     if (existingItem.status === "Completed" && status !== "Completed") {
@@ -86,7 +86,7 @@ router.post("/mark-complete", protect, async (req, res) => {
         `UPDATE tasks SET status = 'In Progress', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
         [taskId]
       );
-      console.log(`✅ Task ${taskId} auto-transitioned to In Progress`);
+      console.log(`Task ${taskId} auto-transitioned to In Progress`);
     }
 
     const completed_at = status === "Completed" ? new Date() : null;
@@ -113,7 +113,7 @@ router.post("/mark-complete", protect, async (req, res) => {
     ]);
 
     const updatedItem = updateResult.rows[0];
-    console.log(`✅ Updated work item: status=${updatedItem.status}, blocks=${updatedItem.blocks}`);
+    console.log(`Updated work item: status=${updatedItem.status}, blocks=${updatedItem.blocks}`);
 
     // ✅ Update daily_metrics
     if (status === "Completed" && blocks > 0) {
@@ -163,7 +163,7 @@ router.post("/mark-complete", protect, async (req, res) => {
       [progress, taskId]
     );
 
-    console.log(`📊 Task ${taskId} progress: ${completed}/${total} (${progress}%)`);
+    console.log(`Task ${taskId} progress: ${completed}/${total} (${progress}%)`);
 
     // ✅ Auto-complete task when 100%
     if (progress === 100) {
@@ -173,7 +173,7 @@ router.post("/mark-complete", protect, async (req, res) => {
          WHERE id = $1 AND status != 'Completed'`,
         [taskId]
       );
-      console.log(`✅ Task ${taskId} auto-completed`);
+      console.log(`Task ${taskId} auto-completed`);
     }
 
     await db.query("COMMIT");
@@ -320,7 +320,7 @@ router.post("/assign-pid", protect, async (req, res) => {
 
     const { pid_id, user_id, task_type, project_id } = req.body;
 
-    console.log("🔵 PID Assignment Request:", {
+    console.log("PID Assignment Request:", {
       pid_id,
       user_id,
       task_type,
@@ -384,7 +384,7 @@ router.post("/assign-pid", protect, async (req, res) => {
       const pidNumber = pidInfo.rows[0].pid_number;
       const pidProjectId = pidInfo.rows[0].project_id;
 
-      console.log(`✅ Found PID: ${pidNumber} (project: ${pidProjectId})`);
+      console.log(`Found PID: ${pidNumber} (project: ${pidProjectId})`);
 
       // ✅ Find or create task (group assignments within 5 minutes)
       const recentTaskQuery = `
@@ -409,7 +409,7 @@ router.post("/assign-pid", protect, async (req, res) => {
 
       if (recentTaskResult.rows.length > 0) {
         taskId = recentTaskResult.rows[0].id;
-        console.log(`♻️ Reusing task ${taskId} (created ${recentTaskResult.rows[0].created_at})`);
+        console.log(`Reusing task ${taskId} (created ${recentTaskResult.rows[0].created_at})`);
       } else {
         // Create new task
         const taskInsertQuery = `
@@ -427,7 +427,7 @@ router.post("/assign-pid", protect, async (req, res) => {
         ]);
 
         taskId = taskResult.rows[0].id;
-        console.log(`✨ Created new task ${taskId}`);
+        console.log(`Created new task ${taskId}`);
       }
 
       // ✅ Get all lines and equipment in this PID
@@ -456,7 +456,7 @@ router.post("/assign-pid", protect, async (req, res) => {
       const itemsResult = await db.query(itemsQuery, [pidIdInt]);
       const items = itemsResult.rows;
 
-      console.log(`📋 Found ${items.length} items in PID ${pidNumber}`);
+      console.log(`Found ${items.length} items in PID ${pidNumber}`);
 
       if (items.length === 0) {
         await db.query("ROLLBACK");
@@ -505,7 +505,7 @@ router.post("/assign-pid", protect, async (req, res) => {
         }
       }
 
-      console.log(`✅ Created ${createdCount}/${items.length} work items for task ${taskId}`);
+      console.log(`Created ${createdCount}/${items.length} work items for task ${taskId}`);
 
       if (createdCount === 0) {
         await db.query("ROLLBACK");

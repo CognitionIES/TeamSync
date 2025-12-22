@@ -87,7 +87,7 @@ const fetchTasks = async () => {
       getAuthHeaders()
     );
 
-    console.log("🔄 Fetching tasks from API...");
+    console.log("Fetching tasks from API...");
 
     //   SIMPLIFIED: No more splitting, no more deduplication!
     const tasksData = response.data.data
@@ -142,14 +142,14 @@ const fetchTasks = async () => {
       })
       .filter((task) => task.assigneeId === user?.id?.toString());
 
-    console.log(`📊 Processed ${tasksData.length} tasks (no modifications)`);
+    console.log(`Processed ${tasksData.length} tasks (no modifications)`);
     
     //   Just set it directly - that's it!
     setTasks(tasksData);
     
   } catch (error) {
     const axiosError = error as AxiosError<{ message: string }>;
-    console.error("❌ Error fetching tasks:", axiosError);
+    console.error("Error fetching tasks:", axiosError);
     toast.error(
       axiosError.response?.data?.message || "Failed to fetch tasks"
     );

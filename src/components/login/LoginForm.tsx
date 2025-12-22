@@ -51,28 +51,35 @@ const LoginForm = () => {
   }, [role]);
 
   // Fetch users by role from backend
-  const fetchUsersByRole = async (selectedRole: UserRole) => {
-    setIsLoadingUsers(true);
-    try {
-      const encodedRole = encodeURIComponent(selectedRole); // Encode the role to handle spaces
-      console.log(`Fetching users for role: ${encodedRole}`);
-      const response = await axios.get(`${API_URL}/users/role/${encodedRole}`);
-      console.log("Users response:", response.data);
-      if (response.data && response.data.data) {
-        setNameOptions(response.data.data.map((user: any) => user.name));
-      } else {
-        setNameOptions([]);
-      }
-    } catch (error) {
-      console.error(
-        "Failed to fetch users:",
-        error.response?.data || error.message
-      );
+const fetchUsersByRole = async (selectedRole: UserRole) => {
+  setIsLoadingUsers(true);
+  try {
+    const encodedRole = encodeURIComponent(selectedRole);
+    console.log(`Fetching users for role: ${encodedRole}`);
+    
+    const response = await axios.get(`${API_URL}/users/role/${encodedRole}`);
+    
+    console.log("Users response:", response.data);
+    
+    if (response.data && response.data.data) {
+      setNameOptions(response.data.data.map((user: any) => user.name));
+    } else {
       setNameOptions([]);
-    } finally {
-      setIsLoadingUsers(false);
     }
-  };
+  } catch (error: any) {
+    console.error("Failed to fetch users:", {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
+    
+    // Show user-friendly error
+    alert(`Failed to load users: ${error.response?.data?.message || error.message}`);
+    setNameOptions([]);
+  } finally {
+    setIsLoadingUsers(false);
+  }
+};
 
   // Redirect if already authenticated and token exists
   useEffect(() => {

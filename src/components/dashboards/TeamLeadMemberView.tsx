@@ -1,13 +1,14 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Task, TaskComment, TaskItem, TaskStatus } from "@/types";
 import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import TaskCard from "../shared/TaskCard";
 import RedlineTaskCard from "../shared/RedlineTaskCard";
+import PIDBasedTaskCard from "../shared/PIDBasedTaskCard";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,15 @@ const TeamLeadMemberView = () => {
   const [isCommentsOpen, setIsCommentsOpen] = useState(false);
 
   const token = localStorage.getItem("teamsync_token");
+
+  // ✅ Helper function to check if task is PID-based
+  const isTaskPIDBased = (task: Task): boolean => {
+    return task.isPIDBased === true || (
+      task.pidWorkItems !== undefined &&
+      Array.isArray(task.pidWorkItems) &&
+      task.pidWorkItems.length > 0
+    );
+  };
 
   useEffect(() => {
     if (!isAuthenticated || !token) {
@@ -112,6 +122,12 @@ const TeamLeadMemberView = () => {
           })
           .filter((item): item is TaskItem => item !== null);
 
+        // ✅ Include PID work items
+        const hasPIDWorkItems =
+          task.pid_work_items &&
+          Array.isArray(task.pid_work_items) &&
+          task.pid_work_items.length > 0;
+
         return {
           id: task.id.toString(),
           type: task.type,
@@ -131,6 +147,8 @@ const TeamLeadMemberView = () => {
           areaNumber: task.area_name ?? "N/A",
           description: task.description || "",
           lines: task.lines || [],
+          isPIDBased: hasPIDWorkItems,
+          pidWorkItems: task.pid_work_items || [],
         };
       });
 
@@ -245,6 +263,42 @@ const TeamLeadMemberView = () => {
   const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
   const completedTasks = tasks.filter((task) => task.status === "Completed");
 
+  // ✅ Helper function to render correct card type
+  const renderTaskCard = (task: Task, showActions: boolean = true) => {
+    if (isTaskPIDBased(task)) {
+      return (
+        <PIDBasedTaskCard
+          key={task.id}
+          task={task}
+          onStatusChange={showActions ? handleStatusChange : undefined}
+          onItemToggle={showActions ? handleItemToggle : undefined}
+          onOpenComments={handleOpenComments}
+          onUpdate={fetchMyTasks}
+        />
+      );
+    } else if (task.type === "Redline") {
+      return (
+        <RedlineTaskCard
+          key={task.id}
+          task={task}
+          onStatusChange={showActions ? handleStatusChange : undefined}
+          onItemToggle={showActions ? handleItemToggle : undefined}
+          onOpenComments={handleOpenComments}
+        />
+      );
+    } else {
+      return (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onStatusChange={showActions ? handleStatusChange : undefined}
+          onItemToggle={showActions ? handleItemToggle : undefined}
+          onOpenComments={handleOpenComments}
+        />
+      );
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar onRefresh={handleRefresh} />
@@ -344,64 +398,17 @@ const TeamLeadMemberView = () => {
                     Completed ({completedTasks.length})
                   </TabsTrigger>
                 </TabsList>
+                
                 <TabsContent value="assigned" className="space-y-4">
-                  {assignedTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {assignedTasks.map((task) => renderTaskCard(task, true))}
                 </TabsContent>
+                
                 <TabsContent value="inProgress" className="space-y-4">
-                  {inProgressTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {inProgressTasks.map((task) => renderTaskCard(task, true))}
                 </TabsContent>
+                
                 <TabsContent value="completed" className="space-y-4">
-                  {completedTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {completedTasks.map((task) => renderTaskCard(task, false))}
                 </TabsContent>
               </Tabs>
             </div>
@@ -414,75 +421,27 @@ const TeamLeadMemberView = () => {
                   Assigned ({assignedTasks.length})
                 </h2>
                 <div className="space-y-4">
-                  {assignedTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {assignedTasks.map((task) => renderTaskCard(task, true))}
                 </div>
               </div>
+              
               <div>
                 <h2 className="text-lg font-semibold mb-4 flex items-center">
                   <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
                   In Progress ({inProgressTasks.length})
                 </h2>
                 <div className="space-y-4">
-                  {inProgressTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onStatusChange={handleStatusChange}
-                        onItemToggle={handleItemToggle}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {inProgressTasks.map((task) => renderTaskCard(task, true))}
                 </div>
               </div>
+              
               <div>
                 <h2 className="text-lg font-semibold mb-4 flex items-center">
                   <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
                   Completed ({completedTasks.length})
                 </h2>
                 <div className="space-y-4">
-                  {completedTasks.map((task) =>
-                    task.type === "Redline" ? (
-                      <RedlineTaskCard
-                        key={task.id}
-                        task={task}
-                        onOpenComments={handleOpenComments}
-                      />
-                    ) : (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        onOpenComments={handleOpenComments}
-                      />
-                    )
-                  )}
+                  {completedTasks.map((task) => renderTaskCard(task, false))}
                 </div>
               </div>
             </div>
