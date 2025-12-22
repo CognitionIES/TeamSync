@@ -8,6 +8,122 @@ const { protect, authorize } = require("../middleware/auth");
 const db = require("../config/db");
 
 const router = express.Router();
+// Test 1: Ultra simple - no database, no nothing
+router.get("/ping", (req, res) => {
+  console.log("=== PING route hit ===");
+  res.status(200).json({ 
+    message: "pong",
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    environment: process.env.NODE_ENV
+  });
+});
+
+// Test 2: Check if controller is loaded
+router.get("/check-controller", (req, res) => {
+  console.log("=== Checking controller ===");
+  try {
+    const controller = require("../controllers/users.controller");
+    res.status(200).json({ 
+      message: "Controller loaded successfully",
+      functions: Object.keys(controller),
+      getUsersByRoleExists: typeof controller.getUsersByRole === 'function'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Controller load failed",
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// Test 3: Check database connection
+router.get("/check-db", async (req, res) => {
+  console.log("=== Checking database ===");
+  try {
+    const { rows } = await db.query("SELECT NOW() as time, version() as version");
+    res.status(200).json({ 
+      message: "Database connected",
+      serverTime: rows[0].time,
+      postgresVersion: rows[0].version,
+      hasDbUrl: !!process.env.DATABASE_URL
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Database connection failed",
+      error: error.message,
+      errorCode: error.code,
+      stack: error.stack
+    });
+  }
+});
+
+// Test 4: Simple role route without controller
+router.get("/role-simple/:role", async (req, res) => {
+  console.log("=== Simple role route ===");
+  console.log("Role param:", req.params.role);
+  
+  try {
+    const role = decodeURIComponent(req.params.role);
+    console.log("Decoded role:", role);
+    
+    const { rows } = await db.query(
+      "SELECT id, name, role FROM users WHERE role = $1 ORDER BY name ASC",
+      [role]
+    );
+    
+    console.log(`Found ${rows.length} users`);
+    
+    res.status(200).json({ 
+      message: "Success",
+      requestedRole: role,
+      count: rows.length,
+      data: rows
+    });
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).json({ 
+      message: "Query failed",
+      error: error.message,
+      errorCode: error.code,
+      stack: error.stack
+    });
+  }
+});
+
+// Test 5: Test the actual getUsersByRole controller
+router.get("/role-controller/:role", async (req, res) => {
+  console.log("=== Testing getUsersByRole controller ===");
+  console.log("Role param:", req.params.role);
+  
+  try {
+    const { getUsersByRole } = require("../controllers/users.controller");
+    console.log("Controller function loaded:", typeof getUsersByRole);
+    
+    // Call the controller function
+    await getUsersByRole(req, res);
+  } catch (error) {
+    console.error("Controller error:", error);
+    res.status(500).json({ 
+      message: "Controller execution failed",
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// Test 6: Check all environment variables (without exposing sensitive data)
+router.get("/check-env", (req, res) => {
+  console.log("=== Checking environment ===");
+  res.status(200).json({
+    nodeEnv: process.env.NODE_ENV,
+    hasDbUrl: !!process.env.DATABASE_URL,
+    dbUrlLength: process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0,
+    dbUrlStart: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 15) + "..." : "not set",
+    allEnvKeys: Object.keys(process.env).filter(key => !key.includes('SECRET') && !key.includes('PASSWORD'))
+  });
+});
 
 // PUBLIC ROUTES (NO AUTHENTICATION REQUIRED)
 // Public test route to fetch all users
