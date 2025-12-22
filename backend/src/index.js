@@ -34,7 +34,7 @@ try {
   console.error("Failed to load pid-work.js:", error.message);
 }
 
-//   CRITICAL FIX: Mount PID work routes with correct paths
+// CRITICAL FIX: Mount PID work routes with correct paths
 if (pidWorkRoutes) {
   // Mount for /api/tasks/pid-work-items/mark-complete
   app.use("/api/tasks/pid-work-items", pidWorkRoutes);
@@ -69,14 +69,12 @@ app.use(
 
 if (equipmentRoutes) {
   app.use("/api/equipment", equipmentRoutes);
-  // console.log("  Mounted /api/equipment route");
 } else {
   console.error("Equipment routes not mounted due to loading error");
 }
 
 if (metricsRoutes) {
   app.use("/api/metrics", metricsRoutes);
-  // console.log("  Mounted /api/metrics route");
 } else {
   console.error("Metrics routes not mounted due to loading error");
 }
@@ -94,7 +92,6 @@ app.get("/health", (req, res) => {
 
 // 404 handler for debugging
 app.use((req, res, next) => {
-  //console.log(`404 Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     message: "Route not found",
     path: req.originalUrl,
@@ -110,23 +107,34 @@ app.use((err, req, res, next) => {
     .json({ message: "Something went wrong!", error: err.message });
 });
 
-// Start server only after database connection
-const startServer = async () => {
-  try {
-    await connectDB();
-    app.listen(PORT, () => {
-      console.log(` Server running on port ${PORT}`);
-      console.log(`\nAvailable PID Work Routes:`);
-      console.log(`   POST /api/tasks/pid-work-items/mark-complete`);
-      console.log(`   POST /api/tasks/assign-pid`);
-      console.log(`   GET  /api/tasks/pid-work-items/users/:user_id/assigned-pids`);
-      console.log(`   GET  /api/tasks/pid-work-items/hierarchy/:taskId`);
-      console.log(`   GET  /api/tasks/pid-work-items/summary`);
-    });
-  } catch (error) {
-    console.error("Database connection failed:", error.message);
-    process.exit(1);
-  }
-};
+// Start server only when running directly (not on Vercel)
+// This checks if the file is being run directly vs being imported
+if (require.main === module) {
+  const startServer = async () => {
+    try {
+      await connectDB();
+      app.listen(PORT, () => {
+        console.log(` Server running on port ${PORT}`);
+        console.log(`\nAvailable PID Work Routes:`);
+        console.log(`   POST /api/tasks/pid-work-items/mark-complete`);
+        console.log(`   POST /api/tasks/assign-pid`);
+        console.log(`   GET  /api/tasks/pid-work-items/users/:user_id/assigned-pids`);
+        console.log(`   GET  /api/tasks/pid-work-items/hierarchy/:taskId`);
+        console.log(`   GET  /api/tasks/pid-work-items/summary`);
+      });
+    } catch (error) {
+      console.error("Database connection failed:", error.message);
+      process.exit(1);
+    }
+  };
 
-startServer();
+  startServer();
+} else {
+  // When running on Vercel, connect to DB immediately
+  // Vercel will handle the HTTP server
+  connectDB().catch((error) => {
+    console.error("Database connection failed:", error.message);
+  });
+}
+
+module.exports = app;
