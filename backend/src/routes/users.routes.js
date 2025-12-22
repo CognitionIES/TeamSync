@@ -124,6 +124,31 @@ router.get("/check-env", (req, res) => {
     allEnvKeys: Object.keys(process.env).filter(key => !key.includes('SECRET') && !key.includes('PASSWORD'))
   });
 });
+// Add this to users.routes.js temporarily
+router.get("/debug-db-info", async (req, res) => {
+  try {
+    // Check current database
+    const { rows: dbInfo } = await db.query("SELECT current_database(), current_schema()");
+    
+    // List all tables
+    const { rows: tables } = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+    `);
+    
+    res.status(200).json({
+      currentDatabase: dbInfo[0],
+      tablesFound: tables.map(t => t.table_name),
+      tablesCount: tables.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      code: error.code
+    });
+  }
+});
 
 // PUBLIC ROUTES (NO AUTHENTICATION REQUIRED)
 // Public test route to fetch all users
