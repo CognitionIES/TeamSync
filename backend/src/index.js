@@ -13,6 +13,36 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
+// ✅ CRITICAL: Database connection middleware MUST come BEFORE routes
+let dbConnected = false;
+const ensureDbConnection = async () => {
+  if (!dbConnected) {
+    try {
+      await connectDB();
+      dbConnected = true;
+      console.log("✅ Database connected");
+    } catch (error) {
+      console.error("❌ Database connection failed:", error.message);
+      throw error;
+    }
+  }
+};
+
+// Add middleware to ensure DB is connected before processing requests
+app.use(async (req, res, next) => {
+  try {
+    await ensureDbConnection();
+    next();
+  } catch (error) {
+    console.error("Database connection middleware error:", error);
+    res.status(500).json({ 
+      message: "Database connection failed",
+      error: error.message 
+    });
+  }
+});
+
+// Load optional routes with try-catch
 let equipmentRoutes;
 try {
   equipmentRoutes = require("./routes/equipment.routes");
@@ -34,22 +64,16 @@ try {
   console.error("Failed to load pid-work.js:", error.message);
 }
 
-// CRITICAL FIX: Mount PID work routes with correct paths
+// Mount PID work routes with correct paths
 if (pidWorkRoutes) {
-  // Mount for /api/tasks/pid-work-items/mark-complete
   app.use("/api/tasks/pid-work-items", pidWorkRoutes);
-
-  // Mount for /api/tasks/assign-pid (this route is defined in pid-work.js)
   app.use("/api/tasks", pidWorkRoutes);
-
-  console.log("  Mounted PID work routes:");
-  console.log("   - /api/tasks/pid-work-items/mark-complete");
-  console.log("   - /api/tasks/assign-pid");
+  console.log("  Mounted PID work routes");
 } else {
   console.error("PID work routes not mounted due to loading error");
 }
 
-// Routes (order matters - specific routes before general ones!)
+// Mount all routes (order matters - specific routes before general ones!)
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/projects", require("./routes/projects.routes"));
 app.use("/api/tasks", require("./routes/tasks.routes"));
@@ -62,10 +86,7 @@ app.use("/api/lines", require("./routes/lines.routes"));
 app.use("/api/project-stats", require("./routes/projectStats.routes"));
 app.use("/api/task-status", require("./routes/taskStatus.routes"));
 app.use("/api/block-counts", require("./routes/block-counts.routes"));
-app.use(
-  "/api/non-inline-instruments",
-  require("./routes/non-inline-instruments.routes")
-);
+app.use("/api/non-inline-instruments", require("./routes/non-inline-instruments.routes"));
 
 if (equipmentRoutes) {
   app.use("/api/equipment", equipmentRoutes);
@@ -90,7 +111,7 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Server is running" });
 });
 
-// 404 handler for debugging
+// 404 handler
 app.use((req, res, next) => {
   res.status(404).json({
     message: "Route not found",
@@ -102,13 +123,13 @@ app.use((req, res, next) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.stack);
-  res
-    .status(500)
-    .json({ message: "Something went wrong!", error: err.message });
+  res.status(500).json({ 
+    message: "Something went wrong!", 
+    error: err.message 
+  });
 });
 
 // Start server only when running directly (not on Vercel)
-// This checks if the file is being run directly vs being imported
 if (require.main === module) {
   const startServer = async () => {
     try {
@@ -129,12 +150,7 @@ if (require.main === module) {
   };
 
   startServer();
-} else {
-  // When running on Vercel, connect to DB immediately
-  // Vercel will handle the HTTP server
-  connectDB().catch((error) => {
-    console.error("Database connection failed:", error.message);
-  });
 }
 
+// ✅ Export the app for Vercel serverless functions
 module.exports = app;
