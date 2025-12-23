@@ -11,7 +11,7 @@ const router = express.Router();
 // Test 1: Ultra simple - no database, no nothing
 router.get("/ping", (req, res) => {
   console.log("=== PING route hit ===");
-  res.status(200).json({ 
+  res.status(200).json({
     message: "pong",
     timestamp: new Date().toISOString(),
     nodeVersion: process.version,
@@ -24,13 +24,13 @@ router.get("/check-controller", (req, res) => {
   console.log("=== Checking controller ===");
   try {
     const controller = require("../controllers/users.controller");
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Controller loaded successfully",
       functions: Object.keys(controller),
       getUsersByRoleExists: typeof controller.getUsersByRole === 'function'
     });
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Controller load failed",
       error: error.message,
       stack: error.stack
@@ -43,14 +43,14 @@ router.get("/check-db", async (req, res) => {
   console.log("=== Checking database ===");
   try {
     const { rows } = await db.query("SELECT NOW() as time, version() as version");
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Database connected",
       serverTime: rows[0].time,
       postgresVersion: rows[0].version,
       hasDbUrl: !!process.env.DATABASE_URL
     });
   } catch (error) {
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Database connection failed",
       error: error.message,
       errorCode: error.code,
@@ -63,19 +63,19 @@ router.get("/check-db", async (req, res) => {
 router.get("/role-simple/:role", async (req, res) => {
   console.log("=== Simple role route ===");
   console.log("Role param:", req.params.role);
-  
+
   try {
     const role = decodeURIComponent(req.params.role);
     console.log("Decoded role:", role);
-    
+
     const { rows } = await db.query(
       "SELECT id, name, role FROM users WHERE role = $1 ORDER BY name ASC",
       [role]
     );
-    
+
     console.log(`Found ${rows.length} users`);
-    
-    res.status(200).json({ 
+
+    res.status(200).json({
       message: "Success",
       requestedRole: role,
       count: rows.length,
@@ -83,7 +83,7 @@ router.get("/role-simple/:role", async (req, res) => {
     });
   } catch (error) {
     console.error("Error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Query failed",
       error: error.message,
       errorCode: error.code,
@@ -96,16 +96,16 @@ router.get("/role-simple/:role", async (req, res) => {
 router.get("/role-controller/:role", async (req, res) => {
   console.log("=== Testing getUsersByRole controller ===");
   console.log("Role param:", req.params.role);
-  
+
   try {
     const { getUsersByRole } = require("../controllers/users.controller");
     console.log("Controller function loaded:", typeof getUsersByRole);
-    
+
     // Call the controller function
     await getUsersByRole(req, res);
   } catch (error) {
     console.error("Controller error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Controller execution failed",
       error: error.message,
       stack: error.stack
@@ -129,14 +129,14 @@ router.get("/debug-db-info", async (req, res) => {
   try {
     // Check current database
     const { rows: dbInfo } = await db.query("SELECT current_database(), current_schema()");
-    
+
     // List all tables
     const { rows: tables } = await db.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public'
     `);
-    
+
     res.status(200).json({
       currentDatabase: dbInfo[0],
       tablesFound: tables.map(t => t.table_name),
@@ -157,16 +157,16 @@ router.get("/test", async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM users");
     console.log(`Test route: Found ${rows.length} users`);
-    res.status(200).json({ 
-      message: "Database query successful", 
+    res.status(200).json({
+      message: "Database query successful",
       data: rows,
-      count: rows.length 
+      count: rows.length
     });
   } catch (error) {
     console.error("Test route error:", error);
-    res.status(500).json({ 
-      message: "Database query failed", 
-      error: error.message 
+    res.status(500).json({
+      message: "Database query failed",
+      error: error.message
     });
   }
 });
@@ -186,8 +186,8 @@ router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
       console.error("No user ID found in request. User:", req.user);
-      return res.status(401).json({ 
-        message: "User authentication failed. Please log in again." 
+      return res.status(401).json({
+        message: "User authentication failed. Please log in again."
       });
     }
 
@@ -288,9 +288,9 @@ router.get("/", async (req, res) => {
     }
   } catch (error) {
     console.error("Error fetching users:", error.message, error.stack);
-    res.status(500).json({ 
-      message: "Failed to fetch users", 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to fetch users",
+      error: error.message
     });
   }
 });
@@ -306,8 +306,8 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
   try {
     // Allow Team Lead, Admin, Project Manager
     if (!["Team Lead", "Admin", "Project Manager"].includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: "Not authorized to view assigned items" 
+      return res.status(403).json({
+        message: "Not authorized to view assigned items"
       });
     }
 
@@ -357,8 +357,8 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
     );
 
     if (tasks.length === 0) {
-      return res.status(404).json({ 
-        message: "Task not found for this user" 
+      return res.status(404).json({
+        message: "Task not found for this user"
       });
     }
 
