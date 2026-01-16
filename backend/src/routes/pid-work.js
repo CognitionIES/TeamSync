@@ -194,7 +194,7 @@ router.post("/mark-complete", protect, async (req, res) => {
     });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("❌ Error marking work item complete:", error);
+    console.error(" Error marking work item complete:", error);
     res.status(500).json({
       message: "Failed to update work item",
       error: error.message,
@@ -500,7 +500,7 @@ router.post("/assign-pid", protect, async (req, res) => {
             });
           }
         } catch (itemError) {
-          console.error(`❌ Error inserting item:`, itemError.message);
+          console.error(` Error inserting item:`, itemError.message);
           // Continue with other items
         }
       }
@@ -533,12 +533,12 @@ router.post("/assign-pid", protect, async (req, res) => {
 
     } catch (innerError) {
       await db.query("ROLLBACK");
-      console.error("❌ Inner transaction error:", innerError);
+      console.error("  Inner transaction error:", innerError);
       throw innerError;
     }
 
   } catch (error) {
-    console.error("❌ Error assigning PID:", {
+    console.error("  Error assigning PID:", {
       message: error.message,
       detail: error.detail,
       hint: error.hint,
