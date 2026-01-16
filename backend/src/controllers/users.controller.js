@@ -1,7 +1,7 @@
 const db = require("../config/db");
 
 // Log that the controller is being loaded
-console.log("✅ users.controller.js loaded successfully");
+console.log("users.controller.js loaded successfully");
 
 /**
  * Get all users (Admin only)
@@ -44,25 +44,25 @@ const getUsersByRole = async (req, res) => {
   console.log("===========================================");
   console.log("getUsersByRole CALLED");
   console.log("Timestamp:", new Date().toISOString());
-  
+
   try {
     // Get the role parameter - Express should auto-decode it, but let's be explicit
     let { role } = req.params;
-    
+
     // Decode the role in case it wasn't automatically decoded
     // This handles cases like "Team%20Member" -> "Team Member"
     role = decodeURIComponent(role);
-    
+
     console.log(`Original role param: ${req.params.role}`);
     console.log(`Decoded role: "${role}"`);
     console.log(`Role length: ${role.length}`);
-    
+
     // Validate role exists
     if (!role || role.trim() === '') {
       console.error("ERROR: No role parameter provided or empty after decode");
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Role parameter is required",
-        received: role 
+        received: role
       });
     }
 
@@ -72,7 +72,7 @@ const getUsersByRole = async (req, res) => {
     // Validate against allowed roles
     const allowedRoles = [
       "Data Entry",
-      "Team Member", 
+      "Team Member",
       "Team Lead",
       "Project Manager",
       "Admin"
@@ -81,7 +81,7 @@ const getUsersByRole = async (req, res) => {
     if (!allowedRoles.includes(role)) {
       console.error(`Invalid role: "${role}"`);
       console.error("Allowed roles:", allowedRoles);
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "Invalid role. Allowed roles: " + allowedRoles.join(", "),
         received: role,
         allowedRoles: allowedRoles
@@ -99,7 +99,7 @@ const getUsersByRole = async (req, res) => {
     console.log("Users found:", JSON.stringify(rows, null, 2));
 
     // Return response
-    const response = { 
+    const response = {
       data: rows,
       count: rows.length,
       requestedRole: role
@@ -107,7 +107,7 @@ const getUsersByRole = async (req, res) => {
 
     console.log("Sending response with", rows.length, "users");
     console.log("===========================================");
-    
+
     return res.status(200).json(response);
 
   } catch (error) {
@@ -118,8 +118,8 @@ const getUsersByRole = async (req, res) => {
     console.error("Error code:", error.code);
     console.error("Error stack:", error.stack);
     console.error("===========================================");
-    
-    return res.status(500).json({ 
+
+    return res.status(500).json({
       message: "Server error while fetching users by role",
       error: error.message,
       errorCode: error.code
@@ -154,13 +154,13 @@ const getTeamMembers = async (req, res) => {
       });
     }
     if (error.code === "28000" || error.code === "28P01") {
-      return res.status(500).json({ 
-        message: "Database authentication error." 
+      return res.status(500).json({
+        message: "Database authentication error."
       });
     }
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
+    res.status(500).json({
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -172,8 +172,8 @@ const getUserByName = async (req, res) => {
   try {
     const { name } = req.query;
     if (!name) {
-      return res.status(400).json({ 
-        message: "Name query parameter is required" 
+      return res.status(400).json({
+        message: "Name query parameter is required"
       });
     }
     const { rows } = await db.query(
@@ -186,9 +186,9 @@ const getUserByName = async (req, res) => {
     res.status(200).json({ data: rows });
   } catch (error) {
     console.error("Error fetching user by name:", error.stack);
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
+    res.status(500).json({
+      message: "Server error",
+      error: error.message
     });
   }
 };

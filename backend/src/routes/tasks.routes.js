@@ -135,15 +135,53 @@ router.get("/", protect, async (req, res) => {
           t.progress, 
           t.project_id,
           t.description,
+          t.is_pid_based,
           p.name as project_name,
           COALESCE(a.name, 'N/A') as area_name,
+          
+          -- Get first PID number for display (works for both PID-based and legacy)
           COALESCE((
+            SELECT pids.pid_number
+            FROM pid_work_items pwi
+            JOIN pids ON pwi.pid_id = pids.id
+            WHERE pwi.task_id = t.id
+            ORDER BY pwi.created_at ASC
+            LIMIT 1
+          ), COALESCE((
             SELECT pid.pid_number
             FROM task_items ti
             JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
             WHERE ti.task_id = t.id
             LIMIT 1
-          ), 'N/A') as pid_number,
+          ), 'N/A')) as pid_number,
+          
+          --   PID-based work items
+          CASE 
+            WHEN t.is_pid_based = true 
+            THEN COALESCE((
+              SELECT json_agg(json_build_object(
+                'id', pwi.id,
+                'pid_id', pwi.pid_id,
+                'pid_number', pids.pid_number,
+                'line_id', pwi.line_id,
+                'line_number', l.line_number,
+                'equipment_id', pwi.equipment_id,
+                'equipment_number', e.equipment_number,
+                'status', pwi.status,
+                'completed_at', pwi.completed_at,
+                'remarks', pwi.remarks,
+                'blocks', COALESCE(pwi.blocks, 0)
+              ) ORDER BY pids.pid_number, l.line_number, e.equipment_number)
+              FROM pid_work_items pwi
+              LEFT JOIN pids ON pwi.pid_id = pids.id
+              LEFT JOIN lines l ON pwi.line_id = l.id
+              LEFT JOIN equipment e ON pwi.equipment_id = e.id
+              WHERE pwi.task_id = t.id
+            ), '[]')
+            ELSE '[]'
+          END as pid_work_items,
+          
+          -- Legacy task items
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', ti.id,
@@ -156,6 +194,8 @@ router.get("/", protect, async (req, res) => {
             FROM task_items ti
             WHERE t.id = ti.task_id AND ti.id IS NOT NULL
           ), '[]') as items,
+          
+          -- Comments
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', tc.id,
@@ -168,6 +208,7 @@ router.get("/", protect, async (req, res) => {
             FROM task_comments tc
             WHERE t.id = tc.task_id AND tc.id IS NOT NULL AND tc.user_id IS NOT NULL
           ), '[]') as comments
+          
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
         LEFT JOIN projects p ON t.project_id = p.id
@@ -187,12 +228,13 @@ router.get("/", protect, async (req, res) => {
           t.progress, 
           t.project_id,
           t.description,
+          t.is_pid_based,
           u.name,
           p.name,
           a.name
         `;
         const { rows } = await db.query(query, [req.user.id]);
-        console.log("Tasks fetched for Team Lead:", rows);
+        console.log("Tasks fetched for Team Lead (with PID work items):", rows);
         res.status(200).json({ data: rows });
       } catch (error) {
         console.error("Detailed error fetching tasks for Team Lead:", {
@@ -243,7 +285,7 @@ SELECT
     LIMIT 1
   ), 'N/A')) as pid_number,
  
-  -- ✅ CRITICAL FIX: Only get work items for THIS task
+  --   CRITICAL FIX: Only get work items for THIS task
   CASE 
     WHEN t.is_pid_based = true 
     THEN COALESCE((
@@ -310,7 +352,6 @@ ORDER BY
   END,
   t.created_at DESC
     `;
-
 
         const { rows } = await db.query(query, [req.user.id]);
         console.log("Tasks fetched for Team Member:", rows);

@@ -44,6 +44,51 @@ router.get("/individual/all", protect, async (req, res) => {
       const metrics = { daily: [], weekly: [], monthly: [] };
 
       // ========== DAILY METRICS ==========
+      console.log(" Fetching daily metrics for date:", date);
+
+      // Get all users first
+      const usersQuery = `SELECT id, name FROM users ORDER BY name`;
+      const usersResult = await db.query(usersQuery);
+      const allUsers = usersResult.rows;
+
+      console.log(
+        `Found ${allUsers.length} users:`,
+        allUsers.map((u) => `${u.name}(${u.id})`)
+      );
+
+      // Build daily metrics map for ALL users
+      const dailyMetricsMap = {};
+
+      allUsers.forEach((user) => {
+        const uid = user.id.toString();
+        dailyMetricsMap[uid] = {
+          userId: uid,
+          date: date,
+          counts: {
+            Line: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            PID: {
+              Redline: { completed: 0, skipped: 0 },
+            },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+          },
+          totalBlocks: 0,
+        };
+      });
+
+      // Fetch completed counts from daily_metrics
       let dailyQuery = `
         SELECT user_id, date, item_type, task_type, 
                SUM(count) as count, SUM(blocks) as blocks
@@ -60,37 +105,31 @@ router.get("/individual/all", protect, async (req, res) => {
       dailyQuery += ` GROUP BY user_id, date, item_type, task_type ORDER BY user_id`;
 
       const dailyResult = await db.query(dailyQuery, dailyParams);
-      console.log("Daily query result:", dailyResult.rows);
+      console.log(
+        ` Daily metrics query returned ${dailyResult.rows.length} rows`
+      );
 
-      const dailyMetricsMap = {};
       dailyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!dailyMetricsMap[uid]) {
-          dailyMetricsMap[uid] = {
-            userId: uid,
-            date: date,
-            counts: {},
-            totalBlocks: 0,
-          };
-        }
+        if (dailyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
 
-        if (!dailyMetricsMap[uid].counts[row.item_type]) {
-          dailyMetricsMap[uid].counts[row.item_type] = {};
+          if (
+            dailyMetricsMap[uid].counts[itemType] &&
+            dailyMetricsMap[uid].counts[itemType][taskType]
+          ) {
+            dailyMetricsMap[uid].counts[itemType][taskType].completed =
+              parseInt(row.count) || 0;
+            dailyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+          }
         }
-
-        //   FIXED: Return only completed/skipped, blocks go to totalBlocks
-        dailyMetricsMap[uid].counts[row.item_type][row.task_type] = {
-          completed: parseInt(row.count) || 0,
-          skipped: 0,  // Filled below
-        };
-        dailyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
       });
 
-      // Add skipped counts for daily
+      //   CRITICAL FIX: Fetch skipped counts from skipped_items_tracking
       let skippedDailyQuery = `
         SELECT 
           user_id,
-          date,
           item_type,
           task_type,
           COUNT(*) AS skipped
@@ -104,46 +143,93 @@ router.get("/individual/all", protect, async (req, res) => {
         skippedDailyParams.push(userId);
       }
 
-      skippedDailyQuery += ` GROUP BY user_id, date, item_type, task_type ORDER BY user_id`;
+      skippedDailyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
 
-      const skippedDailyResult = await db.query(skippedDailyQuery, skippedDailyParams);
+      const skippedDailyResult = await db.query(
+        skippedDailyQuery,
+        skippedDailyParams
+      );
+      console.log(
+        ` Skipped items query returned ${skippedDailyResult.rows.length} rows`
+      );
+
       skippedDailyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!dailyMetricsMap[uid]) {
-          dailyMetricsMap[uid] = {
-            userId: uid,
-            date: date,
-            counts: {},
-            totalBlocks: 0,
-          };
-        }
+        console.log(`Processing skipped for user ${uid}:`, row);
 
-        if (!dailyMetricsMap[uid].counts[row.item_type]) {
-          dailyMetricsMap[uid].counts[row.item_type] = {};
-        }
+        if (dailyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
 
-        if (!dailyMetricsMap[uid].counts[row.item_type][row.task_type]) {
-          dailyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
+          if (
+            dailyMetricsMap[uid].counts[itemType] &&
+            dailyMetricsMap[uid].counts[itemType][taskType]
+          ) {
+            dailyMetricsMap[uid].counts[itemType][taskType].skipped =
+              parseInt(row.skipped) || 0;
+            console.log(
+              `  Set skipped=${row.skipped} for user ${uid}, ${itemType}, ${taskType}`
+            );
+          }
         }
-
-        dailyMetricsMap[uid].counts[row.item_type][row.task_type].skipped = parseInt(row.skipped) || 0;
       });
 
-      metrics.daily = Object.values(dailyMetricsMap);
-      console.log("  Final daily metrics structure:", JSON.stringify(metrics.daily, null, 2));
+      // Filter out users with no activity
+      metrics.daily = Object.values(dailyMetricsMap).filter((user) => {
+        const hasActivity =
+          Object.values(user.counts).some((itemType) =>
+            Object.values(itemType).some(
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0
+            )
+          ) || user.totalBlocks > 0;
+        return hasActivity;
+      });
 
-      // ========== WEEKLY METRICS ==========
+      console.log(
+        `  Final daily metrics: ${metrics.daily.length} users with activity`
+      );
+
+      // ========== WEEKLY METRICS (Similar logic) ==========
       const weekStartDate = new Date(date);
       weekStartDate.setDate(weekStartDate.getDate() - 6);
+      const weekStartStr = weekStartDate.toISOString().split("T")[0];
 
+      const weeklyMetricsMap = {};
+      allUsers.forEach((user) => {
+        const uid = user.id.toString();
+        weeklyMetricsMap[uid] = {
+          userId: uid,
+          week_start: weekStartStr,
+          counts: {
+            Line: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            PID: { Redline: { completed: 0, skipped: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+          },
+          totalBlocks: 0,
+        };
+      });
+
+      // Weekly completed
       let weeklyQuery = `
         SELECT user_id, item_type, task_type, 
-               SUM(count) as count, SUM(blocks) as blocks,
-               DATE_TRUNC('week', $1::date) as week_start
+               SUM(count) as count, SUM(blocks) as blocks
         FROM daily_metrics
-        WHERE date >= $2 AND date <= $1
+        WHERE date >= $1 AND date <= $2
       `;
-      let weeklyParams = [date, weekStartDate.toISOString().split("T")[0]];
+      let weeklyParams = [weekStartStr, date];
 
       if (userId && userId !== "all") {
         weeklyQuery += ` AND user_id = $3`;
@@ -153,38 +239,26 @@ router.get("/individual/all", protect, async (req, res) => {
       weeklyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
 
       const weeklyResult = await db.query(weeklyQuery, weeklyParams);
-      const weeklyMetricsMap = {};
       weeklyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!weeklyMetricsMap[uid]) {
-          weeklyMetricsMap[uid] = {
-            userId: uid,
-            week_start: row.week_start,
-            counts: {},
-            totalBlocks: 0,
-          };
+        if (weeklyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
+          if (weeklyMetricsMap[uid].counts[itemType]?.[taskType]) {
+            weeklyMetricsMap[uid].counts[itemType][taskType].completed =
+              parseInt(row.count) || 0;
+            weeklyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+          }
         }
-        if (!weeklyMetricsMap[uid].counts[row.item_type]) {
-          weeklyMetricsMap[uid].counts[row.item_type] = {};
-        }
-        weeklyMetricsMap[uid].counts[row.item_type][row.task_type] = {
-          completed: parseInt(row.count) || 0,
-          skipped: 0,
-        };
-        weeklyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
       });
 
-      // Add skipped for weekly
+      // Weekly skipped
       let skippedWeeklyQuery = `
-        SELECT 
-          user_id,
-          item_type,
-          task_type,
-          COUNT(*) AS skipped
+        SELECT user_id, item_type, task_type, COUNT(*) AS skipped
         FROM skipped_items_tracking
         WHERE date >= $1 AND date <= $2
       `;
-      let skippedWeeklyParams = [weekStartDate.toISOString().split("T")[0], date];
+      let skippedWeeklyParams = [weekStartStr, date];
 
       if (userId && userId !== "all") {
         skippedWeeklyQuery += ` AND user_id = $3`;
@@ -193,43 +267,73 @@ router.get("/individual/all", protect, async (req, res) => {
 
       skippedWeeklyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
 
-      const skippedWeeklyResult = await db.query(skippedWeeklyQuery, skippedWeeklyParams);
+      const skippedWeeklyResult = await db.query(
+        skippedWeeklyQuery,
+        skippedWeeklyParams
+      );
       skippedWeeklyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!weeklyMetricsMap[uid]) {
-          weeklyMetricsMap[uid] = {
-            userId: uid,
-            week_start: weekStartDate.toISOString().split("T")[0],
-            counts: {},
-            totalBlocks: 0,
-          };
+        if (weeklyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
+          if (weeklyMetricsMap[uid].counts[itemType]?.[taskType]) {
+            weeklyMetricsMap[uid].counts[itemType][taskType].skipped =
+              parseInt(row.skipped) || 0;
+          }
         }
-
-        if (!weeklyMetricsMap[uid].counts[row.item_type]) {
-          weeklyMetricsMap[uid].counts[row.item_type] = {};
-        }
-
-        if (!weeklyMetricsMap[uid].counts[row.item_type][row.task_type]) {
-          weeklyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
-        }
-
-        weeklyMetricsMap[uid].counts[row.item_type][row.task_type].skipped += parseInt(row.skipped) || 0;
       });
 
-      metrics.weekly = Object.values(weeklyMetricsMap);
+      metrics.weekly = Object.values(weeklyMetricsMap).filter((user) => {
+        const hasActivity =
+          Object.values(user.counts).some((itemType) =>
+            Object.values(itemType).some(
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0
+            )
+          ) || user.totalBlocks > 0;
+        return hasActivity;
+      });
 
-      // ========== MONTHLY METRICS ==========
+      // ========== MONTHLY METRICS (Similar logic) ==========
       const monthStartDate = new Date(date);
       monthStartDate.setDate(monthStartDate.getDate() - 29);
+      const monthStartStr = monthStartDate.toISOString().split("T")[0];
 
+      const monthlyMetricsMap = {};
+      allUsers.forEach((user) => {
+        const uid = user.id.toString();
+        monthlyMetricsMap[uid] = {
+          userId: uid,
+          month_start: monthStartStr,
+          counts: {
+            Line: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+            PID: { Redline: { completed: 0, skipped: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0 },
+              QC: { completed: 0, skipped: 0 },
+              Redline: { completed: 0, skipped: 0 },
+            },
+          },
+          totalBlocks: 0,
+        };
+      });
+
+      // Monthly completed
       let monthlyQuery = `
         SELECT user_id, item_type, task_type, 
-               SUM(count) as count, SUM(blocks) as blocks,
-               DATE_TRUNC('month', $1::date) as month_start
+               SUM(count) as count, SUM(blocks) as blocks
         FROM daily_metrics
-        WHERE date >= $2 AND date <= $1
+        WHERE date >= $1 AND date <= $2
       `;
-      let monthlyParams = [date, monthStartDate.toISOString().split("T")[0]];
+      let monthlyParams = [monthStartStr, date];
 
       if (userId && userId !== "all") {
         monthlyQuery += ` AND user_id = $3`;
@@ -239,38 +343,26 @@ router.get("/individual/all", protect, async (req, res) => {
       monthlyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
 
       const monthlyResult = await db.query(monthlyQuery, monthlyParams);
-      const monthlyMetricsMap = {};
       monthlyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!monthlyMetricsMap[uid]) {
-          monthlyMetricsMap[uid] = {
-            userId: uid,
-            month_start: row.month_start,
-            counts: {},
-            totalBlocks: 0,
-          };
+        if (monthlyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
+          if (monthlyMetricsMap[uid].counts[itemType]?.[taskType]) {
+            monthlyMetricsMap[uid].counts[itemType][taskType].completed =
+              parseInt(row.count) || 0;
+            monthlyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+          }
         }
-        if (!monthlyMetricsMap[uid].counts[row.item_type]) {
-          monthlyMetricsMap[uid].counts[row.item_type] = {};
-        }
-        monthlyMetricsMap[uid].counts[row.item_type][row.task_type] = {
-          completed: parseInt(row.count) || 0,
-          skipped: 0,
-        };
-        monthlyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
       });
 
-      // Add skipped for monthly
+      // Monthly skipped
       let skippedMonthlyQuery = `
-        SELECT 
-          user_id,
-          item_type,
-          task_type,
-          COUNT(*) AS skipped
+        SELECT user_id, item_type, task_type, COUNT(*) AS skipped
         FROM skipped_items_tracking
         WHERE date >= $1 AND date <= $2
       `;
-      let skippedMonthlyParams = [monthStartDate.toISOString().split("T")[0], date];
+      let skippedMonthlyParams = [monthStartStr, date];
 
       if (userId && userId !== "all") {
         skippedMonthlyQuery += ` AND user_id = $3`;
@@ -279,30 +371,31 @@ router.get("/individual/all", protect, async (req, res) => {
 
       skippedMonthlyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
 
-      const skippedMonthlyResult = await db.query(skippedMonthlyQuery, skippedMonthlyParams);
+      const skippedMonthlyResult = await db.query(
+        skippedMonthlyQuery,
+        skippedMonthlyParams
+      );
       skippedMonthlyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        if (!monthlyMetricsMap[uid]) {
-          monthlyMetricsMap[uid] = {
-            userId: uid,
-            month_start: monthStartDate.toISOString().split("T")[0],
-            counts: {},
-            totalBlocks: 0,
-          };
+        if (monthlyMetricsMap[uid] && row.item_type && row.task_type) {
+          const itemType = row.item_type;
+          const taskType = row.task_type;
+          if (monthlyMetricsMap[uid].counts[itemType]?.[taskType]) {
+            monthlyMetricsMap[uid].counts[itemType][taskType].skipped =
+              parseInt(row.skipped) || 0;
+          }
         }
-
-        if (!monthlyMetricsMap[uid].counts[row.item_type]) {
-          monthlyMetricsMap[uid].counts[row.item_type] = {};
-        }
-
-        if (!monthlyMetricsMap[uid].counts[row.item_type][row.task_type]) {
-          monthlyMetricsMap[uid].counts[row.item_type][row.task_type] = { completed: 0, skipped: 0 };
-        }
-
-        monthlyMetricsMap[uid].counts[row.item_type][row.task_type].skipped += parseInt(row.skipped) || 0;
       });
 
-      metrics.monthly = Object.values(monthlyMetricsMap);
+      metrics.monthly = Object.values(monthlyMetricsMap).filter((user) => {
+        const hasActivity =
+          Object.values(user.counts).some((itemType) =>
+            Object.values(itemType).some(
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0
+            )
+          ) || user.totalBlocks > 0;
+        return hasActivity;
+      });
 
       console.log("Final metrics response:", {
         daily: metrics.daily.length,
@@ -392,10 +485,14 @@ router.get("/individual/:itemType", protect, async (req, res) => {
         (acc, r) => {
           if (!acc.counts[r.item_type]) acc.counts[r.item_type] = {};
           if (!acc.counts[r.item_type][r.task_type]) {
-            acc.counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+            acc.counts[r.item_type][r.task_type] = {
+              completed: 0,
+              blocks: 0,
+              skipped: 0,
+            };
           }
-          acc.counts[r.item_type][r.task_type].completed += (r.count || 0);
-          acc.counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
+          acc.counts[r.item_type][r.task_type].completed += r.count || 0;
+          acc.counts[r.item_type][r.task_type].blocks += r.blocks || 0;
           acc.totalBlocks += r.blocks || 0;
           return acc;
         },
@@ -421,10 +518,14 @@ router.get("/individual/:itemType", protect, async (req, res) => {
           };
         if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
         if (!acc[key].counts[r.item_type][r.task_type]) {
-          acc[key].counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+          acc[key].counts[r.item_type][r.task_type] = {
+            completed: 0,
+            blocks: 0,
+            skipped: 0,
+          };
         }
-        acc[key].counts[r.item_type][r.task_type].completed += (r.count || 0);
-        acc[key].counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
+        acc[key].counts[r.item_type][r.task_type].completed += r.count || 0;
+        acc[key].counts[r.item_type][r.task_type].blocks += r.blocks || 0;
         acc[key].totalBlocks += r.blocks || 0;
         return acc;
       }, {});
@@ -441,10 +542,14 @@ router.get("/individual/:itemType", protect, async (req, res) => {
         };
       if (!acc[key].counts[r.item_type]) acc[key].counts[r.item_type] = {};
       if (!acc[key].counts[r.item_type][r.task_type]) {
-        acc[key].counts[r.item_type][r.task_type] = { completed: 0, blocks: 0, skipped: 0 };
+        acc[key].counts[r.item_type][r.task_type] = {
+          completed: 0,
+          blocks: 0,
+          skipped: 0,
+        };
       }
-      acc[key].counts[r.item_type][r.task_type].completed += (r.count || 0);
-      acc[key].counts[r.item_type][r.task_type].blocks += (r.blocks || 0);
+      acc[key].counts[r.item_type][r.task_type].completed += r.count || 0;
+      acc[key].counts[r.item_type][r.task_type].blocks += r.blocks || 0;
       acc[key].totalBlocks += r.blocks || 0;
       return acc;
     }, {});
@@ -953,23 +1058,35 @@ router.get("/team/all", protect, async (req, res) => {
       console.log("Daily query result rows:", dailyResult.rows.length);
     } catch (dailyError) {
       console.error("Daily query failed:", dailyError);
-      throw dailyError;  // Will go to outer catch
+      throw dailyError; // Will go to outer catch
     }
 
     const dailyMetricsMap = {};
     dailyResult.rows.forEach((row) => {
       const teamId = row.team_id ? row.team_id.toString() : null;
-      if (!teamId) return;  // Skip if null team_id
+      if (!teamId) return; // Skip if null team_id
       if (!dailyMetricsMap[teamId]) {
         dailyMetricsMap[teamId] = {
           teamId: teamId,
           teamName: row.team_name || "Unknown Team",
           date: date,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -978,9 +1095,13 @@ router.get("/team/all", protect, async (req, res) => {
         const itemType = row.item_type;
         const taskType = row.task_type;
         const count = parseInt(row.count) || 0;
-        if (dailyMetricsMap[teamId].counts[itemType] && dailyMetricsMap[teamId].counts[itemType][taskType]) {
+        if (
+          dailyMetricsMap[teamId].counts[itemType] &&
+          dailyMetricsMap[teamId].counts[itemType][taskType]
+        ) {
           dailyMetricsMap[teamId].counts[itemType][taskType].completed += count;
-          dailyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+          dailyMetricsMap[teamId].counts[itemType][taskType].blocks +=
+            parseInt(row.blocks) || 0;
         }
         dailyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
       }
@@ -1015,10 +1136,22 @@ router.get("/team/all", protect, async (req, res) => {
           teamName: row.team_name || "Unknown Team",
           date: date,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -1072,10 +1205,22 @@ router.get("/team/all", protect, async (req, res) => {
           teamName: row.team_name || "Unknown Team",
           week_start: weekStartStr,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -1087,8 +1232,10 @@ router.get("/team/all", protect, async (req, res) => {
         const count = parseInt(row.count) || 0;
 
         if (weeklyMetricsMap[teamId].counts[itemType]) {
-          weeklyMetricsMap[teamId].counts[itemType][taskType].completed += count;
-          weeklyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+          weeklyMetricsMap[teamId].counts[itemType][taskType].completed +=
+            count;
+          weeklyMetricsMap[teamId].counts[itemType][taskType].blocks +=
+            parseInt(row.blocks) || 0;
         }
 
         weeklyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
@@ -1115,7 +1262,10 @@ router.get("/team/all", protect, async (req, res) => {
       ORDER BY tl.id, s.item_type, s.task_type
     `;
 
-    const skippedWeeklyResult = await db.query(skippedWeeklyQuery, [weekStartStr, date]);
+    const skippedWeeklyResult = await db.query(skippedWeeklyQuery, [
+      weekStartStr,
+      date,
+    ]);
     skippedWeeklyResult.rows.forEach((row) => {
       const teamId = row.team_id.toString();
 
@@ -1125,10 +1275,22 @@ router.get("/team/all", protect, async (req, res) => {
           teamName: row.team_name || "Unknown Team",
           week_start: weekStartStr,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -1140,7 +1302,8 @@ router.get("/team/all", protect, async (req, res) => {
         const skipped = parseInt(row.skipped) || 0;
 
         if (weeklyMetricsMap[teamId].counts[itemType]) {
-          weeklyMetricsMap[teamId].counts[itemType][taskType].skipped += skipped;
+          weeklyMetricsMap[teamId].counts[itemType][taskType].skipped +=
+            skipped;
         }
       }
     });
@@ -1182,10 +1345,22 @@ router.get("/team/all", protect, async (req, res) => {
           teamName: row.team_name || "Unknown Team",
           month_start: monthStartStr,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -1197,8 +1372,10 @@ router.get("/team/all", protect, async (req, res) => {
         const count = parseInt(row.count) || 0;
 
         if (monthlyMetricsMap[teamId].counts[itemType]) {
-          monthlyMetricsMap[teamId].counts[itemType][taskType].completed += count;
-          monthlyMetricsMap[teamId].counts[itemType][taskType].blocks += parseInt(row.blocks) || 0;
+          monthlyMetricsMap[teamId].counts[itemType][taskType].completed +=
+            count;
+          monthlyMetricsMap[teamId].counts[itemType][taskType].blocks +=
+            parseInt(row.blocks) || 0;
         }
 
         monthlyMetricsMap[teamId].totalBlocks += parseInt(row.blocks) || 0;
@@ -1225,7 +1402,10 @@ router.get("/team/all", protect, async (req, res) => {
       ORDER BY tl.id, s.item_type, s.task_type
     `;
 
-    const skippedMonthlyResult = await db.query(skippedMonthlyQuery, [monthStartStr, date]);
+    const skippedMonthlyResult = await db.query(skippedMonthlyQuery, [
+      monthStartStr,
+      date,
+    ]);
     skippedMonthlyResult.rows.forEach((row) => {
       const teamId = row.team_id.toString();
 
@@ -1235,10 +1415,22 @@ router.get("/team/all", protect, async (req, res) => {
           teamName: row.team_name || "Unknown Team",
           month_start: monthStartStr,
           counts: {
-            Line: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            Equipment: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            Line: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
+            Equipment: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
             PID: { Redline: { completed: 0, skipped: 0, blocks: 0 } },
-            NonInlineInstrument: { UPV: { completed: 0, skipped: 0, blocks: 0 }, QC: { completed: 0, skipped: 0, blocks: 0 }, Redline: { completed: 0, skipped: 0, blocks: 0 } },
+            NonInlineInstrument: {
+              UPV: { completed: 0, skipped: 0, blocks: 0 },
+              QC: { completed: 0, skipped: 0, blocks: 0 },
+              Redline: { completed: 0, skipped: 0, blocks: 0 },
+            },
           },
           totalBlocks: 0,
         };
@@ -1250,7 +1442,8 @@ router.get("/team/all", protect, async (req, res) => {
         const skipped = parseInt(row.skipped) || 0;
 
         if (monthlyMetricsMap[teamId].counts[itemType]) {
-          monthlyMetricsMap[teamId].counts[itemType][taskType].skipped += skipped;
+          monthlyMetricsMap[teamId].counts[itemType][taskType].skipped +=
+            skipped;
         }
       }
     });

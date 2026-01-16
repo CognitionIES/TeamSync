@@ -222,7 +222,7 @@ const pidWorkItems = task.pidWorkItems || [];
       
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
-      console.error(`❌ [${task.id}] Error:`, axiosError.response?.data);
+      console.error(`  [${task.id}] Error:`, axiosError.response?.data);
 
       setProcessingItems(prev => {
         const newSet = new Set(prev);
@@ -274,7 +274,7 @@ const pidWorkItems = task.pidWorkItems || [];
       toast.success("Item skipped");
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
-      console.error("❌ Error skipping:", axiosError);
+      console.error("  Error skipping:", axiosError);
 
       setProcessingItems(prev => {
         const newSet = new Set(prev);
@@ -380,7 +380,7 @@ const pidWorkItems = task.pidWorkItems || [];
           </div>
           <div className="bg-purple-50 p-2 rounded-lg">
             <p className="text-xs text-purple-700">
-              📊 Progress: {completedItems} / {totalItems} items completed (
+               Progress: {completedItems} / {totalItems} items completed (
               {totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0}%)
             </p>
             <p className="text-xs text-purple-600 mt-1">

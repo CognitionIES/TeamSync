@@ -10,7 +10,7 @@ router.get("/", protect, async (req, res) => {
   try {
     const { projectId, pidNumber, areaId, taskType } = req.query;
 
-    // ✅ NEW: Base query that excludes assigned PIDs
+    //   NEW: Base query that excludes assigned PIDs
     let query = `
       SELECT p.* 
       FROM pids p

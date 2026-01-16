@@ -21,6 +21,12 @@ import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { getRandomMessage } from "@/components/shared/messages";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
@@ -35,12 +41,13 @@ const TeamLeadMemberView = () => {
 
   const token = localStorage.getItem("teamsync_token");
 
-  // ✅ Helper function to check if task is PID-based
+  // Helper function to check if task is PID-based
   const isTaskPIDBased = (task: Task): boolean => {
-    return task.isPIDBased === true || (
-      task.pidWorkItems !== undefined &&
-      Array.isArray(task.pidWorkItems) &&
-      task.pidWorkItems.length > 0
+    return (
+      task.isPIDBased === true ||
+      (task.pidWorkItems !== undefined &&
+        Array.isArray(task.pidWorkItems) &&
+        task.pidWorkItems.length > 0)
     );
   };
 
@@ -65,7 +72,26 @@ const TeamLeadMemberView = () => {
       },
     };
   };
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "—";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      timeZone: "Asia/Kolkata",
+    });
+  };
 
+  const getTotalBlocks = (task: Task) => {
+    if (task.isPIDBased) {
+      return (
+        task.pidWorkItems?.reduce((sum, item) => sum + (item.blocks || 0), 0) ||
+        0
+      );
+    }
+    return task.items.reduce((sum, item) => sum + (item.blocks || 0), 0);
+  };
   const fetchMyTasks = async () => {
     try {
       setIsLoading(true);
@@ -122,7 +148,7 @@ const TeamLeadMemberView = () => {
           })
           .filter((item): item is TaskItem => item !== null);
 
-        // ✅ Include PID work items
+        //   Include PID work items
         const hasPIDWorkItems =
           task.pid_work_items &&
           Array.isArray(task.pid_work_items) &&
@@ -263,7 +289,7 @@ const TeamLeadMemberView = () => {
   const inProgressTasks = tasks.filter((task) => task.status === "In Progress");
   const completedTasks = tasks.filter((task) => task.status === "Completed");
 
-  // ✅ Helper function to render correct card type
+  //   Helper function to render correct card type
   const renderTaskCard = (task: Task, showActions: boolean = true) => {
     if (isTaskPIDBased(task)) {
       return (
@@ -398,17 +424,69 @@ const TeamLeadMemberView = () => {
                     Completed ({completedTasks.length})
                   </TabsTrigger>
                 </TabsList>
-                
+
                 <TabsContent value="assigned" className="space-y-4">
                   {assignedTasks.map((task) => renderTaskCard(task, true))}
                 </TabsContent>
-                
+
                 <TabsContent value="inProgress" className="space-y-4">
                   {inProgressTasks.map((task) => renderTaskCard(task, true))}
                 </TabsContent>
-                
+
                 <TabsContent value="completed" className="space-y-4">
-                  {completedTasks.map((task) => renderTaskCard(task, false))}
+                  {isLoading ? (
+                    <div className="text-center py-8 text-gray-600">
+                      Loading...
+                    </div>
+                  ) : completedTasks.length > 0 ? (
+                    completedTasks
+                      .sort(
+                        (a, b) =>
+                          new Date(b.completedAt || 0).getTime() -
+                          new Date(a.completedAt || 0).getTime()
+                      )
+                      .map((task) => (
+                        <Collapsible key={task.id} defaultOpen={false}>
+                          <CollapsibleTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className="flex w-full justify-between items-center h-[60px] p-3 bg-green-50 hover:bg-green-100 rounded-lg shadow-sm transition-all duration-200"
+                            >
+                              <div className="flex flex-col items-start text-left">
+                                <span className="font-semibold text-sm text-green-800 truncate max-w-[260px] sm:max-w-none">
+                                  {task.type} - {task.projectName} - Area No:{" "}
+                                  {task.areaNumber} - Blocks:{" "}
+                                  {getTotalBlocks(task)}
+                                </span>
+                                <div className="text-xs text-gray-600 mt-1">
+                                  <span>
+                                    Assigned: {formatDate(task.createdAt)}
+                                  </span>
+                                  {task.completedAt && (
+                                    <span className="ml-2">
+                                      Completed: {formatDate(task.completedAt)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center">
+                                <ChevronDown className="h-4 w-4 CollapsibleChevron text-green-600" />
+                                <ChevronUp className="h-4 w-4 hidden CollapsibleChevron text-green-600" />
+                              </div>
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
+                            <div className="border-l-2 border-green-200 pl-4">
+                              {renderTaskCard(task, false)}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      {getRandomMessage("noTasks") || "No completed tasks"}
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
@@ -424,7 +502,7 @@ const TeamLeadMemberView = () => {
                   {assignedTasks.map((task) => renderTaskCard(task, true))}
                 </div>
               </div>
-              
+
               <div>
                 <h2 className="text-lg font-semibold mb-4 flex items-center">
                   <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
@@ -434,14 +512,66 @@ const TeamLeadMemberView = () => {
                   {inProgressTasks.map((task) => renderTaskCard(task, true))}
                 </div>
               </div>
-              
+
               <div>
                 <h2 className="text-lg font-semibold mb-4 flex items-center">
                   <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
                   Completed ({completedTasks.length})
                 </h2>
                 <div className="space-y-4">
-                  {completedTasks.map((task) => renderTaskCard(task, false))}
+                  {isLoading ? (
+                    <div className="text-center py-8 text-gray-600">
+                      Loading...
+                    </div>
+                  ) : completedTasks.length > 0 ? (
+                    completedTasks
+                      .sort(
+                        (a, b) =>
+                          new Date(b.completedAt || 0).getTime() -
+                          new Date(a.completedAt || 0).getTime()
+                      )
+                      .map((task) => (
+                        <Collapsible key={task.id} defaultOpen={false}>
+                          <CollapsibleTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              className="flex w-full justify-between items-center h-[60px] p-3 bg-green-50 hover:bg-green-100 rounded-lg shadow-sm transition-all duration-200"
+                            >
+                              <div className="flex flex-col items-start text-left">
+                                <span className="font-semibold text-sm text-green-800 truncate max-w-[320px] lg:max-w-none">
+                                  {task.type} - {task.projectName} - Area No:{" "}
+                                  {task.areaNumber} - Blocks:{" "}
+                                  {getTotalBlocks(task)}
+                                </span>
+                                <div className="text-xs text-gray-600 mt-1">
+                                  <span>
+                                    Assigned: {formatDate(task.createdAt)}
+                                  </span>
+                                  {task.completedAt && (
+                                    <span className="ml-2">
+                                      Completed: {formatDate(task.completedAt)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center">
+                                <ChevronDown className="h-4 w-4 CollapsibleChevron text-green-600" />
+                                <ChevronUp className="h-4 w-4 hidden CollapsibleChevron text-green-600" />
+                              </div>
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="mt-2 px-2 transition-all duration-200">
+                            <div className="border-l-2 border-green-200 pl-4">
+                              {renderTaskCard(task, false)}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      {getRandomMessage("noTasks") || "No completed tasks"}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

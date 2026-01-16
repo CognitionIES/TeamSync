@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Task, TaskComment, TaskItem, TaskType } from "@/types";
+import { PIDWorkItem, Task, TaskComment, TaskItem, TaskType } from "@/types";
 import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import TaskTable from "../shared/TaskTable";
@@ -60,6 +60,8 @@ interface AssignedItems {
   redlinePIDs: string[];
 }
 interface FetchedAssignedItems {
+  isPIDBased?: boolean;  
+  pidWorkItems?: PIDWorkItem[];  
   pids: any;
   lines: any;
   equipment: any;
@@ -517,16 +519,20 @@ const TeamLeadDashboard = () => {
       setSelectedNonInlineInstruments([]);
     }
   };
+// Replace the fetchTasks function in TeamLeadDashboard.tsx (lines ~499-533)
+
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
       console.log("Fetching tasks for Team Lead with token:", token);
       console.log("Selected project:", selectedProject);
+
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
         getAuthHeaders()
       );
       console.log("Tasks API response:", response.data);
+
       const tasksData = response.data.data
         .filter((task) => {
           const matchesProject =
@@ -565,23 +571,47 @@ const TeamLeadDashboard = () => {
               });
             }
           });
+
           const uniqueComments = Array.from(commentMap.values());
-          const mappedItems = (task.items || [])
-            .map((item) => {
-              if (!item || !item.id) {
-                console.warn(`Invalid item at task id ${task.id}:`, item);
-                return null;
-              }
-              return {
-                id: item.id.toString(),
-                name: item.name || "",
-                type: item.item_type || "",
-                completed: item.completed || false,
-                completedAt: item.completed_at || null,
-              };
-            })
-            .filter((item) => item !== null);
-          // Add lines property as required by Task type
+
+          const isPIDBased = task.is_pid_based === true;
+
+          let mappedItems: any[] = [];
+
+          if (isPIDBased) {
+            // Map pid_work_items to TaskItem format
+            mappedItems = (task.pid_work_items || []).map((pwi: any) => ({
+              id: pwi.id.toString(),
+              name: pwi.line_number 
+                ? `Line: ${pwi.line_number}` 
+                : pwi.equipment_number 
+                  ? `Equipment: ${pwi.equipment_number}`
+                  : `PID: ${pwi.pid_number}`,
+              type: pwi.line_id ? "Line" : pwi.equipment_id ? "Equipment" : "PID",
+              completed: pwi.status === "Completed" || pwi.status === "Skipped",
+              completedAt: pwi.completed_at || null,
+              blocks: pwi.blocks || 0,
+            }));
+          } else {
+            // Map legacy task_items
+            mappedItems = (task.items || [])
+              .map((item: any) => {
+                if (!item || !item.id) {
+                  console.warn(`Invalid item at task id ${task.id}:`, item);
+                  return null;
+                }
+                return {
+                  id: item.id.toString(),
+                  name: item.name || "",
+                  type: item.item_type || "",
+                  completed: item.completed || false,
+                  completedAt: item.completed_at || null,
+                  blocks: item.blocks || 0,
+                };
+              })
+              .filter((item: any) => item !== null);
+          }
+
           return {
             id: task.id.toString(),
             type: task.type,
@@ -598,13 +628,16 @@ const TeamLeadDashboard = () => {
             comments: uniqueComments,
             pidNumber: task.pid_number ?? "N/A",
             projectName: task.project_name ?? "Unknown",
-            areaNumber: task.area_name ?? "N/A", // Already correct
+            areaNumber: task.area_name ?? "N/A",
             description: task.description || "",
-            lines: task.lines || [], // <-- Ensure lines property exists
+            lines: task.lines || [],
+            isPIDBased: isPIDBased,
+            pidWorkItems: task.pid_work_items || [],
           };
         });
+      
       console.log("Processed tasks data:", tasksData);
-      setTasks(tasksData);
+      setTasks(tasksData); 
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Detailed error fetching tasks:", {
@@ -615,78 +648,178 @@ const TeamLeadDashboard = () => {
       });
       toast.error(
         axiosError.response?.data?.message ||
-        "Failed to fetch tasks. Please try again."
+          "Failed to fetch tasks. Please try again."
       );
     } finally {
       setIsLoading(false);
     }
-  };
+  }; 
+
   const fetchAssignedItems = async (userId: string, taskId: string) => {
+    console.log("=== fetchAssignedItems START ===");
+    console.log("Input - userId:", userId, "taskId:", taskId);
+
     try {
+      const url = `${API_URL}/users/${userId}/assigned-items/${taskId}`;
+      console.log("API URL:", url);
+      console.log("API_URL constant:", API_URL);
+
+      const headers = getAuthHeaders();
+      console.log("Request headers:", headers);
+
       const response = await axios.get<{ data: FetchedAssignedItems }>(
-        `${API_URL}/users/${userId}/assigned-items/${taskId}`,
-        getAuthHeaders()
-      );
+      url,
+      headers
+    );
+    
+      console.log("Raw axios response:", response);
+      console.log("Response status:", response.status);
+      console.log("Response data:", response.data);
+      console.log("Response data.data:", response.data.data);
+
       const data = response.data.data;
+
+      console.log("Extracted data object:", data);
+      console.log("data.isPIDBased:", data.isPIDBased);
+      console.log("data.pidWorkItems:", data.pidWorkItems);
+      console.log("data.pidWorkItems type:", typeof data.pidWorkItems);
+      console.log("data.pidWorkItems is array:", Array.isArray(data.pidWorkItems));
+      console.log("data.pidWorkItems length:", data.pidWorkItems?.length);
+
+    // Log each pidWorkItem
+    if (data.pidWorkItems && data.pidWorkItems.length > 0) {
+      console.log("First pidWorkItem:", data.pidWorkItems[0]);
+        data.pidWorkItems.forEach((item, idx) => {
+          console.log(`pidWorkItem[${idx}]:`, item);
+        });
+      }
+      
       // Map project_id to project_name using the projects array
-      const mapProjectName = (items: any[]) =>
-        items.map((item) => ({
+      const mapProjectName = (items: any[]) => {
+        console.log("Mapping project names for items:", items);
+        return items.map((item) => ({
           ...item,
           project_name:
             projects.find((p) => p.id === item.project_id)?.name || "Unknown",
         }));
-      return {
+      };
+      
+      const result = {
+        isPIDBased: data.isPIDBased || false,
+        pidWorkItems: data.pidWorkItems || [],
         upvLines: {
-          count: data.upvLines.count,
-          items: mapProjectName(data.upvLines.items),
+          count: data.upvLines?.count || 0,
+          items: mapProjectName(data.upvLines?.items || []),
         },
         qcLines: {
-          count: data.qcLines.count,
-          items: mapProjectName(data.qcLines.items),
+          count: data.qcLines?.count || 0,
+          items: mapProjectName(data.qcLines?.items || []),
         },
         redlinePIDs: {
-          count: data.redlinePIDs.count,
-          items: mapProjectName(data.redlinePIDs.items),
+          count: data.redlinePIDs?.count || 0,
+          items: mapProjectName(data.redlinePIDs?.items || []),
         },
         upvEquipment: {
-          count: data.upvEquipment.count,
-          items: mapProjectName(data.upvEquipment.items),
+          count: data.upvEquipment?.count || 0,
+          items: mapProjectName(data.upvEquipment?.items || []),
         },
         qcEquipment: {
-          count: data.qcEquipment.count,
-          items: mapProjectName(data.qcEquipment.items),
+          count: data.qcEquipment?.count || 0,
+          items: mapProjectName(data.qcEquipment?.items || []),
         },
       };
+      
+      console.log("Final result object:", result);
+      console.log("Result isPIDBased:", result.isPIDBased);
+      console.log("Result pidWorkItems:", result.pidWorkItems);
+      console.log("Result pidWorkItems length:", result.pidWorkItems.length);
+      console.log("=== fetchAssignedItems END ===");
+      
+      return result;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching assigned items:", axiosError);
+      console.error("=== fetchAssignedItems ERROR ===");
+      console.error("Error:", axiosError);
+      console.error("Error message:", axiosError.message);
+      console.error("Error response:", axiosError.response);
+      console.error("Error response data:", axiosError.response?.data);
+      console.error("Error response status:", axiosError.response?.status);
       throw axiosError;
     }
   };
+
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
+    console.log("=== MODAL DEBUG START ===");
+    console.log("Opening modal for taskId:", taskId, "userId:", userId);
+
     setSelectedUserId(userId);
     setLoadingItems(true);
+
     try {
       const task = tasks.find((t) => t.id === taskId);
-      if (task) {
-        setSelectedTaskType(task.type);
-        const itemType = task.items.length > 0 ? task.items[0].type : null;
-        setSelectedItemType(itemType as "PID" | "Line" | "Equipment" | null);
-      } else {
-        setSelectedTaskType(null);
-        setSelectedItemType(null);
+      console.log("Found task:", task);
+
+      if (!task) {
+        toast.error("Task not found");
+        setLoadingItems(false);
+        return;
       }
+
+      //   FIX: Determine itemType correctly for both PID-based and legacy tasks
+      let itemType: "PID" | "Line" | "Equipment" | null = null;
+
+      if (task.isPIDBased) {
+        console.log("Task is PID-based, pidWorkItems:", task.pidWorkItems);
+        // For PID-based tasks, the itemType should be based on what's in the PID
+        // Could be Line or Equipment
+        if (task.pidWorkItems && task.pidWorkItems.length > 0) {
+          const firstItem = task.pidWorkItems[0];
+          if (firstItem.line_id || firstItem.line_number) {
+            itemType = "Line";
+          } else if (firstItem.equipment_id || firstItem.equipment_number) {
+            itemType = "Equipment";
+          }
+        }
+        console.log("Detected itemType for PID-based task:", itemType);
+      } else {
+        // Legacy task - get from task.items
+        if (task.items && task.items.length > 0) {
+          itemType = task.items[0].type as "PID" | "Line" | "Equipment";
+        }
+        console.log("Detected itemType for legacy task:", itemType);
+      }
+
+      setSelectedTaskType(task.type);
+      setSelectedItemType(itemType);
+
+      console.log("Calling fetchAssignedItems for userId:", userId, "taskId:", taskId);
       const items = await fetchAssignedItems(userId, taskId);
-      setAssignedItems({
-        pids: [],
-        lines: [],
-        equipment: [],
+      console.log("fetchAssignedItems returned:", items);
+      console.log("items.isPIDBased:", items.isPIDBased);
+      console.log("items.pidWorkItems length:", items.pidWorkItems?.length);
+
+      //   FIX: Ensure we're spreading the data correctly
+      const modalData = {
         ...items,
-      });
+        isPIDBased: items.isPIDBased || false,
+        pidWorkItems: items.pidWorkItems || [],
+      };
+
+      console.log("Setting modal data:", modalData);
+      console.log("Modal data isPIDBased:", modalData.isPIDBased);
+      console.log("Modal data pidWorkItems:", modalData.pidWorkItems);
+
+      setAssignedItems(modalData);
       setModalIsOpen(true);
+
+      console.log("=== MODAL DEBUG END ===");
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
+      console.error("=== MODAL ERROR ===");
       console.error("Error fetching assigned items:", axiosError);
+      console.error("Error response:", axiosError.response?.data);
+      console.error("Error status:", axiosError.response?.status);
+
       toast.error(
         axiosError.response?.data?.message || "Failed to fetch assigned items"
       );
@@ -1414,6 +1547,7 @@ const TeamLeadDashboard = () => {
       (item) => !item.completed
     );
     const hasCompletedWork = completedItems.length > 0;
+    
     return (
       <Modal
         isOpen={retractModalOpen}
@@ -1446,12 +1580,15 @@ const TeamLeadDashboard = () => {
           },
         }}
         contentLabel="Retract Task Modal"
+        
       >
+        
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-gray-800">
               Retract Task #{selectedTaskForRetract.id}
             </h2>
+            
             <button
               onClick={() => {
                 setRetractModalOpen(false);
@@ -1505,6 +1642,7 @@ const TeamLeadDashboard = () => {
                 incomplete items ({incompleteItems.length}) will be reassigned
                 to the new assignee.
               </p>
+              
             </div>
           )}
           {!hasCompletedWork && (
@@ -1515,6 +1653,7 @@ const TeamLeadDashboard = () => {
               </p>
             </div>
           )}
+          
           <div>
             <label className="block text-sm font-medium mb-2">
               {hasCompletedWork
@@ -1581,6 +1720,7 @@ const TeamLeadDashboard = () => {
   return (
     <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
+      
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <div className="flex justify-between items-center">
@@ -2290,6 +2430,7 @@ const TeamLeadDashboard = () => {
           }}
           contentLabel="Task Comments Modal"
         >
+          
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">
               Task Comments

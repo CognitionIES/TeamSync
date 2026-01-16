@@ -53,12 +53,13 @@ const TeamMemberDashboard = () => {
 
   const token = localStorage.getItem("teamsync_token");
   const currentDate = new Date().toISOString().split("T")[0];
-  
+
   const isTaskPIDBased = (task: Task): boolean => {
-    return task.isPIDBased === true || (
-      task.pidWorkItems !== undefined &&
-      Array.isArray(task.pidWorkItems) &&
-      task.pidWorkItems.length > 0
+    return (
+      task.isPIDBased === true ||
+      (task.pidWorkItems !== undefined &&
+        Array.isArray(task.pidWorkItems) &&
+        task.pidWorkItems.length > 0)
     );
   };
 
@@ -77,86 +78,85 @@ const TeamMemberDashboard = () => {
   });
 
   //   FIXED: Simplified fetchTasks - no more splitting or virtual tasks
-// Only showing the fetchTasks function - replace your existing one
+  // Only showing the fetchTasks function - replace your existing one
 
-const fetchTasks = async () => {
-  try {
-    setIsLoading(true);
-    const response = await axios.get<{ data: any[] }>(
-      `${API_URL}/tasks`,
-      getAuthHeaders()
-    );
+  const fetchTasks = async () => {
+    try {
+      setIsLoading(true);
+      const response = await axios.get<{ data: any[] }>(
+        `${API_URL}/tasks`,
+        getAuthHeaders()
+      );
 
-    console.log("Fetching tasks from API...");
+      console.log("Fetching tasks from API...");
 
-    //   SIMPLIFIED: No more splitting, no more deduplication!
-    const tasksData = response.data.data
-      .map((task) => {
-        const hasPIDWorkItems =
-          task.pid_work_items &&
-          Array.isArray(task.pid_work_items) &&
-          task.pid_work_items.length > 0;
+      //   SIMPLIFIED: No more splitting, no more deduplication!
+      const tasksData = response.data.data
+        .map((task) => {
+          const hasPIDWorkItems =
+            task.pid_work_items &&
+            Array.isArray(task.pid_work_items) &&
+            task.pid_work_items.length > 0;
 
-        return {
-          id: task.id.toString(),
-          type: task.type as TaskType,
-          assignee: task.assignee || "Unknown",
-          assigneeId: task.assignee_id?.toString() || "",
-          status: task.status || "Assigned",
-          isComplex: task.is_complex || false,
-          createdAt: task.created_at || new Date().toISOString(),
-          updatedAt: task.updated_at || new Date().toISOString(),
-          completedAt: task.completed_at || null,
-          progress: task.progress || 0,
-          projectId: task.project_id?.toString() || "Unknown",
-          projectName: task.project_name || "Unknown",
-          areaNumber: task.area_name || "N/A",
-          pidNumber: task.pid_number ?? "",
-          isPIDBased: hasPIDWorkItems,
-          
-          //   Just use what backend gives us - it's already filtered by task_id
-          pidWorkItems: task.pid_work_items || [],
+          return {
+            id: task.id.toString(),
+            type: task.type as TaskType,
+            assignee: task.assignee || "Unknown",
+            assigneeId: task.assignee_id?.toString() || "",
+            status: task.status || "Assigned",
+            isComplex: task.is_complex || false,
+            createdAt: task.created_at || new Date().toISOString(),
+            updatedAt: task.updated_at || new Date().toISOString(),
+            completedAt: task.completed_at || null,
+            progress: task.progress || 0,
+            projectId: task.project_id?.toString() || "Unknown",
+            projectName: task.project_name || "Unknown",
+            areaNumber: task.area_name || "N/A",
+            pidNumber: task.pid_number ?? "",
+            isPIDBased: hasPIDWorkItems,
 
-          items: (task.items || []).map((item) => ({
-            id: item.id.toString(),
-            name: item.name || "Unnamed Item",
-            type: item.item_type || "Unknown",
-            completed: item.completed || false,
-            completedAt: item.completed_at || null,
-            entityId: item.line_id || null,
-            blocks: item.blocks !== undefined ? Number(item.blocks) : 0,
-          })),
+            //   Just use what backend gives us - it's already filtered by task_id
+            pidWorkItems: task.pid_work_items || [],
 
-          comments: (task.comments || []).map((comment) => ({
-            id: comment.id.toString(),
-            userId: comment.user_id.toString(),
-            userName: comment.user_name || "Unknown",
-            userRole: comment.user_role || "Unknown",
-            comment: comment.comment || "",
-            createdAt: comment.created_at,
-          })),
+            items: (task.items || []).map((item) => ({
+              id: item.id.toString(),
+              name: item.name || "Unnamed Item",
+              type: item.item_type || "Unknown",
+              completed: item.completed || false,
+              completedAt: item.completed_at || null,
+              entityId: item.line_id || null,
+              blocks: item.blocks !== undefined ? Number(item.blocks) : 0,
+            })),
 
-          description: task.description || "",
-          lines: task.lines || [],
-        };
-      })
-      .filter((task) => task.assigneeId === user?.id?.toString());
+            comments: (task.comments || []).map((comment) => ({
+              id: comment.id.toString(),
+              userId: comment.user_id.toString(),
+              userName: comment.user_name || "Unknown",
+              userRole: comment.user_role || "Unknown",
+              comment: comment.comment || "",
+              createdAt: comment.created_at,
+            })),
 
-    console.log(`Processed ${tasksData.length} tasks (no modifications)`);
-    
-    //   Just set it directly - that's it!
-    setTasks(tasksData);
-    
-  } catch (error) {
-    const axiosError = error as AxiosError<{ message: string }>;
-    console.error("Error fetching tasks:", axiosError);
-    toast.error(
-      axiosError.response?.data?.message || "Failed to fetch tasks"
-    );
-  } finally {
-    setIsLoading(false);
-  }
-};
+            description: task.description || "",
+            lines: task.lines || [],
+          };
+        })
+        .filter((task) => task.assigneeId === user?.id?.toString());
+
+      console.log(`Processed ${tasksData.length} tasks (no modifications)`);
+
+      //   Just set it directly - that's it!
+      setTasks(tasksData);
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message: string }>;
+      console.error("Error fetching tasks:", axiosError);
+      toast.error(
+        axiosError.response?.data?.message || "Failed to fetch tasks"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isAuthenticated && user?.role === "Team Member" && token) {
@@ -197,7 +197,9 @@ const fetchTasks = async () => {
           ? {
               ...task,
               status: newStatus,
-              ...(newStatus === "Completed" && { completedAt: new Date().toISOString() }),
+              ...(newStatus === "Completed" && {
+                completedAt: new Date().toISOString(),
+              }),
             }
           : task
       )
@@ -212,7 +214,7 @@ const fetchTasks = async () => {
       toast.success(
         newStatus === "In Progress" ? "Task started" : "Task completed"
       );
-      
+
       //   Refetch to sync with server
       await fetchTasks();
     } catch (error) {
@@ -264,7 +266,6 @@ const fetchTasks = async () => {
 
       await fetchMetrics();
       toast.success("Task item updated successfully");
-      
     } catch (error) {
       await fetchTasks(); // Revert on error
       const axiosError = error as AxiosError<{ message?: string }>;
@@ -313,7 +314,10 @@ const fetchTasks = async () => {
 
   const getTotalBlocks = (task: Task) => {
     if (task.isPIDBased) {
-      return task.pidWorkItems?.reduce((sum, item) => sum + (item.blocks || 0), 0) || 0;
+      return (
+        task.pidWorkItems?.reduce((sum, item) => sum + (item.blocks || 0), 0) ||
+        0
+      );
     }
     return task.items.reduce((sum, item) => sum + (item.blocks || 0), 0);
   };
@@ -321,12 +325,12 @@ const fetchTasks = async () => {
   const renderTaskCard = (task: Task) => {
     if (isTaskPIDBased(task)) {
       return (
-        <PIDBasedTaskCard 
-          key={task.id} 
-          task={task} 
-          onStatusChange={handleStatusChange} 
-          onItemToggle={handleItemToggle} 
-          onOpenComments={handleOpenComments} 
+        <PIDBasedTaskCard
+          key={task.id}
+          task={task}
+          onStatusChange={handleStatusChange}
+          onItemToggle={handleItemToggle}
+          onOpenComments={handleOpenComments}
           onUpdate={fetchTasks}
         />
       );

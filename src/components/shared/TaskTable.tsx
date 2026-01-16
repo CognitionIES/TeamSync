@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import StatusBadge from "./StatusBadge";
 import { Task, TaskStatus, TaskType } from "@/types";
-import { formatDistanceToNow, parseISO } from "date-fns";
+import { parseISO } from "date-fns";
 import {
   ArrowUpDown,
   Clock,
@@ -248,8 +248,20 @@ const TaskTable: React.FC<TaskTableProps> = ({
     const assignedTime = formatDateTime(task.createdAt, "Assigned");
     const completedTime = formatDateTime(task.completedAt, "Completed");
 
-    const totalItems = task.items.length;
-    const completedItems = task.items.filter((item) => item.completed).length;
+    let totalItems = 0;
+    let completedItems = 0;
+
+    if (task.isPIDBased && task.pidWorkItems) {
+      totalItems = task.pidWorkItems.length;
+      completedItems = task.pidWorkItems.filter(
+        (item: any) => item.status === "Completed" || item.status === "Skipped"
+      ).length;
+    } else {
+      // For legacy tasks, count items
+      totalItems = task.items.length;
+      completedItems = task.items.filter((item) => item.completed).length;
+    }
+
     const progress =
       totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
 
@@ -276,9 +288,9 @@ const TaskTable: React.FC<TaskTableProps> = ({
       pidNumber: task.pidNumber || "N/A",
       isComplex: task.isComplex || false,
       description: task.description || "",
+      isPIDBased: task.isPIDBased || false,
     };
   });
-
   const sortedRows = [...rows].sort((a, b) => {
     const aValue = a[sortColumn];
     const bValue = b[sortColumn];

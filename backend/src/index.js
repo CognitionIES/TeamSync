@@ -13,14 +13,14 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-// ✅ CRITICAL: Database connection middleware MUST come BEFORE routes
+// CRITICAL: Database connection middleware MUST come BEFORE routes
 let dbConnected = false;
 const ensureDbConnection = async () => {
   if (!dbConnected) {
     try {
       await connectDB();
       dbConnected = true;
-      console.log("✅ Database connected");
+      console.log("Database connected");
     } catch (error) {
       console.error("Database connection failed:", error.message);
       throw error;
@@ -35,9 +35,9 @@ app.use(async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Database connection middleware error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Database connection failed",
-      error: error.message 
+      error: error.message
     });
   }
 });
@@ -123,9 +123,9 @@ app.use((req, res, next) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.stack);
-  res.status(500).json({ 
-    message: "Something went wrong!", 
-    error: err.message 
+  res.status(500).json({
+    message: "Something went wrong!",
+    error: err.message
   });
 });
 
@@ -152,5 +152,5 @@ if (require.main === module) {
   startServer();
 }
 
-// ✅ Export the app for Vercel serverless functions
+// Export the app for Vercel serverless functions
 module.exports = app;

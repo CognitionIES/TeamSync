@@ -153,6 +153,7 @@ interface TeamLead {
   team: string[];
 }
 interface MetricEntry {
+  teamName: ReactNode;
   userId: string;
   date?: string;
   week_start?: string;

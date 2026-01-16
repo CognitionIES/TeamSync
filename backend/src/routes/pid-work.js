@@ -4,7 +4,6 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
-
 router.post("/mark-complete", protect, async (req, res) => {
   try {
     await db.query("BEGIN");
@@ -21,7 +20,13 @@ router.post("/mark-complete", protect, async (req, res) => {
     } = req.body;
 
     console.log("Mark complete request:", {
-      pid_id, line_id, equipment_id, user_id, task_type, status, blocks
+      pid_id,
+      line_id,
+      equipment_id,
+      user_id,
+      task_type,
+      status,
+      blocks,
     });
 
     if (!["Pending", "In Progress", "Completed", "Skipped"].includes(status)) {
@@ -32,11 +37,11 @@ router.post("/mark-complete", protect, async (req, res) => {
     if (!line_id && !equipment_id) {
       await db.query("ROLLBACK");
       return res.status(400).json({
-        message: "Either line_id or equipment_id must be provided"
+        message: "Either line_id or equipment_id must be provided",
       });
     }
 
-    // ✅ CRITICAL FIX: First, FIND the existing work item by its unique key
+    // Find existing work item
     const findQuery = `
       SELECT pwi.*, t.status as task_status
       FROM pid_work_items pwi
@@ -56,13 +61,13 @@ router.post("/mark-complete", protect, async (req, res) => {
       user_id,
       task_type,
       line_id || null,
-      equipment_id || null
+      equipment_id || null,
     ]);
 
     if (findResult.rows.length === 0) {
       await db.query("ROLLBACK");
       return res.status(404).json({
-        message: "Work item not found. This item may not be assigned to you."
+        message: "Work item not found. This item may not be assigned to you.",
       });
     }
 
@@ -70,18 +75,23 @@ router.post("/mark-complete", protect, async (req, res) => {
     const taskId = existingItem.task_id;
     const taskStatus = existingItem.task_status;
 
-    console.log(`Found existing work item: ID=${existingItem.id}, task_id=${taskId}`);
+    console.log(
+      `Found existing work item: ID=${existingItem.id}, task_id=${taskId}`
+    );
 
-    // ✅ Prevent changes if already completed
+    // Prevent changes if already completed
     if (existingItem.status === "Completed" && status !== "Completed") {
       await db.query("ROLLBACK");
       return res.status(400).json({
-        message: "Cannot modify a completed item"
+        message: "Cannot modify a completed item",
       });
     }
 
-    // ✅ Auto-transition task to In Progress
-    if (taskStatus === "Assigned" && (status === "In Progress" || status === "Completed")) {
+    // Auto-transition task to In Progress
+    if (
+      taskStatus === "Assigned" &&
+      (status === "In Progress" || status === "Completed")
+    ) {
       await db.query(
         `UPDATE tasks SET status = 'In Progress', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
         [taskId]
@@ -91,7 +101,7 @@ router.post("/mark-complete", protect, async (req, res) => {
 
     const completed_at = status === "Completed" ? new Date() : null;
 
-    // ✅ CRITICAL FIX: UPDATE by ID, not INSERT
+    // Update work item
     const updateQuery = `
       UPDATE pid_work_items
       SET 
@@ -109,13 +119,77 @@ router.post("/mark-complete", protect, async (req, res) => {
       completed_at,
       remarks || existingItem.remarks,
       blocks,
-      existingItem.id  // ✅ Update by ID, not by composite key
+      existingItem.id,
     ]);
 
     const updatedItem = updateResult.rows[0];
-    console.log(`Updated work item: status=${updatedItem.status}, blocks=${updatedItem.blocks}`);
+    console.log(
+      `Updated work item: status=${updatedItem.status}, blocks=${updatedItem.blocks}`
+    );
 
-    // ✅ Update daily_metrics
+    //   ========== NEW: TRACK SKIPPED ITEMS ==========
+    if (status === "Skipped") {
+      const date = new Date().toISOString().split("T")[0];
+
+      // Determine item_type
+      let item_type = "Line"; // Default
+      if (equipment_id) {
+        item_type = "Equipment";
+      } else if (!line_id && pid_id) {
+        item_type = "PID";
+      }
+
+      // Determine entity_id (required for metrics compatibility)
+      let entity_id = line_id;
+
+      if (!entity_id && equipment_id) {
+        // Find a line in the same project as this equipment
+        const { rows: equipRows } = await db.query(
+          `SELECT l.id 
+           FROM equipment e
+           JOIN lines l ON e.pid_id = l.pid_id
+           WHERE e.id = $1
+           LIMIT 1`,
+          [equipment_id]
+        );
+        entity_id = equipRows[0]?.id || null;
+      }
+
+      if (!entity_id) {
+        // Fallback: Find any line in this PID
+        const { rows: lineRows } = await db.query(
+          `SELECT id FROM lines WHERE pid_id = $1 LIMIT 1`,
+          [pid_id]
+        );
+        entity_id = lineRows[0]?.id || null;
+      }
+
+      if (!entity_id) {
+        console.error("⚠️ Could not determine entity_id for skipped item");
+      } else {
+        // Insert into skipped_items_tracking
+        try {
+          await db.query(
+            `INSERT INTO skipped_items_tracking 
+             (user_id, entity_id, item_type, task_type, pid_id, date)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (user_id, entity_id, pid_id, task_type, date) 
+             DO NOTHING`,
+            [user_id, entity_id, item_type, task_type, pid_id, date]
+          );
+
+          console.log(
+            `  Skipped item tracked: user=${user_id}, item=${item_type}, task=${task_type}, date=${date}`
+          );
+        } catch (skipError) {
+          console.error("❌ Error inserting skipped item:", skipError.message);
+          // Don't fail the whole request if tracking fails
+        }
+      }
+    }
+    //   ========== END SKIPPED TRACKING ==========
+
+    // Update daily_metrics for completed items
     if (status === "Completed" && blocks > 0) {
       const date = new Date().toISOString().split("T")[0];
       let entityId = line_id;
@@ -145,7 +219,7 @@ router.post("/mark-complete", protect, async (req, res) => {
       }
     }
 
-    // ✅ Calculate task progress
+    // Calculate task progress
     const progressQuery = `
       SELECT 
         COUNT(*) as total,
@@ -163,9 +237,11 @@ router.post("/mark-complete", protect, async (req, res) => {
       [progress, taskId]
     );
 
-    console.log(`Task ${taskId} progress: ${completed}/${total} (${progress}%)`);
+    console.log(
+      `Task ${taskId} progress: ${completed}/${total} (${progress}%)`
+    );
 
-    // ✅ Auto-complete task when 100%
+    // Auto-complete task when 100%
     if (progress === 100) {
       await db.query(
         `UPDATE tasks 
@@ -189,12 +265,12 @@ router.post("/mark-complete", protect, async (req, res) => {
         blocks: updatedItem.blocks,
         completed_at: updatedItem.completed_at,
         task_id: updatedItem.task_id,
-        task_progress: progress
+        task_progress: progress,
       },
     });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error(" Error marking work item complete:", error);
+    console.error("❌ Error marking work item complete:", error);
     res.status(500).json({
       message: "Failed to update work item",
       error: error.message,
@@ -325,18 +401,18 @@ router.post("/assign-pid", protect, async (req, res) => {
       user_id,
       task_type,
       project_id,
-      body: req.body
+      body: req.body,
     });
 
-    // ✅ Validate inputs
+    //   Validate inputs
     if (!pid_id || !user_id || !task_type || !project_id) {
       return res.status(400).json({
         message: "Missing required fields",
-        received: { pid_id, user_id, task_type, project_id }
+        received: { pid_id, user_id, task_type, project_id },
       });
     }
 
-    // ✅ Parse IDs properly
+    //   Parse IDs properly
     const pidIdInt = parseInt(pid_id);
     const userIdInt = parseInt(user_id);
     const projectIdInt = parseInt(project_id);
@@ -344,14 +420,14 @@ router.post("/assign-pid", protect, async (req, res) => {
     if (isNaN(pidIdInt) || isNaN(userIdInt) || isNaN(projectIdInt)) {
       return res.status(400).json({
         message: "Invalid ID format",
-        received: { pid_id, user_id, project_id }
+        received: { pid_id, user_id, project_id },
       });
     }
 
     await db.query("BEGIN");
 
     try {
-      // ✅ Check if PID already assigned
+      //   Check if PID already assigned
       const pidCheckQuery = `
         SELECT pwi.user_id, u.name as user_name, pwi.task_id
         FROM pid_work_items pwi
@@ -368,11 +444,11 @@ router.post("/assign-pid", protect, async (req, res) => {
         const existingUser = pidCheck.rows[0];
         return res.status(400).json({
           message: `PID already assigned to ${existingUser.user_name}`,
-          error: "PID_ALREADY_ASSIGNED"
+          error: "PID_ALREADY_ASSIGNED",
         });
       }
 
-      // ✅ Get PID info
+      //   Get PID info
       const pidInfoQuery = `SELECT pid_number, project_id FROM pids WHERE id = $1`;
       const pidInfo = await db.query(pidInfoQuery, [pidIdInt]);
 
@@ -386,7 +462,7 @@ router.post("/assign-pid", protect, async (req, res) => {
 
       console.log(`Found PID: ${pidNumber} (project: ${pidProjectId})`);
 
-      // ✅ Find or create task (group assignments within 5 minutes)
+      //   Find or create task (group assignments within 5 minutes)
       const recentTaskQuery = `
         SELECT id, created_at
         FROM tasks
@@ -404,12 +480,14 @@ router.post("/assign-pid", protect, async (req, res) => {
       const recentTaskResult = await db.query(recentTaskQuery, [
         userIdInt,
         task_type,
-        projectIdInt
+        projectIdInt,
       ]);
 
       if (recentTaskResult.rows.length > 0) {
         taskId = recentTaskResult.rows[0].id;
-        console.log(`Reusing task ${taskId} (created ${recentTaskResult.rows[0].created_at})`);
+        console.log(
+          `Reusing task ${taskId} (created ${recentTaskResult.rows[0].created_at})`
+        );
       } else {
         // Create new task
         const taskInsertQuery = `
@@ -423,14 +501,14 @@ router.post("/assign-pid", protect, async (req, res) => {
         const taskResult = await db.query(taskInsertQuery, [
           task_type,
           userIdInt,
-          projectIdInt
+          projectIdInt,
         ]);
 
         taskId = taskResult.rows[0].id;
         console.log(`Created new task ${taskId}`);
       }
 
-      // ✅ Get all lines and equipment in this PID
+      //   Get all lines and equipment in this PID
       const itemsQuery = `
         SELECT 
           id as line_id, 
@@ -461,11 +539,11 @@ router.post("/assign-pid", protect, async (req, res) => {
       if (items.length === 0) {
         await db.query("ROLLBACK");
         return res.status(400).json({
-          message: `PID ${pidNumber} has no lines or equipment to assign`
+          message: `PID ${pidNumber} has no lines or equipment to assign`,
         });
       }
 
-      // ✅ Insert pid_work_items with task_id
+      //   Insert pid_work_items with task_id
       const insertItemsQuery = `
         INSERT INTO pid_work_items (
           pid_id, line_id, equipment_id, user_id, task_type, task_id, 
@@ -487,7 +565,7 @@ router.post("/assign-pid", protect, async (req, res) => {
             item.equipment_id,
             userIdInt,
             task_type,
-            taskId
+            taskId,
           ]);
 
           if (result.rows.length > 0) {
@@ -496,7 +574,7 @@ router.post("/assign-pid", protect, async (req, res) => {
               id: result.rows[0].id,
               line_id: item.line_id,
               equipment_id: item.equipment_id,
-              item_name: item.item_name
+              item_name: item.item_name,
             });
           }
         } catch (itemError) {
@@ -505,13 +583,15 @@ router.post("/assign-pid", protect, async (req, res) => {
         }
       }
 
-      console.log(`Created ${createdCount}/${items.length} work items for task ${taskId}`);
+      console.log(
+        `Created ${createdCount}/${items.length} work items for task ${taskId}`
+      );
 
       if (createdCount === 0) {
         await db.query("ROLLBACK");
         return res.status(400).json({
           message: "Failed to create any work items. They may already exist.",
-          error: "NO_ITEMS_CREATED"
+          error: "NO_ITEMS_CREATED",
         });
       }
 
@@ -527,16 +607,14 @@ router.post("/assign-pid", protect, async (req, res) => {
           taskType: task_type,
           itemsCount: createdCount,
           isNewTask: recentTaskResult.rows.length === 0,
-          items: createdItems
+          items: createdItems,
         },
       });
-
     } catch (innerError) {
       await db.query("ROLLBACK");
       console.error("  Inner transaction error:", innerError);
       throw innerError;
     }
-
   } catch (error) {
     console.error("  Error assigning PID:", {
       message: error.message,
@@ -546,14 +624,14 @@ router.post("/assign-pid", protect, async (req, res) => {
       table: error.table,
       column: error.column,
       code: error.code,
-      stack: error.stack
+      stack: error.stack,
     });
 
     res.status(500).json({
       message: "Failed to assign PID",
       error: error.message,
       detail: error.detail || "Check server logs for details",
-      code: error.code
+      code: error.code,
     });
   }
 });
@@ -641,7 +719,7 @@ router.patch("/skip/:workItemId", protect, async (req, res) => {
 
     res.json({
       message: "Work item skipped successfully",
-      data: rows[0]
+      data: rows[0],
     });
   } catch (error) {
     console.error("Error skipping work item:", error);
