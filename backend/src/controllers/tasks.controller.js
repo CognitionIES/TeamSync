@@ -179,6 +179,14 @@ const getTasks = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
+    // ✅ ALLOW BOTH TEAM LEAD AND PROJECT MANAGER
+    if (req.user.role !== "Team Lead" && req.user.role !== "Project Manager") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to create tasks`,
+      });
+    }
+
+
     console.log("Raw request body:", req.body);
     if (!req.body || typeof req.body !== "object") {
       return res.status(400).json({ message: "Invalid request body" });
@@ -188,42 +196,44 @@ const createTask = async (req, res) => {
     const description =
       typeof req.body.description === "string" ? req.body.description : "";
     console.log("Received task data:", req.body);
-    console.log("Description value before validation:", description);
 
     if (!type || !assigneeId || !projectId) {
       return res
         .status(400)
         .json({ message: "Task type, assignee, and project ID are required" });
     }
+
     if (type !== "Misc" && (!items || items.length === 0)) {
       return res
         .status(400)
         .json({ message: "Items are required for this task type" });
     }
+
     if (type === "Misc") {
       if (
         !description ||
         typeof description !== "string" ||
         description.trim() === ""
       ) {
-        console.log("Validation failed: Description is invalid");
         return res.status(400).json({
-          message:
-            "Description is required for Misc tasks and must be a non-empty string",
+          message: "Description is required for Misc tasks and must be a non-empty string",
         });
       }
     }
 
     await db.query("BEGIN");
 
+    // Verify assignee exists
     const { rows: userRows } = await db.query(
-      "SELECT id FROM users WHERE id = $1",
+      "SELECT id, name FROM users WHERE id = $1",
       [assigneeId]
     );
     if (userRows.length === 0) {
       await db.query("ROLLBACK");
       return res.status(400).json({ message: "Assignee not found" });
     }
+
+    // Verify project exists
     const { rows: projectRows } = await db.query(
       "SELECT id FROM projects WHERE id = $1",
       [projectId]
@@ -232,6 +242,8 @@ const createTask = async (req, res) => {
       await db.query("ROLLBACK");
       return res.status(400).json({ message: "Project not found" });
     }
+
+    // Get area_id from first item
     let areaId = null;
     if (type !== "Misc" && items && items.length > 0) {
       const firstItem = items[0];
@@ -262,7 +274,8 @@ const createTask = async (req, res) => {
         areaId = instrRows.length > 0 ? instrRows[0].area_id : null;
       }
     }
-    console.log("Creating task in database with area_id:", areaId);
+
+    // Create task
     const { rows: taskRows } = await db.query(
       "INSERT INTO tasks (type, assignee_id, is_complex, status, progress, project_id, description, area_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
       [
@@ -273,12 +286,13 @@ const createTask = async (req, res) => {
         0,
         projectId,
         type === "Misc" ? description : null,
-        areaId, // NEW
+        areaId,
       ]
     );
 
     const task = taskRows[0];
 
+    // Insert task items
     if (type !== "Misc") {
       for (const item of items) {
         await db.query(
@@ -287,6 +301,7 @@ const createTask = async (req, res) => {
         );
       }
 
+      // Handle Redline task lines
       if (type === "Redline") {
         const pidItem = items.find((item) => item.itemType === "PID");
         if (pidItem) {
@@ -304,11 +319,13 @@ const createTask = async (req, res) => {
       }
     }
 
+    // Create audit log
     const assigneeName = userRows[0]?.name || "Unknown";
     const taskName =
       type === "Misc"
         ? `Misc Task`
         : items.map((item) => `${item.itemType} ${item.itemName}`).join(", ");
+
     if (req.user) {
       await db.query(
         "INSERT INTO audit_logs (type, name, created_by_id, current_work, timestamp) VALUES ($1, $2, $3, $4, $5)",
@@ -316,7 +333,7 @@ const createTask = async (req, res) => {
           "Task Assignment",
           `${type} ${taskName}`,
           req.user.id,
-          `${type} Task ${taskName}`,
+          `${type} Task assigned to ${assigneeName}`,
           new Date(),
         ]
       );
@@ -324,13 +341,13 @@ const createTask = async (req, res) => {
 
     await db.query("COMMIT");
 
+    // Fetch complete task details
     const { rows: detailedTasks } = await db.query(
-      `
-      SELECT t.*, u.name as assignee, p.name as project_name
-      FROM tasks t 
-      JOIN users u ON t.assignee_id = u.id 
-      LEFT JOIN projects p ON t.project_id = p.id
-      WHERE t.id = $1`,
+      `SELECT t.*, u.name as assignee, p.name as project_name
+       FROM tasks t 
+       JOIN users u ON t.assignee_id = u.id 
+       LEFT JOIN projects p ON t.project_id = p.id
+       WHERE t.id = $1`,
       [task.id]
     );
 
@@ -342,7 +359,7 @@ const createTask = async (req, res) => {
           id: item.itemId,
           item_id: item.itemId,
           item_type: item.itemType,
-          name: item.itemName, // Changed from item_name to name
+          name: item.itemName,
           completed: false,
         }));
     detailedTask.comments = [];
@@ -356,6 +373,7 @@ const createTask = async (req, res) => {
       .json({ message: "Failed to create task", error: error.message });
   }
 };
+
 
 module.exports = { createTask }; // Export the function
 

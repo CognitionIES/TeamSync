@@ -13,7 +13,8 @@ router.get("/", protect, async (req, res) => {
       req.user.role !== "Admin" &&
       req.user.role !== "Team Lead" &&
       req.user.role !== "Data Entry" &&
-      req.user.role !== "Team Member"
+      req.user.role !== "Team Member" &&
+      req.user.role !== "Project Manager"
     ) {
       return res.status(403).json({
         message: `User role ${req.user.role} is not authorized to view projects`,

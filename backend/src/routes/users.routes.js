@@ -182,60 +182,68 @@ router.get("/role/:role", (req, res, next) => {
 router.use(protect);
 
 // Fetch team members (for Team Lead dashboard dropdown)
-router.get("/team-members", authorize(["Team Lead"]), async (req, res) => {
+router.get("/team-members", authorize(["Team Lead", "Project Manager"]), async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
-      console.error("No user ID found in request. User:", req.user);
       return res.status(401).json({
         message: "User authentication failed. Please log in again."
       });
     }
 
-    console.log("Fetching team members for Team Lead ID:", req.user.id);
-    console.log("User role:", req.user.role);
+    console.log("Fetching team members for:", req.user.role, "ID:", req.user.id);
 
-    // Fetch team members
-    const { rows: memberRows } = await db.query(
-      `
-      SELECT u.id, u.name, u.role
-      FROM users u
-      WHERE u.id IN (
-        SELECT tm.member_id
-        FROM team_members tm
-        WHERE tm.lead_id = $1
-      )
-      `,
-      [req.user.id]
-    );
+    //PROJECT MANAGER SEES ALL TEAM MEMBERS
+    if (req.user.role === "Project Manager") {
+      const { rows: allMembers } = await db.query(
+        `SELECT DISTINCT u.id, u.name, u.role
+         FROM users u
+         WHERE u.role IN ('Team Member', 'Team Lead')
+         ORDER BY u.name`
+      );
 
-    // Fetch the team lead themselves
-    const { rows: leadRows } = await db.query(
-      `
-      SELECT id, name, role
-      FROM users
-      WHERE id = $1
-      `,
-      [req.user.id]
-    );
-
-    // Combine team lead + team members
-    const allMembers = [...leadRows, ...memberRows];
-
-    console.log("Team members + lead fetched:", allMembers);
-
-    if (allMembers.length === 1) {
-      // Only the lead, no team members
-      return res.status(200).json({
-        data: allMembers,
-        message: "No team members found. You can assign tasks to yourself.",
-      });
+      console.log(`Project Manager fetched ${allMembers.length} team members`);
+      return res.status(200).json({ data: allMembers });
     }
 
-    res.status(200).json({ data: allMembers });
+    //TEAM LEAD SEES THEIR TEAM + THEMSELVES
+    if (req.user.role === "Team Lead") {
+      // Fetch team members
+      const { rows: memberRows } = await db.query(
+        `SELECT u.id, u.name, u.role
+         FROM users u
+         WHERE u.id IN (
+           SELECT tm.member_id
+           FROM team_members tm
+           WHERE tm.lead_id = $1
+         )`,
+        [req.user.id]
+      );
+
+      // Fetch the team lead themselves
+      const { rows: leadRows } = await db.query(
+        `SELECT id, name, role FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+
+      const allMembers = [...leadRows, ...memberRows];
+      console.log(`Team Lead fetched ${allMembers.length} members (including self)`);
+
+      if (allMembers.length === 1) {
+        return res.status(200).json({
+          data: allMembers,
+          message: "No team members found. You can assign tasks to yourself.",
+        });
+      }
+
+      return res.status(200).json({ data: allMembers });
+    }
+
+    return res.status(403).json({ message: "Unauthorized to fetch team members" });
+
   } catch (error) {
     console.error("Error fetching team members:", error.message, error.stack);
     res.status(500).json({
-      message: "Failed to fetch team members. Please try again later.",
+      message: "Failed to fetch team members",
       error: error.message,
     });
   }
@@ -434,7 +442,7 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
       }));
 
       console.log(`Fetched ${pidWorkRows.length} PID work items`);
-    } 
+    }
     // Fetch task_items for non-PID tasks
     else {
       if (taskType === "Redline") {

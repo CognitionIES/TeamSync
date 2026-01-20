@@ -1040,8 +1040,10 @@ router.post("/individual/update", protect, async (req, res) => {
 
 router.get("/team/all", protect, async (req, res) => {
   try {
-    if (!["Project Manager", "Team Lead"].includes(req.user.role)) {
-      return res.status(403).json({ message: "Unauthorized access" });
+    if (req.user.role !== "Team Lead" && req.user.role !== "Project Manager") {
+      return res.status(403).json({
+        message: `User role ${req.user.role} is not authorized to view team metrics`,
+      });
     }
     const date = req.query.date || new Date().toISOString().split("T")[0];
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1058,7 +1060,7 @@ router.get("/team/all", protect, async (req, res) => {
       console.log("Daily query result rows:", dailyResult.rows.length);
     } catch (dailyError) {
       console.error("Daily query failed:", dailyError);
-      throw dailyError; // Will go to outer catch
+      throw dailyError;
     }
 
     const dailyMetricsMap = {};

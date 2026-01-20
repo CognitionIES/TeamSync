@@ -3,15 +3,16 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "@/context/AuthContext";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Analytics } from "@vercel/analytics/react";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import DashboardRouter from "./components/dashboards/DashboardRouter";
 import LoginForm from "@/components/login/LoginForm";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import TeamLeadMemberView from "@/components/dashboards/TeamLeadMemberView"; // NEW IMPORT
+import TeamLeadMemberView from "@/components/dashboards/TeamLeadMemberView";
+import TeamLeadDashboard from "@/components/dashboards/TeamLeadDashboard";
 import axios from "axios";
 
 // Configure axios defaults
@@ -23,7 +24,7 @@ axios.interceptors.request.use(
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
 // Handle unauthorized responses globally
@@ -36,7 +37,7 @@ axios.interceptors.response.use(
       window.location.href = "/login";
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 const queryClient = new QueryClient({
@@ -47,6 +48,15 @@ const queryClient = new QueryClient({
     },
   },
 });
+const CreateTaskRoute = () => {
+  const { user } = useAuth();
+
+  if (!["Team Lead", "Project Manager"].includes(user?.role || "")) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <TeamLeadDashboard />;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -67,7 +77,15 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
-            {/* NEW ROUTE FOR TEAM LEAD MY TASKS */}
+            {/* ✅ FIXED: Single create-task route */}
+            <Route
+              path="/create-task"
+              element={
+                <ProtectedRoute>
+                  <CreateTaskRoute />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/my-tasks"
               element={

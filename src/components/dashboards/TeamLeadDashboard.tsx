@@ -60,8 +60,8 @@ interface AssignedItems {
   redlinePIDs: string[];
 }
 interface FetchedAssignedItems {
-  isPIDBased?: boolean;  
-  pidWorkItems?: PIDWorkItem[];  
+  isPIDBased?: boolean;
+  pidWorkItems?: PIDWorkItem[];
   pids: any;
   lines: any;
   equipment: any;
@@ -150,7 +150,7 @@ const TeamLeadDashboard = () => {
   const [loadingItems, setLoadingItems] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedTaskType, setSelectedTaskType] = useState<TaskType | null>(
-    null
+    null,
   );
   const [usePIDBasedAssignment, setUsePIDBasedAssignment] = useState(false);
   const [description, setDescription] = useState("");
@@ -198,6 +198,21 @@ const TeamLeadDashboard = () => {
       setRetractModalOpen(false);
     }
   };
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      toast.info(getRandomMessage("login"));
+      navigate("/login", { replace: true });
+    } else if (!["Team Lead", "Project Manager"].includes(user?.role || "")) {
+      toast.error("You are not authorized to access this page.");
+      navigate("/", { replace: true });
+    }
+  }, [isAuthenticated, user, token, navigate]);
+  const getDashboardTitle = () => {
+    if (user?.role === "Project Manager")
+      return "Assign Tasks (Project Manager)";
+    if (user?.role === "Team Lead") return "Team Lead Dashboard";
+    return "Dashboard";
+  };
   const handleRetractTask = async (taskId: string) => {
     console.log("Retracting Task:", taskId);
     const task = tasks.find((t) => t.id === taskId);
@@ -210,7 +225,7 @@ const TeamLeadDashboard = () => {
     const hasCompletedWork = completedItems.length > 0;
     if (hasCompletedWork && !newAssigneeId) {
       toast.error(
-        "This task has completed work. Please select a new assignee to reassign incomplete items."
+        "This task has completed work. Please select a new assignee to reassign incomplete items.",
       );
       return;
     }
@@ -223,14 +238,14 @@ const TeamLeadDashboard = () => {
       const response = await axios.patch(
         `${API_URL}/tasks/${taskId}/retract`,
         payload,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       console.log("Retract response:", response.data);
       // Refresh tasks to sync with backend
       await fetchTasks();
       if (response.data.data.newTask) {
         toast.success(
-          `Task ${taskId} retracted and reassigned to new task #${response.data.data.newTask.id}`
+          `Task ${taskId} retracted and reassigned to new task #${response.data.data.newTask.id}`,
         );
       } else {
         toast.success(`Task ${taskId} retracted successfully`);
@@ -242,7 +257,7 @@ const TeamLeadDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error retracting task:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to retract task"
+        axiosError.response?.data?.message || "Failed to retract task",
       );
     } finally {
       setIsLoading(false);
@@ -251,15 +266,7 @@ const TeamLeadDashboard = () => {
   const handleReassign = (assigneeId: string) => {
     setNewAssigneeId(assigneeId);
   };
-  useEffect(() => {
-    if (!isAuthenticated || !token) {
-      toast.info(getRandomMessage("login"));
-      navigate("/login", { replace: true });
-    } else if (user?.role !== "Team Lead") {
-      toast.error("You are not authorized to access this dashboard.");
-      navigate("/", { replace: true });
-    }
-  }, [isAuthenticated, user, token, navigate]);
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem("teamsync_token");
     if (!token) {
@@ -273,38 +280,64 @@ const TeamLeadDashboard = () => {
     };
   };
   const fetchProjects = async () => {
+    console.log("===== fetchProjects START =====");
+    console.log("API_URL:", API_URL);
+    console.log("Token exists:", !!localStorage.getItem("teamsync_token"));
     try {
-      const response = await axios.get<{
-        data: { id: number; name: string }[];
-      }>(`${API_URL}/projects`, getAuthHeaders());
-      const projectData = response.data.data.map((project) => ({
-        id: project.id.toString(),
-        name: project.name,
-      }));
-      console.log("Fetched projects:", projectData);
+      const headers = getAuthHeaders();
+      console.log("Request headers:", headers);
+      const response = await axios.get(`${API_URL}/projects`, headers);
+      console.log("Response status:", response.status);
+      console.log("Full axios response object:", response);
+      console.log("response.data (raw):", response.data);
+      // Safely extract projects - handle both wrapped and unwrapped responses
+      const rawData = response.data?.data ?? response.data ?? [];
+      console.log("Extracted raw data:", rawData);
+      if (!Array.isArray(rawData)) {
+        console.warn("Projects data is not an array:", rawData);
+        setProjects([]);
+        toast.warning("Invalid project data format from server");
+        return;
+      }
+      const projectData = rawData
+        .filter((p: any) => p?.id != null && p?.name)
+        .map((project: any) => ({
+          id: String(project.id),
+          name: String(project.name),
+        }));
+      console.log("Processed projects array:", projectData);
       setProjects(projectData);
-      // auto selection is disabled
       if (projectData.length === 0) {
-        toast.warning(
-          "No projects available. Please contact an Admin to be assigned to a project."
-        );
+        toast.warning("No projects available. Contact Admin to create one.");
+      } else {
+        toast.success(`Loaded ${projectData.length} projects`);
       }
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      console.error("Error fetching projects:", axiosError);
-      const errorMessage =
-        axiosError.response?.data?.message || "Failed to fetch projects";
-      toast.error(errorMessage);
-      if (axiosError.response?.status === 403) {
-        toast.error(
-          "You are not authorized to view projects. Redirecting to login..."
-        );
+    } catch (error: any) {
+      console.error("===== fetchProjects ERROR =====");
+      console.error("Error object:", error);
+      if (error.response) {
+        console.error("Status:", error.response.status);
+        console.error("Response data:", error.response.data);
+      } else if (error.request) {
+        console.error("No response received - request details:", error.request);
+      } else {
+        console.error("Request setup error:", error.message);
+      }
+      const message =
+        error.response?.data?.message ||
+        error.message ||
+        "Failed to fetch projects";
+      toast.error(message);
+      if (error.response?.status === 403) {
+        toast.error("Not authorized to view projects. Redirecting...");
         navigate("/login", { replace: true });
-      } else if (axiosError.response?.status === 500) {
-        toast.error(
-          "A server error occurred while fetching projects. Please try again later or contact support."
-        );
+      } else if (error.response?.status === 401) {
+        toast.error("Session expired. Please log in again.");
+        navigate("/login", { replace: true });
       }
+      setProjects([]);
+    } finally {
+      console.log("===== fetchProjects END =====");
     }
   };
   const fetchTeamMembers = async () => {
@@ -314,7 +347,7 @@ const TeamLeadDashboard = () => {
       console.log("Logged-in user ID:", user?.id); // Log user ID
       const response = await axios.get<{ data: User[]; message?: string }>(
         `${API_URL}/users/team-members`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       console.log("Team members API response:", response.data);
       const members = response.data.data.map((user) => ({
@@ -355,7 +388,7 @@ const TeamLeadDashboard = () => {
       const pidsData = response.data.data
         .filter(
           (pid) =>
-            !assignedItemsForDuplicates.redlinePIDs.includes(pid.id.toString())
+            !assignedItemsForDuplicates.redlinePIDs.includes(pid.id.toString()),
         )
         .map((pid) => ({
           id: pid.id.toString(),
@@ -364,7 +397,7 @@ const TeamLeadDashboard = () => {
       console.log(`Fetched PIDs for project ${selectedProject}:`, pidsData);
       setPIDs(pidsData);
       setSelectedPIDs((prev) =>
-        prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId))
+        prev.filter((pidId) => pidsData.some((pid) => pid.id === pidId)),
       );
       if (pidsData.length === 0) {
         toast.info("No unassigned P&IDs available for this project.");
@@ -373,7 +406,7 @@ const TeamLeadDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching P&IDs:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch P&IDs"
+        axiosError.response?.data?.message || "Failed to fetch P&IDs",
       );
       setPIDs([]);
       setSelectedPIDs([]);
@@ -393,13 +426,13 @@ const TeamLeadDashboard = () => {
         }[];
       }>(
         `${API_URL}/lines/unassigned/${selectedProject}${taskTypeParam}`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       const linesData = response.data.data
         .filter(
           (line) =>
             !assignedItemsForDuplicates.upvLines.includes(line.id.toString()) &&
-            !assignedItemsForDuplicates.qcLines.includes(line.id.toString())
+            !assignedItemsForDuplicates.qcLines.includes(line.id.toString()),
         )
         .map((line) => ({
           id: line.id.toString(),
@@ -408,7 +441,7 @@ const TeamLeadDashboard = () => {
         }));
       setLines(linesData);
       setSelectedLines((prev) =>
-        prev.filter((lineId) => linesData.some((line) => line.id === lineId))
+        prev.filter((lineId) => linesData.some((line) => line.id === lineId)),
       );
       if (linesData.length === 0) {
         const message =
@@ -421,7 +454,8 @@ const TeamLeadDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching unassigned lines:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch unassigned lines"
+        axiosError.response?.data?.message ||
+          "Failed to fetch unassigned lines",
       );
       setLines([]);
       setSelectedLines([]);
@@ -440,17 +474,17 @@ const TeamLeadDashboard = () => {
         }[];
       }>(
         `${API_URL}/equipment/unassigned/${selectedProject}${taskTypeParam}`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       const equipmentData = response.data.data
         .filter(
           (equip) =>
             !assignedItemsForDuplicates.upvEquipment.includes(
-              equip.id.toString()
+              equip.id.toString(),
             ) &&
             !assignedItemsForDuplicates.qcEquipment.includes(
-              equip.id.toString()
-            )
+              equip.id.toString(),
+            ),
         )
         .map((equip) => ({
           id: equip.id.toString(),
@@ -460,8 +494,8 @@ const TeamLeadDashboard = () => {
       setEquipment(equipmentData);
       setSelectedEquipment((prev) =>
         prev.filter((equipId) =>
-          equipmentData.some((equip) => equip.id === equipId)
-        )
+          equipmentData.some((equip) => equip.id === equipId),
+        ),
       );
       if (equipmentData.length === 0) {
         const message =
@@ -474,7 +508,7 @@ const TeamLeadDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching equipment:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch equipment"
+        axiosError.response?.data?.message || "Failed to fetch equipment",
       );
       setEquipment([]);
       setSelectedEquipment([]);
@@ -488,7 +522,7 @@ const TeamLeadDashboard = () => {
         data: { id: number; instrument_tag: string; description: string }[];
       }>(
         `${API_URL}/non-inline-instruments/unassigned/${selectedProject}${taskTypeParam}`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       const instrumentsData = response.data.data.map((instrument) => ({
         id: instrument.id.toString(),
@@ -498,8 +532,8 @@ const TeamLeadDashboard = () => {
       setNonInlineInstruments(instrumentsData);
       setSelectedNonInlineInstruments((prev) =>
         prev.filter((id) =>
-          instrumentsData.some((instrument) => instrument.id === id)
-        )
+          instrumentsData.some((instrument) => instrument.id === id),
+        ),
       );
       if (instrumentsData.length === 0) {
         const message =
@@ -513,26 +547,23 @@ const TeamLeadDashboard = () => {
       console.error("Error fetching non-inline instruments:", axiosError);
       toast.error(
         axiosError.response?.data?.message ||
-        "Failed to fetch non-inline instruments"
+          "Failed to fetch non-inline instruments",
       );
       setNonInlineInstruments([]);
       setSelectedNonInlineInstruments([]);
     }
   };
-// Replace the fetchTasks function in TeamLeadDashboard.tsx (lines ~499-533)
-
+  // Replace the fetchTasks function in TeamLeadDashboard.tsx (lines ~499-533)
   const fetchTasks = async () => {
     try {
       setIsLoading(true);
       console.log("Fetching tasks for Team Lead with token:", token);
       console.log("Selected project:", selectedProject);
-
       const response = await axios.get<{ data: any[] }>(
         `${API_URL}/tasks`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
       console.log("Tasks API response:", response.data);
-
       const tasksData = response.data.data
         .filter((task) => {
           const matchesProject =
@@ -540,7 +571,7 @@ const TeamLeadDashboard = () => {
             task.project_id?.toString() === selectedProject ||
             task.project_id === null;
           console.log(
-            `Task ${task.id} project_id: ${task.project_id}, matches: ${matchesProject}`
+            `Task ${task.id} project_id: ${task.project_id}, matches: ${matchesProject}`,
           );
           return matchesProject;
         })
@@ -555,7 +586,7 @@ const TeamLeadDashboard = () => {
             ) {
               console.warn(
                 `Invalid comment at comment index ${commentIndex}:`,
-                comment
+                comment,
               );
               return;
             }
@@ -571,23 +602,23 @@ const TeamLeadDashboard = () => {
               });
             }
           });
-
           const uniqueComments = Array.from(commentMap.values());
-
           const isPIDBased = task.is_pid_based === true;
-
           let mappedItems: any[] = [];
-
           if (isPIDBased) {
             // Map pid_work_items to TaskItem format
             mappedItems = (task.pid_work_items || []).map((pwi: any) => ({
               id: pwi.id.toString(),
-              name: pwi.line_number 
-                ? `Line: ${pwi.line_number}` 
-                : pwi.equipment_number 
+              name: pwi.line_number
+                ? `Line: ${pwi.line_number}`
+                : pwi.equipment_number
                   ? `Equipment: ${pwi.equipment_number}`
                   : `PID: ${pwi.pid_number}`,
-              type: pwi.line_id ? "Line" : pwi.equipment_id ? "Equipment" : "PID",
+              type: pwi.line_id
+                ? "Line"
+                : pwi.equipment_id
+                  ? "Equipment"
+                  : "PID",
               completed: pwi.status === "Completed" || pwi.status === "Skipped",
               completedAt: pwi.completed_at || null,
               blocks: pwi.blocks || 0,
@@ -611,7 +642,6 @@ const TeamLeadDashboard = () => {
               })
               .filter((item: any) => item !== null);
           }
-
           return {
             id: task.id.toString(),
             type: task.type,
@@ -635,9 +665,9 @@ const TeamLeadDashboard = () => {
             pidWorkItems: task.pid_work_items || [],
           };
         });
-      
+
       console.log("Processed tasks data:", tasksData);
-      setTasks(tasksData); 
+      setTasks(tasksData);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Detailed error fetching tasks:", {
@@ -648,52 +678,48 @@ const TeamLeadDashboard = () => {
       });
       toast.error(
         axiosError.response?.data?.message ||
-          "Failed to fetch tasks. Please try again."
+          "Failed to fetch tasks. Please try again.",
       );
     } finally {
       setIsLoading(false);
     }
-  }; 
-
+  };
   const fetchAssignedItems = async (userId: string, taskId: string) => {
     console.log("=== fetchAssignedItems START ===");
     console.log("Input - userId:", userId, "taskId:", taskId);
-
     try {
       const url = `${API_URL}/users/${userId}/assigned-items/${taskId}`;
       console.log("API URL:", url);
       console.log("API_URL constant:", API_URL);
-
       const headers = getAuthHeaders();
       console.log("Request headers:", headers);
-
       const response = await axios.get<{ data: FetchedAssignedItems }>(
-      url,
-      headers
-    );
-    
+        url,
+        headers,
+      );
+
       console.log("Raw axios response:", response);
       console.log("Response status:", response.status);
       console.log("Response data:", response.data);
       console.log("Response data.data:", response.data.data);
-
       const data = response.data.data;
-
       console.log("Extracted data object:", data);
       console.log("data.isPIDBased:", data.isPIDBased);
       console.log("data.pidWorkItems:", data.pidWorkItems);
       console.log("data.pidWorkItems type:", typeof data.pidWorkItems);
-      console.log("data.pidWorkItems is array:", Array.isArray(data.pidWorkItems));
+      console.log(
+        "data.pidWorkItems is array:",
+        Array.isArray(data.pidWorkItems),
+      );
       console.log("data.pidWorkItems length:", data.pidWorkItems?.length);
-
-    // Log each pidWorkItem
-    if (data.pidWorkItems && data.pidWorkItems.length > 0) {
-      console.log("First pidWorkItem:", data.pidWorkItems[0]);
+      // Log each pidWorkItem
+      if (data.pidWorkItems && data.pidWorkItems.length > 0) {
+        console.log("First pidWorkItem:", data.pidWorkItems[0]);
         data.pidWorkItems.forEach((item, idx) => {
           console.log(`pidWorkItem[${idx}]:`, item);
         });
       }
-      
+
       // Map project_id to project_name using the projects array
       const mapProjectName = (items: any[]) => {
         console.log("Mapping project names for items:", items);
@@ -703,7 +729,7 @@ const TeamLeadDashboard = () => {
             projects.find((p) => p.id === item.project_id)?.name || "Unknown",
         }));
       };
-      
+
       const result = {
         isPIDBased: data.isPIDBased || false,
         pidWorkItems: data.pidWorkItems || [],
@@ -728,13 +754,13 @@ const TeamLeadDashboard = () => {
           items: mapProjectName(data.qcEquipment?.items || []),
         },
       };
-      
+
       console.log("Final result object:", result);
       console.log("Result isPIDBased:", result.isPIDBased);
       console.log("Result pidWorkItems:", result.pidWorkItems);
       console.log("Result pidWorkItems length:", result.pidWorkItems.length);
       console.log("=== fetchAssignedItems END ===");
-      
+
       return result;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -747,27 +773,21 @@ const TeamLeadDashboard = () => {
       throw axiosError;
     }
   };
-
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
     console.log("=== MODAL DEBUG START ===");
     console.log("Opening modal for taskId:", taskId, "userId:", userId);
-
     setSelectedUserId(userId);
     setLoadingItems(true);
-
     try {
       const task = tasks.find((t) => t.id === taskId);
       console.log("Found task:", task);
-
       if (!task) {
         toast.error("Task not found");
         setLoadingItems(false);
         return;
       }
-
-      //   FIX: Determine itemType correctly for both PID-based and legacy tasks
+      // FIX: Determine itemType correctly for both PID-based and legacy tasks
       let itemType: "PID" | "Line" | "Equipment" | null = null;
-
       if (task.isPIDBased) {
         console.log("Task is PID-based, pidWorkItems:", task.pidWorkItems);
         // For PID-based tasks, the itemType should be based on what's in the PID
@@ -788,30 +808,29 @@ const TeamLeadDashboard = () => {
         }
         console.log("Detected itemType for legacy task:", itemType);
       }
-
       setSelectedTaskType(task.type);
       setSelectedItemType(itemType);
-
-      console.log("Calling fetchAssignedItems for userId:", userId, "taskId:", taskId);
+      console.log(
+        "Calling fetchAssignedItems for userId:",
+        userId,
+        "taskId:",
+        taskId,
+      );
       const items = await fetchAssignedItems(userId, taskId);
       console.log("fetchAssignedItems returned:", items);
       console.log("items.isPIDBased:", items.isPIDBased);
       console.log("items.pidWorkItems length:", items.pidWorkItems?.length);
-
-      //   FIX: Ensure we're spreading the data correctly
+      // FIX: Ensure we're spreading the data correctly
       const modalData = {
         ...items,
         isPIDBased: items.isPIDBased || false,
         pidWorkItems: items.pidWorkItems || [],
       };
-
       console.log("Setting modal data:", modalData);
       console.log("Modal data isPIDBased:", modalData.isPIDBased);
       console.log("Modal data pidWorkItems:", modalData.pidWorkItems);
-
       setAssignedItems(modalData);
       setModalIsOpen(true);
-
       console.log("=== MODAL DEBUG END ===");
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -819,9 +838,8 @@ const TeamLeadDashboard = () => {
       console.error("Error fetching assigned items:", axiosError);
       console.error("Error response:", axiosError.response?.data);
       console.error("Error status:", axiosError.response?.status);
-
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch assigned items"
+        axiosError.response?.data?.message || "Failed to fetch assigned items",
       );
       setAssignedItems(null);
       setSelectedTaskType(null);
@@ -855,12 +873,17 @@ const TeamLeadDashboard = () => {
     setAssignee(value);
   };
   useEffect(() => {
-    if (isAuthenticated && user?.role === "Team Lead" && token) {
+    if (
+      isAuthenticated &&
+      token &&
+      ["Team Lead", "Project Manager"].includes(user?.role || "")
+    ) {
+      console.log("Dashboard mount - fetching data for role:", user?.role);
       fetchProjects();
-      fetchTeamMembers(); // Fetch team members on mount
+      fetchTeamMembers();
       setGeneralMessage(getRandomMessage("general"));
     }
-  }, [isAuthenticated, user, token]);
+  }, [isAuthenticated, token, user?.role]); // ← user?.role in deps is fine
   useEffect(() => {
     if (selectedProject && taskType) {
       Promise.all([
@@ -966,7 +989,7 @@ const TeamLeadDashboard = () => {
     try {
       const authHeaders = getAuthHeaders();
       const assigneeMember = teamMembers.find(
-        (member) => member.id === assignee
+        (member) => member.id === assignee,
       );
       if (!assigneeMember) {
         throw new Error("Assignee not found");
@@ -978,37 +1001,27 @@ const TeamLeadDashboard = () => {
       ) {
         console.log("Using PID-based assignment workflow");
         console.log("Token being sent:", token);
-
-        //   FIXED: Changed from /api/pid-work/tasks/assign-pid to /api/tasks/assign-pid
+        // FIXED: Changed from /api/pid-work/tasks/assign-pid to /api/tasks/assign-pid
         const pidAssignmentPromises = selectedPIDs.map((pidId) => {
           const payload = {
             pid_id: parseInt(pidId),
             user_id: assigneeId,
             task_type: "UPV",
             estimated_blocks: 0,
-            project_id: selectedProject
-
+            project_id: selectedProject,
           };
-
           console.log(`---> Assigning PID ${pidId} with payload:`, payload);
-
-          return axios.post(
-            `${API_URL}/tasks/assign-pid`,
-            payload,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Cache-Control": "no-cache",
-              },
-            }
-          );
+          return axios.post(`${API_URL}/tasks/assign-pid`, payload, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Cache-Control": "no-cache",
+            },
+          });
         });
         try {
           const results = await Promise.all(pidAssignmentPromises);
-          console.log("--->  PID assignment results:", results);
-
+          console.log("---> PID assignment results:", results);
           setSubmissionProgress(100);
-
           // Refresh data
           await Promise.all([
             fetchTasks(),
@@ -1016,16 +1029,14 @@ const TeamLeadDashboard = () => {
             fetchLines(),
             fetchEquipment(),
           ]);
-
           // Clear form
           setTaskType("");
           setAssignmentType("");
           setSelectedPIDs([]);
           setAssignee("");
           setUsePIDBasedAssignment(false);
-
           toast.success(
-            `${selectedPIDs.length} PID(s) assigned to ${assigneeMember.name} using PID-based workflow. ${getRandomMessage("completion")}`
+            `${selectedPIDs.length} PID(s) assigned to ${assigneeMember.name} using PID-based workflow. ${getRandomMessage("completion")}`,
           );
           return;
         } catch (error) {
@@ -1052,7 +1063,7 @@ const TeamLeadDashboard = () => {
           description.trim().length === 0
         ) {
           toast.error(
-            "Please provide a description for the miscellaneous task"
+            "Please provide a description for the miscellaneous task",
           );
           return;
         }
@@ -1103,7 +1114,7 @@ const TeamLeadDashboard = () => {
                 const equipObj = equipment.find((e) => e.id === equip);
                 if (!equipObj) {
                   console.warn(
-                    `Equipment with ID ${equip} not found in equipment array`
+                    `Equipment with ID ${equip} not found in equipment array`,
                   );
                   return null;
                 }
@@ -1138,11 +1149,11 @@ const TeamLeadDashboard = () => {
             selectedItems = selectedNonInlineInstruments
               .map((instrumentId) => {
                 const instrumentObj = nonInlineInstruments.find(
-                  (i) => i.id === instrumentId
+                  (i) => i.id === instrumentId,
                 );
                 if (!instrumentObj) {
                   console.warn(
-                    `Non-inline instrument with ID ${instrumentId} not found`
+                    `Non-inline instrument with ID ${instrumentId} not found`,
                   );
                   return null;
                 }
@@ -1197,7 +1208,7 @@ const TeamLeadDashboard = () => {
                 const equipObj = equipment.find((e) => e.id === equip);
                 if (!equipObj) {
                   console.warn(
-                    `Equipment with ID ${equip} not found in equipment array`
+                    `Equipment with ID ${equip} not found in equipment array`,
                   );
                   return null;
                 }
@@ -1216,11 +1227,11 @@ const TeamLeadDashboard = () => {
             selectedItems = selectedNonInlineInstruments
               .map((instrumentId) => {
                 const instrumentObj = nonInlineInstruments.find(
-                  (i) => i.id === instrumentId
+                  (i) => i.id === instrumentId,
                 );
                 if (!instrumentObj) {
                   console.warn(
-                    `Non-inline instrument with ID ${instrumentId} not found`
+                    `Non-inline instrument with ID ${instrumentId} not found`,
                   );
                   return null;
                 }
@@ -1250,13 +1261,13 @@ const TeamLeadDashboard = () => {
       };
       console.log(
         "Sending task payload with description:",
-        newTask.description
+        newTask.description,
       );
       console.log("Sending task payload:", newTask);
       const response = await axios.post(
         `${API_URL}/tasks`,
         newTask,
-        authHeaders
+        authHeaders,
       );
       const taskId = response.data.data.id;
       setSubmissionProgress(50);
@@ -1265,22 +1276,22 @@ const TeamLeadDashboard = () => {
         await axios.put(
           `${API_URL}/lines/assign/batch`,
           { lineIds, userId: assigneeId },
-          authHeaders
+          authHeaders,
         );
       } else if (
         assignmentType === "NonInlineInstrument" &&
         taskType !== "Misc"
       ) {
         const instrumentIds = selectedItems.map((item) =>
-          parseInt(item.itemId)
+          parseInt(item.itemId),
         );
         // Validate instrumentIds
         const invalidIds = instrumentIds.filter((id) => isNaN(id) || id <= 0);
         if (invalidIds.length > 0) {
           throw new Error(
             `Invalid instrument IDs: ${invalidIds.join(
-              ", "
-            )}. All IDs must be positive integers.`
+              ", ",
+            )}. All IDs must be positive integers.`,
           );
         }
         console.log("Assigning non-inline instruments with payload:", {
@@ -1291,7 +1302,7 @@ const TeamLeadDashboard = () => {
         await axios.put(
           `${API_URL}/non-inline-instruments/assign/batch`,
           { instrumentIds, userId: assigneeId, taskId },
-          authHeaders
+          authHeaders,
         );
       }
       setSubmissionProgress(100);
@@ -1313,8 +1324,8 @@ const TeamLeadDashboard = () => {
       setDescription("");
       toast.success(
         `Task assigned to ${assigneeMember.name}. ${getRandomMessage(
-          "completion"
-        )}`
+          "completion",
+        )}`,
       );
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -1332,7 +1343,7 @@ const TeamLeadDashboard = () => {
   };
   // Handler for group select count change
   const handleGroupSelectCountChange = (
-    e: React.ChangeEvent<HTMLInputElement>
+    e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const count = parseInt(e.target.value, 10);
     if (isNaN(count) || count < 1) {
@@ -1351,7 +1362,7 @@ const TeamLeadDashboard = () => {
   const handlePIDCheckboxChange = (
     pidId: string,
     index: number,
-    checked: boolean
+    checked: boolean,
   ) => {
     if (groupSelectCount > 1) {
       const startIndex = index;
@@ -1367,7 +1378,7 @@ const TeamLeadDashboard = () => {
         toast.success(`Selected ${pidsToSelect.length} P&IDs`);
       } else {
         const newSelectedPIDs = selectedPIDs.filter(
-          (id) => !pidsToSelect.includes(id)
+          (id) => !pidsToSelect.includes(id),
         );
         setSelectedPIDs(newSelectedPIDs);
         toast.success(`Deselected ${pidsToSelect.length} P&IDs`);
@@ -1385,7 +1396,7 @@ const TeamLeadDashboard = () => {
   const handleLineCheckboxChange = (
     lineId: string,
     index: number,
-    checked: boolean
+    checked: boolean,
   ) => {
     setSelectedLines((prev) => {
       let newSelected = [...prev];
@@ -1415,13 +1426,13 @@ const TeamLeadDashboard = () => {
   const handleEquipmentCheckboxChange = (
     equipId: string,
     index: number,
-    checked: boolean
+    checked: boolean,
   ) => {
     if (groupSelectCount > 1) {
       const startIndex = index;
       const endIndex = Math.min(
         startIndex + groupSelectCount,
-        equipment.length
+        equipment.length,
       );
       const equipmentToSelect = equipment
         .slice(startIndex, endIndex)
@@ -1434,7 +1445,7 @@ const TeamLeadDashboard = () => {
         toast.success(`Selected ${equipmentToSelect.length} equipment items`);
       } else {
         const newSelectedEquipment = selectedEquipment.filter(
-          (id) => !equipmentToSelect.includes(id)
+          (id) => !equipmentToSelect.includes(id),
         );
         setSelectedEquipment(newSelectedEquipment);
         toast.success(`Deselected ${equipmentToSelect.length} equipment items`);
@@ -1475,10 +1486,10 @@ const TeamLeadDashboard = () => {
             }),
             "Completed On": item.completedAt
               ? new Date(item.completedAt).toLocaleString("en-IN", {
-                timeZone: "Asia/Kolkata",
-                dateStyle: "medium",
-                timeStyle: "short",
-              })
+                  timeZone: "Asia/Kolkata",
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })
               : "Not Completed",
           };
           csvData.push(row);
@@ -1507,7 +1518,7 @@ const TeamLeadDashboard = () => {
           return value.toString().includes(",")
             ? `"${value.toString().replace(/"/g, '""')}"`
             : value;
-        })
+        }),
       );
       const csvContent = [headers, ...csvRows]
         .map((row) => row.join(","))
@@ -1519,7 +1530,7 @@ const TeamLeadDashboard = () => {
       link.setAttribute("href", url);
       link.setAttribute(
         "download",
-        `task_details_${new Date().toISOString().split("T")[0]}.csv`
+        `task_details_${new Date().toISOString().split("T")[0]}.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -1531,23 +1542,56 @@ const TeamLeadDashboard = () => {
       toast.error("Failed to export CSV");
     }
   };
-  if (!isAuthenticated || user?.role !== "Team Lead" || !token) {
-    return null;
+  if (!isAuthenticated || !token || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center p-8">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-800">
+            Authenticating...
+          </h2>
+          <p className="text-gray-600 mt-2">
+            Redirecting or loading session...
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (!["Team Lead", "Project Manager"].includes(user.role)) {
+    console.warn(`Unauthorized access attempt — role: ${user.role}`);
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50">
+        <div className="text-center p-8 max-w-md">
+          <h2 className="text-2xl font-bold text-red-800 mb-4">
+            Access Denied
+          </h2>
+          <p className="text-red-700 mb-6">
+            Only Team Leads and Project Managers can access this page.
+          </p>
+          <Button
+            onClick={() => navigate("/")}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    );
   }
   const selectedUser = teamMembers.find(
-    (member) => member.id === selectedUserId
+    (member) => member.id === selectedUserId,
   );
   const userName = selectedUser ? selectedUser.name : "";
   const RetractTaskModal = () => {
     if (!selectedTaskForRetract) return null;
     const completedItems = selectedTaskForRetract.items.filter(
-      (item) => item.completed
+      (item) => item.completed,
     );
     const incompleteItems = selectedTaskForRetract.items.filter(
-      (item) => !item.completed
+      (item) => !item.completed,
     );
     const hasCompletedWork = completedItems.length > 0;
-    
+
     return (
       <Modal
         isOpen={retractModalOpen}
@@ -1580,15 +1624,13 @@ const TeamLeadDashboard = () => {
           },
         }}
         contentLabel="Retract Task Modal"
-        
       >
-        
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-gray-800">
               Retract Task #{selectedTaskForRetract.id}
             </h2>
-            
+
             <button
               onClick={() => {
                 setRetractModalOpen(false);
@@ -1642,7 +1684,6 @@ const TeamLeadDashboard = () => {
                 incomplete items ({incompleteItems.length}) will be reassigned
                 to the new assignee.
               </p>
-              
             </div>
           )}
           {!hasCompletedWork && (
@@ -1653,7 +1694,7 @@ const TeamLeadDashboard = () => {
               </p>
             </div>
           )}
-          
+
           <div>
             <label className="block text-sm font-medium mb-2">
               {hasCompletedWork
@@ -1671,7 +1712,7 @@ const TeamLeadDashboard = () => {
               >
                 {teamMembers
                   .filter(
-                    (member) => member.id !== selectedTaskForRetract.assigneeId
+                    (member) => member.id !== selectedTaskForRetract.assigneeId,
                   )
                   .map((member) => (
                     <SelectItem key={member.id} value={member.id}>
@@ -1720,12 +1761,12 @@ const TeamLeadDashboard = () => {
   return (
     <div className="min-h-screen">
       <Navbar onRefresh={handleRefresh} />
-      
+
       <div className="container mx-auto p-4 sm:p-6">
         <header className="mb-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold">Team Lead Dashboard</h1>
+              <h1 className="text-2xl font-bold">{getDashboardTitle()}</h1>
               <p className="text-gray-500">
                 Assign and manage tasks for your team
               </p>
@@ -1735,26 +1776,50 @@ const TeamLeadDashboard = () => {
                 </p>
               )}
             </div>
-            {/* NEW BUTTON */}
-            <Button
-              onClick={() => navigate("/my-tasks")}
-              className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            {/* Only show "View My Tasks" for Team Leads, not Project Managers */}
+            {user?.role === "Team Lead" && (
+              <Button
+                onClick={() => navigate("/my-tasks")}
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                />
-              </svg>
-              View My Tasks
-            </Button>
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                  />
+                </svg>
+                View My Tasks
+              </Button>
+            )}
+            {/* Add Back button for Project Manager */}
+            {user?.role === "Project Manager" && (
+              <Button
+                onClick={() => navigate("/dashboard")}
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Back to Dashboard
+              </Button>
+            )}
           </div>
         </header>
         <Card className="mb-6">
@@ -1767,6 +1832,10 @@ const TeamLeadDashboard = () => {
                 <label className="block text-sm font-medium mb-1">
                   Project
                 </label>
+                <p className="text-xs text-blue-600 mb-1 font-medium">
+                  Debug: {projects.length} projects in state | First:{" "}
+                  {projects[0]?.name || "—"}
+                </p>
                 <Select
                   value={selectedProject}
                   onValueChange={setSelectedProject}
@@ -1962,7 +2031,6 @@ const TeamLeadDashboard = () => {
                               </p>
                             </div>
                           </label>
-
                           <label className="flex items-start gap-3 cursor-pointer">
                             <input
                               type="radio"
@@ -1973,7 +2041,7 @@ const TeamLeadDashboard = () => {
                             />
                             <div>
                               <span className="font-medium text-sm text-gray-700">
-                               Line-Based Assignment (Legacy)
+                                Line-Based Assignment (Legacy)
                               </span>
                               <p className="text-xs text-gray-600 mt-1">
                                 Traditional method: Assign individual
@@ -2037,7 +2105,7 @@ const TeamLeadDashboard = () => {
                                   handlePIDCheckboxChange(
                                     pid.id,
                                     index,
-                                    checked as boolean
+                                    checked as boolean,
                                   )
                                 }
                               />
@@ -2064,7 +2132,7 @@ const TeamLeadDashboard = () => {
                                 handlePIDCheckboxChange(
                                   pid.id,
                                   index,
-                                  checked as boolean
+                                  checked as boolean,
                                 )
                               }
                             />
@@ -2081,18 +2149,10 @@ const TeamLeadDashboard = () => {
                       {assignmentType === "Line" && lines.length > 0 && (
                         <div className="max-h-60 overflow-y-auto space-y-2">
                           {Object.entries(
-                            lines.reduce((acc, line) => {
-                              const pid = pids.find((p) => p.id === line.pidId);
-                              const pidNumber = pid ? pid.name : "Unknown PID";
-                              if (!acc[pidNumber]) acc[pidNumber] = [];
-                              acc[pidNumber].push(line);
-                              return acc;
-                            }, {} as { [key: string]: Line[] })
-                          ).map(([pidNumber, pidLines], pidIndex) => {
-                            const previousPids = Object.entries(
-                              lines.reduce((acc, line) => {
+                            lines.reduce(
+                              (acc, line) => {
                                 const pid = pids.find(
-                                  (p) => p.id === line.pidId
+                                  (p) => p.id === line.pidId,
                                 );
                                 const pidNumber = pid
                                   ? pid.name
@@ -2100,11 +2160,29 @@ const TeamLeadDashboard = () => {
                                 if (!acc[pidNumber]) acc[pidNumber] = [];
                                 acc[pidNumber].push(line);
                                 return acc;
-                              }, {} as { [key: string]: Line[] })
+                              },
+                              {} as { [key: string]: Line[] },
+                            ),
+                          ).map(([pidNumber, pidLines], pidIndex) => {
+                            const previousPids = Object.entries(
+                              lines.reduce(
+                                (acc, line) => {
+                                  const pid = pids.find(
+                                    (p) => p.id === line.pidId,
+                                  );
+                                  const pidNumber = pid
+                                    ? pid.name
+                                    : "Unknown PID";
+                                  if (!acc[pidNumber]) acc[pidNumber] = [];
+                                  acc[pidNumber].push(line);
+                                  return acc;
+                                },
+                                {} as { [key: string]: Line[] },
+                              ),
                             ).slice(0, pidIndex);
                             const globalStartIndex = previousPids.reduce(
                               (sum, [, lines]) => sum + lines.length,
-                              0
+                              0,
                             );
                             return (
                               <div key={pidNumber + pidIndex}>
@@ -2124,13 +2202,13 @@ const TeamLeadDashboard = () => {
                                       <Checkbox
                                         id={line.id}
                                         checked={selectedLines.includes(
-                                          line.id
+                                          line.id,
                                         )}
                                         onCheckedChange={(checked) =>
                                           handleLineCheckboxChange(
                                             line.id,
                                             globalIndex,
-                                            checked as boolean
+                                            checked as boolean,
                                           )
                                         }
                                       />
@@ -2164,12 +2242,10 @@ const TeamLeadDashboard = () => {
                                 handleLineCheckboxChange(
                                   line.id,
                                   index,
-                                  checked as boolean
+                                  checked as boolean,
                                 )
-                              }// 
-
+                              } //
                             />
-
                             <label htmlFor={line.id} className="text-sm">
                               {line.name}
                             </label>
@@ -2194,7 +2270,7 @@ const TeamLeadDashboard = () => {
                                 handleEquipmentCheckboxChange(
                                   equip.id,
                                   index,
-                                  checked as boolean
+                                  checked as boolean,
                                 )
                               }
                             />
@@ -2219,22 +2295,22 @@ const TeamLeadDashboard = () => {
                               <Checkbox
                                 id={instrument.id}
                                 checked={selectedNonInlineInstruments.includes(
-                                  instrument.id
+                                  instrument.id,
                                 )}
                                 onCheckedChange={(checked: boolean) => {
                                   console.log(
                                     `Checkbox for instrument ${instrument.id} changed to:`,
-                                    checked
+                                    checked,
                                   );
                                   console.log(
                                     "Current selectedNonInlineInstruments:",
-                                    selectedNonInlineInstruments
+                                    selectedNonInlineInstruments,
                                   );
                                   if (groupSelectCount > 1) {
                                     const startIndex = index;
                                     const endIndex = Math.min(
                                       startIndex + groupSelectCount,
-                                      nonInlineInstruments.length
+                                      nonInlineInstruments.length,
                                     );
                                     const itemsToSelect = nonInlineInstruments
                                       .slice(startIndex, endIndex)
@@ -2247,21 +2323,21 @@ const TeamLeadDashboard = () => {
                                         ]),
                                       ];
                                       setSelectedNonInlineInstruments(
-                                        newSelected
+                                        newSelected,
                                       );
                                       toast.success(
-                                        `Selected ${itemsToSelect.length} non-inline instruments`
+                                        `Selected ${itemsToSelect.length} non-inline instruments`,
                                       );
                                     } else {
                                       const newSelected =
                                         selectedNonInlineInstruments.filter(
-                                          (id) => !itemsToSelect.includes(id)
+                                          (id) => !itemsToSelect.includes(id),
                                         );
                                       setSelectedNonInlineInstruments(
-                                        newSelected
+                                        newSelected,
                                       );
                                       toast.success(
-                                        `Deselected ${itemsToSelect.length} non-inline instruments`
+                                        `Deselected ${itemsToSelect.length} non-inline instruments`,
                                       );
                                     }
                                   } else {
@@ -2273,14 +2349,14 @@ const TeamLeadDashboard = () => {
                                     } else {
                                       setSelectedNonInlineInstruments(
                                         selectedNonInlineInstruments.filter(
-                                          (id) => id !== instrument.id
-                                        )
+                                          (id) => id !== instrument.id,
+                                        ),
                                       );
                                     }
                                   }
                                   console.log(
                                     "Updated selectedNonInlineInstruments:",
-                                    selectedNonInlineInstruments
+                                    selectedNonInlineInstruments,
                                   );
                                 }}
                               />
@@ -2397,7 +2473,7 @@ const TeamLeadDashboard = () => {
           onUpdateItem={function (
             itemId: string,
             completed: boolean,
-            blocks: number
+            blocks: number,
           ): void {
             throw new Error("Function not implemented.");
           }}
@@ -2430,7 +2506,6 @@ const TeamLeadDashboard = () => {
           }}
           contentLabel="Task Comments Modal"
         >
-          
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">
               Task Comments
@@ -2462,7 +2537,7 @@ const TeamLeadDashboard = () => {
           {selectedTaskForComments ? (
             <div className="space-y-4">
               {selectedTaskForComments.comments &&
-                selectedTaskForComments.comments.length > 0 ? (
+              selectedTaskForComments.comments.length > 0 ? (
                 <div className="max-h-60 overflow-y-auto space-y-4">
                   {selectedTaskForComments.comments.map((comment) => (
                     <div
@@ -2481,7 +2556,7 @@ const TeamLeadDashboard = () => {
                                 timeZone: "Asia/Kolkata",
                                 dateStyle: "medium",
                                 timeStyle: "short",
-                              }
+                              },
                             )}
                           </p>
                         </div>

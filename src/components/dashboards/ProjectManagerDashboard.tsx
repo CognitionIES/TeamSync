@@ -20,6 +20,7 @@ import {
   RefreshCw,
   AlertTriangle,
   Calendar as CalendarIcon,
+  PlusCircle,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -53,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
+import { useNavigate } from "react-router-dom";
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 
@@ -189,7 +191,7 @@ const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
   team: apiTeamLead.team_members.map((member) => member.member_name),
 });
 const transformTask = (apiTask: ApiTask): Task => {
-  console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
+ // console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
   const validTaskTypes = Object.values(TaskType);
   const taskType = validTaskTypes.includes(apiTask.type as TaskType)
     ? (apiTask.type as TaskType)
@@ -205,26 +207,26 @@ const transformTask = (apiTask: ApiTask): Task => {
         : ItemType.Line,
       completed: typeof item.completed === "boolean" ? item.completed : false,
     };
-    console.log(
-      "Raw Completed:",
-      rawCompleted,
-      "Transformed Item:",
-      transformedItem
-    );
+//console.log(
+//  "Raw Completed:",
+//  rawCompleted,
+//  "Transformed Item:",
+//  transformedItem,
+//);
     return transformedItem;
   });
-  console.log("Raw Comments:", apiTask.comments);
+ // console.log("Raw Comments:", apiTask.comments);
   const transformedComments = Array.isArray(apiTask.comments)
     ? apiTask.comments.map((comment) => ({
-      id: comment.id,
-      userId: comment.user_id,
-      userName: comment.user_name,
-      userRole: comment.user_role as UserRole,
-      comment: comment.comment,
-      createdAt: comment.created_at,
-    }))
+        id: comment.id,
+        userId: comment.user_id,
+        userName: comment.user_name,
+        userRole: comment.user_role as UserRole,
+        comment: comment.comment,
+        createdAt: comment.created_at,
+      }))
     : [];
-  console.log("Transformed Comments:", transformedComments);
+//  console.log("Transformed Comments:", transformedComments);
   if (
     !items.some((item) => item.type === ItemType.Line) &&
     process.env.NODE_ENV === "development"
@@ -241,7 +243,7 @@ const transformTask = (apiTask: ApiTask): Task => {
         name: "L-Dummy-2",
         type: ItemType.Line,
         completed: true,
-      }
+      },
     );
   }
   return {
@@ -275,6 +277,7 @@ const transformTask = (apiTask: ApiTask): Task => {
 };
 
 const ProjectManagerDashboard = () => {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
   const [users, setUsers] = useState<ApiUser[]>([]);
@@ -285,7 +288,7 @@ const ProjectManagerDashboard = () => {
   const [modalIsOpen, setModalIsOpen] = useState(false);
   const [commentsModalIsOpen, setCommentsModalIsOpen] = useState(false);
   const [selectedComments, setSelectedComments] = useState<Task["comments"]>(
-    []
+    [],
   );
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [assignedItems, setAssignedItems] =
@@ -317,7 +320,7 @@ const ProjectManagerDashboard = () => {
   >(null);
   const [areaProgress, setAreaProgress] = useState<AreaProgress[]>([]);
   const [areaProgressError, setAreaProgressError] = useState<string | null>(
-    null
+    null,
   );
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [blockTotals, setBlockTotals] = useState<BlockTotals>({}); // Updated to object structure
@@ -334,18 +337,18 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
-      console.log("Raw API Response for Assigned Items:", response.data.data);
+//console.log("Raw API Response for Assigned Items:", response.data.data);
       return response.data.data;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error(
         "Error fetching assigned items:",
-        axiosError.response?.data || axiosError.message
+        axiosError.response?.data || axiosError.message,
       );
       throw new Error(
-        axiosError.response?.data?.message || "Failed to fetch assigned items"
+        axiosError.response?.data?.message || "Failed to fetch assigned items",
       );
     }
   };
@@ -354,11 +357,11 @@ const ProjectManagerDashboard = () => {
     setLoadingItems(true);
     try {
       const task = tasks.find((t) => t.id === taskId);
-      console.log("Selected Task:", task);
+     // console.log("Selected Task:", task);
       if (!task) {
         setSelectedTaskType("");
         setSelectedItemType("");
-        console.log("Task not found");
+     //   console.log("Task not found");
         toast.error("Task not found. Cannot display assigned items.");
         return;
       }
@@ -379,10 +382,10 @@ const ProjectManagerDashboard = () => {
             itemType = null;
         }
       }
-      console.log("Determined Item Type:", itemType);
+    //  console.log("Determined Item Type:", itemType);
       if (!itemType) {
         toast.error(
-          `Unsupported task type: ${task.type}. Cannot display assigned items.`
+          `Unsupported task type: ${task.type}. Cannot display assigned items.`,
         );
         setSelectedTaskType("");
         setSelectedItemType("");
@@ -390,7 +393,7 @@ const ProjectManagerDashboard = () => {
       }
       setSelectedItemType(itemType);
       const items = await fetchAssignedItems(userId, taskId);
-      console.log("Fetched Assigned Items:", items);
+    //  console.log("Fetched Assigned Items:", items);
       const mappedItems: FetchedAssignedItems = {
         pids: items.pids ?? [],
         lines: items.lines ?? [],
@@ -471,10 +474,10 @@ const ProjectManagerDashboard = () => {
     setSelectedItemType("");
   };
   const handleViewComments = (taskId: string) => {
-    console.log("handleViewComments called for taskId:", taskId);
+ //   console.log("handleViewComments called for taskId:", taskId);
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
-      console.log("Found Task Comments:", task.comments);
+ //     console.log("Found Task Comments:", task.comments);
       setSelectedTask(task);
       setSelectedComments(task.comments || []);
       setCommentsModalIsOpen(true);
@@ -490,7 +493,7 @@ const ProjectManagerDashboard = () => {
   const updateTaskItemCompletion = async (
     taskId: string,
     itemId: string,
-    completed: boolean
+    completed: boolean,
   ) => {
     try {
       const token = localStorage.getItem("teamsync_token");
@@ -498,7 +501,7 @@ const ProjectManagerDashboard = () => {
       const task = tasks.find((t) => t.id === taskId);
       if (!task) throw new Error("Task not found");
       const updatedItems = task.items.map((item) =>
-        item.id === itemId ? { ...item, completed } : item
+        item.id === itemId ? { ...item, completed } : item,
       );
       const updatedTask = { ...task, items: updatedItems };
       await axios.put(
@@ -509,10 +512,10 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
       setTasks((prevTasks) =>
-        prevTasks.map((t) => (t.id === taskId ? updatedTask : t))
+        prevTasks.map((t) => (t.id === taskId ? updatedTask : t)),
       );
       toast.success("Task item updated successfully");
       if (completed) {
@@ -535,7 +538,7 @@ const ProjectManagerDashboard = () => {
               Authorization: `Bearer ${token}`,
               "Cache-Control": "no-cache",
             },
-          }
+          },
         );
         await fetchIndividualMetrics(); // Refresh metrics
       }
@@ -549,8 +552,8 @@ const ProjectManagerDashboard = () => {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
       const formattedDate = format(selectedDate, "yyyy-MM-dd");
-      console.log("Fetching metrics for date:", formattedDate);
-      console.log("Users:", users);
+      //console.log("Fetching metrics for date:", formattedDate);
+     // console.log("Users:", users);
 
       const response = await axios.get<MetricsData>(
         `${API_URL}/metrics/individual/all?date=${formattedDate}`,
@@ -562,10 +565,10 @@ const ProjectManagerDashboard = () => {
           params: {
             userId: users.map((u) => u.id.toString()).join(",") || "all",
           }, // Pass all userIds or "all"
-        }
+        },
       );
 
-      console.log("Response for all users:", response.data);
+     // console.log("Response for all users:", response.data);
 
       const combinedMetrics: MetricsData = {
         daily: response.data.daily || [],
@@ -573,7 +576,7 @@ const ProjectManagerDashboard = () => {
         monthly: response.data.monthly || [],
       };
 
-      console.log("Final combined user metrics:", combinedMetrics.daily);
+    //  console.log("Final combined user metrics:", combinedMetrics.daily);
 
       setIndividualMetrics(combinedMetrics);
       setIndividualMetricsError(null);
@@ -585,7 +588,7 @@ const ProjectManagerDashboard = () => {
       });
       setIndividualMetricsError(
         axiosError.response?.data?.message ||
-        "Failed to fetch individual metrics"
+          "Failed to fetch individual metrics",
       );
       setIndividualMetrics({ daily: [], weekly: [], monthly: [] });
     }
@@ -594,7 +597,7 @@ const ProjectManagerDashboard = () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-      console.log("Fetching area-wise progress");
+   //   console.log("Fetching area-wise progress");
       const response = await axios.get<{ data: AreaProgress[] }>(
         `${API_URL}/metrics/area/progress`,
         {
@@ -602,7 +605,7 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
       setAreaProgress(response.data.data);
       setAreaProgressError(null);
@@ -610,7 +613,7 @@ const ProjectManagerDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching area progress:", axiosError);
       setAreaProgressError(
-        axiosError.response?.data?.message || "Failed to fetch area progress"
+        axiosError.response?.data?.message || "Failed to fetch area progress",
       );
       setAreaProgress([]);
     }
@@ -627,7 +630,7 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
       setBlockTotals(response.data);
     } catch (error) {
@@ -650,7 +653,7 @@ const ProjectManagerDashboard = () => {
         (task) =>
           memberIds.includes(task.assigneeId) &&
           task.completedAt &&
-          new Date(task.completedAt).setHours(0, 0, 0, 0) === today
+          new Date(task.completedAt).setHours(0, 0, 0, 0) === today,
       );
       const counts: { [itemType: string]: { [taskType: string]: number } } = {
         [ItemType.Line]: { UPV: 0, QC: 0, Redline: 0 },
@@ -684,14 +687,15 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
       setProjectProgress(response.data.data);
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error fetching project progress:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to fetch project progress"
+        axiosError.response?.data?.message ||
+          "Failed to fetch project progress",
       );
     }
   };
@@ -712,14 +716,15 @@ const ProjectManagerDashboard = () => {
       const usersText = await usersResponse.text();
       if (!usersResponse.ok) {
         throw new Error(
-          `Users API error: ${usersResponse.status} ${usersResponse.statusText
-          } - ${usersText.substring(0, 100)}`
+          `Users API error: ${usersResponse.status} ${
+            usersResponse.statusText
+          } - ${usersText.substring(0, 100)}`,
         );
       }
       const usersDataResponse = JSON.parse(usersText);
       const usersData = usersDataResponse.data || [];
       setUsers(usersData);
-      console.log("Fetched users:", usersData);
+      //console.log("Fetched users:", usersData);
       const [tasksResponse, teamsResponse] = await Promise.all([
         fetch(`${API_URL}/tasks`, {
           headers: {
@@ -736,12 +741,12 @@ const ProjectManagerDashboard = () => {
       ]);
       if (!tasksResponse.ok) {
         throw new Error(
-          `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`
+          `Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`,
         );
       }
       if (!teamsResponse.ok) {
         throw new Error(
-          `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`
+          `Teams API error: ${teamsResponse.status} ${teamsResponse.statusText}`,
         );
       }
       const tasksData = await tasksResponse.json();
@@ -760,7 +765,7 @@ const ProjectManagerDashboard = () => {
         fetchBlockTotals(),
         fetchAreaProgress(),
       ]);
-      calculateTeamMetrics();
+     // calculateTeamMetrics();
       toast.success("Data refreshed");
     } catch (error) {
       console.error("Fetch error:", error.message, error.stack);
@@ -776,7 +781,7 @@ const ProjectManagerDashboard = () => {
       if (!token) throw new Error("No authentication token found");
 
       const formattedDate = format(selectedDate, "yyyy-MM-dd");
-      console.log("Fetching team metrics for date:", formattedDate);
+    //  console.log("Fetching team metrics for date:", formattedDate);
 
       const response = await axios.get<MetricsData>(
         `${API_URL}/metrics/team/all?date=${formattedDate}`,
@@ -785,10 +790,10 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
 
-      console.log("Team metrics response:", response.data);
+     // console.log("Team metrics response:", response.data);
 
       setTeamMetrics({
         daily: response.data.daily || [],
@@ -803,7 +808,7 @@ const ProjectManagerDashboard = () => {
         response: axiosError.response?.data,
       });
       setTeamMetricsError(
-        axiosError.response?.data?.message || "Failed to fetch team metrics"
+        axiosError.response?.data?.message || "Failed to fetch team metrics",
       );
       setTeamMetrics({ daily: [], weekly: [], monthly: [] });
     }
@@ -811,7 +816,7 @@ const ProjectManagerDashboard = () => {
   useEffect(() => {
     fetchIndividualMetrics();
     fetchBlockTotals();
-    fetchTeamMetrics(); // Changed from calculateTeamMetrics
+    //fetchTeamMetrics(); // Changed from calculateTeamMetrics
     fetchAreaProgress();
   }, [selectedDate]);
   useEffect(() => {
@@ -828,26 +833,26 @@ const ProjectManagerDashboard = () => {
   const teamMembers = Array.from(new Set(users.map((user) => user.name)));
   const teamLeadMembers = new Set(teamLeads.flatMap((lead) => lead.team));
   const usersNotInTeams = users.filter(
-    (user) => !teamLeadMembers.has(user.name)
+    (user) => !teamLeadMembers.has(user.name),
   );
   const today = selectedDate.setHours(0, 0, 0, 0);
   const assignedToday = tasks.filter(
-    (task) => new Date(task.createdAt).setHours(0, 0, 0, 0) === today
+    (task) => new Date(task.createdAt).setHours(0, 0, 0, 0) === today,
   ).length;
   const startedToday = tasks.filter(
     (task) =>
       task.status === "In Progress" &&
-      new Date(task.updatedAt).setHours(0, 0, 0, 0) === today
+      new Date(task.updatedAt).setHours(0, 0, 0, 0) === today,
   ).length;
   const completedToday = tasks.filter(
     (task) =>
       task.status === "Completed" &&
       task.completedAt &&
-      new Date(task.completedAt).setHours(0, 0, 0, 0) === today
+      new Date(task.completedAt).setHours(0, 0, 0, 0) === today,
   ).length;
   const totalTasks = tasks.length;
   const completedCount = tasks.filter(
-    (task) => task.status === "Completed"
+    (task) => task.status === "Completed",
   ).length;
   const completionRate =
     totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
@@ -884,7 +889,7 @@ const ProjectManagerDashboard = () => {
           const lineItem = task.items.find((item) => item.type === "Line");
           if (lineItem) currentWork = `Line ${lineItem.name}`;
           const equipmentItem = task.items.find(
-            (item) => item.type === "Equipment"
+            (item) => item.type === "Equipment",
           );
           if (equipmentItem) currentWork = `Equipment ${equipmentItem.name}`;
         }
@@ -909,7 +914,7 @@ const ProjectManagerDashboard = () => {
       link.setAttribute("href", encodedUri);
       link.setAttribute(
         "download",
-        `teamsync_tasks_${new Date().toISOString().split("T")[0]}.csv`
+        `teamsync_tasks_${new Date().toISOString().split("T")[0]}.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -949,9 +954,9 @@ const ProjectManagerDashboard = () => {
           headers: {
             Authorization: `Bearer ${token}`,
           },
-        }
+        },
       );
-      console.log("Direct API test response:", response.data);
+     // console.log("Direct API test response:", response.data);
     } catch (error) {
       console.error("API test error:", error);
     }
@@ -970,7 +975,7 @@ const ProjectManagerDashboard = () => {
             Authorization: `Bearer ${token}`,
             "Cache-Control": "no-cache",
           },
-        }
+        },
       );
 
       const data = response.data.data;
@@ -993,7 +998,7 @@ const ProjectManagerDashboard = () => {
         "Pending Items",
         "Total Blocks",
         "Progress %",
-        "Completion Date"
+        "Completion Date",
       ];
 
       // Map data to rows
@@ -1002,9 +1007,10 @@ const ProjectManagerDashboard = () => {
         const skippedItems = parseInt(item.skipped_items) || 0;
         const totalItems = parseInt(item.total_items) || 0;
         const pendingItems = totalItems - completedItems - skippedItems;
-        const progressPercent = totalItems > 0
-          ? Math.round(((completedItems + skippedItems) / totalItems) * 100)
-          : 0;
+        const progressPercent =
+          totalItems > 0
+            ? Math.round(((completedItems + skippedItems) / totalItems) * 100)
+            : 0;
 
         return [
           item.user_name || "Unknown",
@@ -1012,10 +1018,10 @@ const ProjectManagerDashboard = () => {
           item.task_type || "N/A",
           item.assigned_date
             ? new Date(item.assigned_date).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "short",
-              day: "2-digit",
-            })
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+              })
             : "N/A",
           item.status || "In Progress",
           totalItems,
@@ -1026,11 +1032,11 @@ const ProjectManagerDashboard = () => {
           `${progressPercent}%`,
           item.completion_date
             ? new Date(item.completion_date).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "short",
-              day: "2-digit",
-            })
-            : "Not Completed"
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+              })
+            : "Not Completed",
         ];
       });
 
@@ -1045,7 +1051,7 @@ const ProjectManagerDashboard = () => {
 
       const csvContent = [
         headers.map(escapeCsvValue).join(","),
-        ...rows.map(row => row.map(escapeCsvValue).join(","))
+        ...rows.map((row) => row.map(escapeCsvValue).join(",")),
       ].join("\n");
 
       // Download
@@ -1055,7 +1061,7 @@ const ProjectManagerDashboard = () => {
       link.setAttribute("href", url);
       link.setAttribute(
         "download",
-        `pid_progress_${new Date().toISOString().split("T")[0]}.csv`
+        `pid_progress_${new Date().toISOString().split("T")[0]}.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -1067,7 +1073,7 @@ const ProjectManagerDashboard = () => {
       const axiosError = error as AxiosError<{ message: string }>;
       console.error("Error exporting PID progress:", axiosError);
       toast.error(
-        axiosError.response?.data?.message || "Failed to export PID progress"
+        axiosError.response?.data?.message || "Failed to export PID progress",
       );
     } finally {
       setIsExporting(false);
@@ -1145,6 +1151,17 @@ const ProjectManagerDashboard = () => {
               </p>
             </div>
             <div className="mt-4 sm:mt-0 flex gap-3">
+              {/* ✅ NEW BUTTON */}
+              <Button
+                variant="default"
+                size="sm"
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+                onClick={() => navigate("/create-task")}
+              >
+                <PlusCircle size={16} />
+                Assign Task
+              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -1155,6 +1172,7 @@ const ProjectManagerDashboard = () => {
                 <RefreshCw size={16} />
                 {isLoading ? "Refreshing..." : "Refresh"}
               </Button>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -1168,6 +1186,7 @@ const ProjectManagerDashboard = () => {
             </div>
           </div>
         </header>
+
         <Tabs
           defaultValue="overview"
           className="space-y-6"
@@ -1525,7 +1544,7 @@ const ProjectManagerDashboard = () => {
                         {Object.values(blockTotals).reduce(
                           (sum, user) =>
                             sum + (user[period as keyof typeof user] || 0),
-                          0
+                          0,
                         )}
                       </div>
                       <p className="text-sm text-gray-500">
@@ -1978,17 +1997,17 @@ const ProjectManagerDashboard = () => {
                         {comment.userRole} •{" "}
                         {comment.createdAt
                           ? new Date(comment.createdAt).toLocaleString(
-                            "en-IN",
-                            {
-                              timeZone: "Asia/Kolkata",
-                              year: "numeric",
-                              month: "short",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: true,
-                            }
-                          )
+                              "en-IN",
+                              {
+                                timeZone: "Asia/Kolkata",
+                                year: "numeric",
+                                month: "short",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: true,
+                              },
+                            )
                           : "Unknown Date"}
                       </p>
                     </div>

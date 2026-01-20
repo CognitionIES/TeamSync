@@ -1213,5 +1213,49 @@ router.patch("/:id/retract", protect, async (req, res) => {
       .json({ message: "Failed to retract task", error: error.message });
   }
 });
+// GET /api/tasks/pm/assignable-users - Get users that PM can assign to
+router.get("/pm/assignable-users", protect, async (req, res) => {
+  try {
+    if (req.user.role !== "Project Manager") {
+      return res.status(403).json({
+        message: "Only Project Managers can access this endpoint",
+      });
+    }
+
+    // Get all team leads under this PM and their team members
+    const query = `
+      SELECT DISTINCT u.id, u.name, u.role
+      FROM users u
+      WHERE u.id IN (
+        -- Team Leads under this PM
+        SELECT member_id 
+        FROM team_members 
+        WHERE lead_id = $1
+        
+        UNION
+        
+        -- Team Members under those Team Leads
+        SELECT tm2.member_id
+        FROM team_members tm1
+        JOIN team_members tm2 ON tm1.member_id = tm2.lead_id
+        WHERE tm1.lead_id = $1
+      )
+      ORDER BY u.role DESC, u.name ASC
+    `;
+
+    const { rows } = await db.query(query, [req.user.id]);
+
+    res.status(200).json({
+      data: rows,
+      message: rows.length === 0 ? "No assignable users found" : null
+    });
+  } catch (error) {
+    console.error("Error fetching assignable users:", error);
+    res.status(500).json({
+      message: "Failed to fetch assignable users",
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;
