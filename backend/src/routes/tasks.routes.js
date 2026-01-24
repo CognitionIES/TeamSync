@@ -82,40 +82,90 @@ router.get("/", protect, async (req, res) => {
     } else if (req.user.role === "Project Manager") {
       console.log("Fetching all tasks for Project Manager...");
       const query = `
-        SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
+      SELECT t.id, t.type, u.name as assignee, t.assignee_id, t.status, t.is_complex,
+             t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
+             t.description, t.is_pid_based,
+             p.name as project_name,
+             COALESCE(a.name, 'N/A') as area_name,
+
+             -- Get first PID number for display
+             COALESCE((
+               SELECT pids.pid_number
+               FROM pid_work_items pwi
+               JOIN pids ON pwi.pid_id = pids.id
+               WHERE pwi.task_id = t.id
+               ORDER BY pwi.created_at ASC
+               LIMIT 1
+             ), COALESCE((
+               SELECT pid.pid_number
+               FROM task_items ti
+               JOIN pids pid ON ti.item_id = pid.id AND ti.item_type = 'PID'
+               WHERE ti.task_id = t.id
+               LIMIT 1
+             ), 'N/A')) as pid_number,
+
+             -- PID-based work items
+             CASE 
+               WHEN t.is_pid_based = true 
+               THEN COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'id', pwi.id,
+                   'pid_id', pwi.pid_id,
+                   'pid_number', pids.pid_number,
+                   'line_id', pwi.line_id,
+                   'line_number', l.line_number,
+                   'equipment_id', pwi.equipment_id,
+                   'equipment_number', e.equipment_number,
+                   'status', pwi.status,
+                   'completed_at', pwi.completed_at,
+                   'remarks', pwi.remarks,
+                   'blocks', COALESCE(pwi.blocks, 0)
+                 ) ORDER BY pids.pid_number, l.line_number, e.equipment_number)
+                 FROM pid_work_items pwi
+                 LEFT JOIN pids ON pwi.pid_id = pids.id
+                 LEFT JOIN lines l ON pwi.line_id = l.id
+                 LEFT JOIN equipment e ON pwi.equipment_id = e.id
+                 WHERE pwi.task_id = t.id
+               ), '[]')
+               ELSE '[]'
+             END as pid_work_items,
+
+             -- Legacy task items
+             COALESCE((
+               SELECT json_agg(json_build_object(
+                 'id', ti.id,
+                 'name', ti.name,
+                 'item_type', ti.item_type,
+                 'completed', ti.completed,
+                 'blocks', COALESCE(ti.blocks, 0)
+               ))
+               FROM task_items ti
+               WHERE t.id = ti.task_id AND ti.id IS NOT NULL
+             ), '[]') as items,
+
+             -- ✅ FIXED: Comments with ALL required fields
+             COALESCE((
+               SELECT json_agg(json_build_object(
+                 'id', tc.id,
+                 'user_id', tc.user_id,
+                 'user_name', tc.user_name,
+                 'user_role', tc.user_role,
+                 'comment', tc.comment,
+                 'created_at', TO_CHAR(tc.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+               ))
+               FROM task_comments tc
+               WHERE t.id = tc.task_id AND tc.id IS NOT NULL
+             ), '[]') as comments
+
+      FROM tasks t
+      LEFT JOIN users u ON t.assignee_id = u.id
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN areas a ON t.area_id = a.id
+      GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
                t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-               COALESCE((
-                 SELECT json_agg(json_build_object(
-                   'id', ti.id,
-                   'name', ti.name
-                 ))
-                 FROM task_items ti
-                 WHERE t.id = ti.task_id
-               ), '[]') as items,
-               COALESCE((
-                 SELECT json_agg(json_build_object(
-                   'id', tc.id,
-                   'text', tc.comment
-                 ))
-                 FROM task_comments tc
-                 WHERE t.id = tc.task_id
-               ), '[]') as comments
-        FROM tasks t
-        LEFT JOIN users u ON t.assignee_id = u.id
-        WHERE t.assignee_id IN (
-          SELECT member_id
-          FROM team_members
-          WHERE lead_id IN (
-            SELECT member_id
-            FROM team_members
-            WHERE lead_id = $1
-          )
-        )
-        GROUP BY t.id, t.type, t.assignee_id, t.status, t.is_complex,
-                 t.created_at, t.updated_at, t.completed_at, t.progress, t.project_id,
-                 u.name
-      `;
-      const { rows } = await db.query(query, [req.user.id]);
+               t.description, t.is_pid_based, u.name, p.name, a.name
+    `;
+      const { rows } = await db.query(query);
       console.log("Tasks fetched for Project Manager:", rows);
       res.status(200).json({ data: rows });
     } else if (req.user.role === "Team Lead") {
@@ -412,7 +462,7 @@ router.patch("/:id/status", protect, async (req, res) => {
       SELECT * FROM tasks
       WHERE id = $1 AND assignee_id = $2
       `,
-      [taskId, req.user.id]
+      [taskId, req.user.id],
     );
 
     if (taskRows.length === 0) {
@@ -451,7 +501,7 @@ router.patch("/:id/status", protect, async (req, res) => {
       WHERE id = $2
       RETURNING *
       `,
-      [status, taskId]
+      [status, taskId],
     );
 
     const updatedTask = updatedTaskRows[0];
@@ -485,7 +535,7 @@ router.patch("/:id/status", protect, async (req, res) => {
       WHERE t.id = $1
       GROUP BY t.id, u.name
       `,
-      [taskId]
+      [taskId],
     );
 
     const returnedTask = fullTaskRows[0];
@@ -549,7 +599,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       LEFT JOIN projects p ON t.project_id = p.id
       WHERE t.id = $1 AND t.assignee_id = $2
       `,
-      [taskId, req.user.id]
+      [taskId, req.user.id],
     );
 
     if (taskRows.length === 0) {
@@ -572,7 +622,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       SELECT * FROM task_items
       WHERE id = $1 AND task_id = $2
       `,
-      [itemId, taskId]
+      [itemId, taskId],
     );
 
     if (itemRows.length === 0) {
@@ -598,7 +648,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       WHERE id = $3
       RETURNING *
       `,
-      [completed, blocks, itemId]
+      [completed, blocks, itemId],
     );
 
     const updatedItem = updatedItemRows[0];
@@ -608,22 +658,22 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       if (item.item_type === "Line") {
         await db.query(
           `UPDATE lines SET upv_completed = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         console.log(`Marked line ${item.item_id} as UPV completed`);
       } else if (item.item_type === "Equipment") {
         await db.query(
           `UPDATE equipment SET upv_completed = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         console.log(`Marked equipment ${item.item_id} as UPV completed`);
       } else if (item.item_type === "NonInlineInstrument") {
         await db.query(
           `UPDATE non_inline_instruments SET upv_completed = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         console.log(
-          `Marked non-inline instrument ${item.item_id} as UPV completed`
+          `Marked non-inline instrument ${item.item_id} as UPV completed`,
         );
       }
     }
@@ -634,19 +684,19 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       if (item.item_type === "Line") {
         const lineResult = await db.query(
           `SELECT id FROM lines WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         entityId = lineResult.rows.length > 0 ? lineResult.rows[0].id : null;
       } else if (item.item_type === "Equipment") {
         const equipResult = await db.query(
           `SELECT project_id FROM equipment WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         if (equipResult.rows.length > 0) {
           const projectId = equipResult.rows[0].project_id;
           const lineMatch = await db.query(
             `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
-            [projectId]
+            [projectId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
         }
@@ -658,20 +708,20 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
           const pidId = pidResult.rows[0].id;
           const lineMatch = await db.query(
             `SELECT l.id FROM lines l JOIN pids p ON l.pid_id = p.id WHERE p.id = $1`,
-            [pidId]
+            [pidId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
         }
       } else if (item.item_type === "NonInlineInstrument") {
         const instrResult = await db.query(
           `SELECT project_id FROM non_inline_instruments WHERE id = $1`,
-          [item.item_id]
+          [item.item_id],
         );
         if (instrResult.rows.length > 0) {
           const projectId = instrResult.rows[0].project_id;
           const lineMatch = await db.query(
             `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
-            [projectId]
+            [projectId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
         }
@@ -710,7 +760,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
         countValue,
         date,
         blocksValue,
-      ]
+      ],
     );
 
     // Rest of the existing logic (progress update, audit logs, etc.) remains the same
@@ -720,7 +770,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       FROM task_items
       WHERE task_id = $1
       `,
-      [taskId]
+      [taskId],
     );
 
     const { total, completed_count } = allItems[0];
@@ -733,12 +783,12 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       SET progress = $1, updated_at = CURRENT_TIMESTAMP
       WHERE id = $2
       `,
-      [progress, taskId]
+      [progress, taskId],
     );
 
     const teamNameQuery = await db.query(
       `SELECT name FROM users WHERE id = $1`,
-      [req.user.id]
+      [req.user.id],
     );
     const teamName = teamNameQuery.rows[0]?.name || "Unknown";
 
@@ -755,7 +805,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
         new Date(),
         task.project_name,
         teamName,
-      ]
+      ],
     );
 
     await db.query("COMMIT");
@@ -789,7 +839,7 @@ router.patch("/:id/items/:itemId", protect, async (req, res) => {
       WHERE t.id = $1
       GROUP BY t.id, u.name
       `,
-      [taskId]
+      [taskId],
     );
 
     const returnedTask = fullTaskRows[0];
@@ -869,7 +919,7 @@ router.get("/:itemId/entity", protect, async (req, res) => {
       `
       SELECT item_type, item_id, line_id, task_id FROM task_items WHERE id = $1
       `,
-      [itemIdNum]
+      [itemIdNum],
     );
 
     if (itemResult.rows.length === 0) {
@@ -882,19 +932,19 @@ router.get("/:itemId/entity", protect, async (req, res) => {
       if (item_type === "Line") {
         const lineResult = await db.query(
           `SELECT id FROM lines WHERE id = $1`,
-          [item_id]
+          [item_id],
         );
         entityId = lineResult.rows.length > 0 ? lineResult.rows[0].id : null;
       } else if (item_type === "Equipment") {
         const equipResult = await db.query(
           `SELECT project_id FROM equipment WHERE id = $1`,
-          [item_id]
+          [item_id],
         );
         if (equipResult.rows.length > 0) {
           const projectId = equipResult.rows[0].project_id;
           const lineMatch = await db.query(
             `SELECT id FROM lines WHERE project_id = $1 AND id IS NOT NULL LIMIT 1`,
-            [projectId]
+            [projectId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
           if (entityId) {
@@ -912,7 +962,7 @@ router.get("/:itemId/entity", protect, async (req, res) => {
           const pidId = pidResult.rows[0].id;
           const lineMatch = await db.query(
             `SELECT l.id FROM lines l JOIN pids p ON l.pid_id = p.id WHERE p.id = $1`,
-            [pidId]
+            [pidId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
           if (entityId) {
@@ -925,13 +975,13 @@ router.get("/:itemId/entity", protect, async (req, res) => {
       } else if (item_type === "NonInlineInstrument") {
         const instrResult = await db.query(
           `SELECT project_id FROM non_inline_instruments WHERE id = $1`,
-          [item_id]
+          [item_id],
         );
         if (instrResult.rows.length > 0) {
           const projectId = instrResult.rows[0].project_id;
           const lineMatch = await db.query(
             `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
-            [projectId]
+            [projectId],
           );
           entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
           if (entityId) {
@@ -947,13 +997,13 @@ router.get("/:itemId/entity", protect, async (req, res) => {
     if (entityId === null) {
       const taskProject = await db.query(
         `SELECT project_id FROM tasks WHERE id = $1`,
-        [task_id]
+        [task_id],
       );
       if (taskProject.rows.length > 0) {
         const projectId = taskProject.rows[0].project_id;
         const lineMatch = await db.query(
           `SELECT id FROM lines WHERE project_id = $1 LIMIT 1`,
-          [projectId]
+          [projectId],
         );
         entityId = lineMatch.rows.length > 0 ? lineMatch.rows[0].id : null;
         if (entityId) {
@@ -1007,7 +1057,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
         SELECT member_id FROM team_members WHERE lead_id = $2
       ) OR t.assignee_id = $2)
       `,
-      [taskId, req.user.id]
+      [taskId, req.user.id],
     );
 
     if (taskRows.length === 0) {
@@ -1024,7 +1074,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
       SELECT id, item_type, item_id, name, completed FROM task_items
       WHERE task_id = $1 AND completed = true
       `,
-      [taskId]
+      [taskId],
     );
 
     await db.query("BEGIN");
@@ -1042,7 +1092,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
           LEFT JOIN team_members tm ON u.id = tm.member_id
           WHERE u.id = $1 AND (tm.lead_id = $2 OR u.id = $2)
           `,
-          [newAssigneeIdInt, req.user.id]
+          [newAssigneeIdInt, req.user.id],
         );
 
         if (newAssigneeRows.length === 0) {
@@ -1065,7 +1115,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
             task.is_complex,
             task.project_id,
             task.description,
-          ]
+          ],
         );
 
         const newTask = newTaskRows[0];
@@ -1077,7 +1127,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
           FROM task_items
           WHERE task_id = $1 AND completed = false
           `,
-          [taskId]
+          [taskId],
         );
 
         // Insert incomplete items into the new task
@@ -1086,17 +1136,17 @@ router.patch("/:id/retract", protect, async (req, res) => {
           if (item.item_type === "Line") {
             await db.query(
               `UPDATE lines SET assigned_to_id = NULL WHERE id = $1`,
-              [item.item_id]
+              [item.item_id],
             );
           } else if (item.item_type === "Equipment") {
             await db.query(
               `UPDATE equipment SET assigned_to = NULL WHERE id = $1`,
-              [item.item_id]
+              [item.item_id],
             );
           } else if (item.item_type === "NonInlineInstrument") {
             await db.query(
               `UPDATE non_inline_instruments SET assigned_to = NULL WHERE id = $1`,
-              [item.item_id]
+              [item.item_id],
             );
           }
         }
@@ -1109,7 +1159,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
             DELETE FROM task_items
             WHERE task_id = $1 AND completed = false
             `,
-            [taskId]
+            [taskId],
           );
 
           // Update original task progress to 100% since only completed items remain
@@ -1119,7 +1169,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
             SET status = 'Completed', progress = 100, updated_at = CURRENT_TIMESTAMP
             WHERE id = $1
             `,
-            [taskId]
+            [taskId],
           );
         } else {
           // If no completed items, we can delete the original task entirely
@@ -1163,7 +1213,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
           SET completed = false, completed_at = NULL, blocks = 0
           WHERE task_id = $1 AND completed = false
           `,
-          [taskId]
+          [taskId],
         );
 
         // Calculate new progress based on completed items only
@@ -1173,7 +1223,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
           FROM task_items
           WHERE task_id = $1
           `,
-          [taskId]
+          [taskId],
         );
 
         const { total, completed_count } = progressData[0];
@@ -1187,7 +1237,7 @@ router.patch("/:id/retract", protect, async (req, res) => {
           SET status = $1, progress = $2, updated_at = CURRENT_TIMESTAMP
           WHERE id = $3
           `,
-          [newStatus, progress, taskId]
+          [newStatus, progress, taskId],
         );
 
         await db.query("COMMIT");
@@ -1247,7 +1297,7 @@ router.get("/pm/assignable-users", protect, async (req, res) => {
 
     res.status(200).json({
       data: rows,
-      message: rows.length === 0 ? "No assignable users found" : null
+      message: rows.length === 0 ? "No assignable users found" : null,
     });
   } catch (error) {
     console.error("Error fetching assignable users:", error);

@@ -1477,4 +1477,110 @@ router.get("/team/all", protect, async (req, res) => {
   }
 });
 
+// Add this route after your existing ones in metrics.routes.js
+router.get("/detailed", protect, async (req, res) => {
+  try {
+    if (!["Project Manager"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+
+    const { taskType, dateStart, dateEnd, projectId, areaId, userId, limit = 100, offset = 0 } = req.query;
+
+    // Validation
+    const validTaskTypes = ["UPV", "Redline", "QC", "Rework"];
+    if (taskType && !validTaskTypes.includes(taskType)) {
+      return res.status(400).json({ message: `Invalid taskType. Valid: ${validTaskTypes.join(", ")}` });
+    }
+    if (dateStart && !/^\d{4}-\d{2}-\d{2}$/.test(dateStart)) {
+      return res.status(400).json({ message: "Invalid dateStart format. Use YYYY-MM-DD" });
+    }
+    if (dateEnd && !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) {
+      return res.status(400).json({ message: "Invalid dateEnd format. Use YYYY-MM-DD" });
+    }
+
+    let query = `
+      SELECT 
+        a.name AS area_no,
+        p.pid_number AS pid,
+        l.line_number AS line_no,
+        u.name AS assigned_to,
+        COALESCE(pwi.blocks, 0) AS block_count,
+        pwi.completed_at,
+        COALESCE(tc.comment, '') AS comments,
+        pwi.status,
+        pwi.task_type,
+        pwi.id AS work_item_id
+      FROM pid_work_items pwi
+      LEFT JOIN pids p ON pwi.pid_id = p.id
+      LEFT JOIN lines l ON pwi.line_id = l.id
+      LEFT JOIN areas a ON p.id = a.id  -- Assuming pid has area_id; adjust if needed
+      LEFT JOIN users u ON pwi.user_id = u.id
+      LEFT JOIN task_comments tc ON pwi.task_id = tc.task_id AND tc.user_id = pwi.user_id  -- Latest comment per task/user
+      WHERE 1=1
+    `;
+    let params = [];
+
+    if (taskType) {
+      query += ` AND pwi.task_type = $${params.length + 1}`;
+      params.push(taskType);
+    }
+    if (dateStart) {
+      query += ` AND pwi.completed_at >= $${params.length + 1}`;
+      params.push(new Date(dateStart));
+    }
+    if (dateEnd) {
+      query += ` AND pwi.completed_at <= $${params.length + 1}`;
+      params.push(new Date(dateEnd));
+    }
+    if (projectId) {
+      query += ` AND p.project_id = $${params.length + 1}`;
+      params.push(projectId);
+    }
+    if (areaId) {
+      query += ` AND a.id = $${params.length + 1}`;
+      params.push(areaId);
+    }
+    if (userId) {
+      query += ` AND pwi.user_id = $${params.length + 1}`;
+      params.push(userId);
+    }
+
+    query += ` ORDER BY pwi.completed_at DESC NULLS LAST`;
+    query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit));
+    params.push(parseInt(offset));
+
+    console.log(`Detailed query: ${query}`, params);  // For debugging
+
+    const result = await db.query(query, params);
+    const countQuery = query.replace(/ORDER BY.*$/i, '').replace(/LIMIT .* OFFSET .*$/i, '') + ' SELECT COUNT(*) FROM (' + query.replace(/ORDER BY.*$/i, '') + ') AS count_sub';
+    // Wait, better: Separate count query
+    const countParams = params.slice(0, -2);  // Remove limit/offset
+    const countResult = await db.query(`SELECT COUNT(*) FROM (${query.replace(/ ORDER BY .* LIMIT .* OFFSET .*/i, '')}) AS sub`, countParams);
+
+    const records = result.rows.map(row => ({
+      areaNo: row.area_no || 'N/A',
+      pid: row.pid || 'N/A',
+      lineNo: row.line_no || 'N/A',
+      assignedTo: row.assigned_to || 'Unassigned',
+      blockCount: row.block_count,
+      completedAt: row.completed_at ? new Date(row.completed_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Pending',
+      comments: row.comments,
+      status: row.status,
+      taskType: row.task_type,
+      workItemId: row.work_item_id,
+      auditLink: `/audit?entityId=${row.work_item_id}&taskType=${row.task_type}`  // For frontend navigation to audit
+    }));
+
+    res.status(200).json({
+      data: records,
+      totalCount: parseInt(countResult.rows[0].count),
+      filtersApplied: { taskType, dateStart, dateEnd, projectId, areaId, userId }
+    });
+
+  } catch (error) {
+    console.error("Detailed metrics error:", error);
+    res.status(500).json({ message: "Failed to fetch detailed metrics", error: error.message });
+  }
+});
 module.exports = router;

@@ -22,100 +22,13 @@ import Modal from "react-modal";
 import { getRandomMessage } from "@/components/shared/messages";
 import { Progress } from "@/components/ui/progress";
 import AssignedItemsModal from "../shared/AssignedItemsModal";
+import {User, TeamMember, Project, PID, Line, Equipment, AssignedItems, FetchedAssignedItems} from "./team-lead/type";
+
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
-interface User {
-  role: string;
-  id: string;
-  name: string;
-}
-interface TeamMember {
-  id: string;
-  name: string;
-}
-interface Project {
-  id: string;
-  name: string;
-}
-interface PID {
-  id: string;
-  name: string;
-}
-interface Line {
-  id: string;
-  name: string;
-  pidId: string;
-}
-interface Equipment {
-  id: string;
-  name: string;
-  areaId: string;
-}
-interface AssignedItems {
-  upvLines: string[];
-  upvEquipment: string[];
-  qcLines: string[];
-  qcEquipment: string[];
-  redlinePIDs: string[];
-}
-interface FetchedAssignedItems {
-  isPIDBased?: boolean;
-  pidWorkItems?: PIDWorkItem[];
-  pids: any;
-  lines: any;
-  equipment: any;
-  upvLines: {
-    count: number;
-    items: {
-      id: string;
-      line_number: string;
-      project_id: string;
-      project_name: string;
-      area_number: string | null;
-    }[];
-  };
-  qcLines: {
-    count: number;
-    items: {
-      id: string;
-      line_number: string;
-      project_id: string;
-      project_name: string;
-      area_number: string | null;
-    }[];
-  };
-  redlinePIDs: {
-    count: number;
-    items: {
-      id: string;
-      pid_number: string;
-      project_id: string;
-      project_name: string;
-      area_number: string | null;
-    }[];
-  };
-  upvEquipment: {
-    count: number;
-    items: {
-      id: string;
-      equipment_name: string;
-      project_id: string;
-      project_name: string;
-      area_number: string | null;
-    }[];
-  };
-  qcEquipment: {
-    count: number;
-    items: {
-      id: string;
-      equipment_name: string;
-      project_id: string;
-      project_name: string;
-      area_number: string | null;
-    }[];
-  };
-}
+
+
 const TeamLeadDashboard = () => {
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();

@@ -55,6 +55,7 @@ import {
   TableRow,
 } from "../ui/table";
 import { useNavigate } from "react-router-dom";
+import { DetailedWorkLogTab } from "./project-manager/DetailedWorkLogTab.tsx";
 // Bind modal to appElement for accessibility
 Modal.setAppElement("#root");
 
@@ -125,28 +126,76 @@ interface ApiUser {
   role: string;
 }
 interface FetchedAssignedItems {
+  isPIDBased?: boolean; // ✅ ADD THIS
+  pidWorkItems?: Array<{
+    // ✅ ADD THIS ENTIRE BLOCK
+    id: string;
+    pid_id: string;
+    pid_number: string;
+    line_id?: string;
+    line_number?: string;
+    equipment_id?: string;
+    equipment_number?: string;
+    status: string;
+    completed_at?: string;
+    remarks?: string;
+    blocks: number;
+    project_id: string;
+    project_name: string;
+    area_number: string;
+  }>;
   pids: any;
   lines: any;
   equipment: any;
   upvLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      id: string;
+      line_number: string;
+      project_id: string;
+      area_number?: string;
+      project_name?: string;
+    }[];
   };
   qcLines: {
     count: number;
-    items: { id: string; line_number: string; project_id: string }[];
+    items: {
+      id: string;
+      line_number: string;
+      project_id: string;
+      area_number?: string;
+      project_name?: string;
+    }[];
   };
   redlinePIDs: {
     count: number;
-    items: { id: string; pid_number: string; project_id: string }[];
+    items: {
+      id: string;
+      pid_number: string;
+      project_id: string;
+      area_number?: string;
+      project_name?: string;
+    }[];
   };
   upvEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      area_number?: string;
+      project_name?: string;
+    }[];
   };
   qcEquipment: {
     count: number;
-    items: { id: string; equipment_name: string; project_id: string }[];
+    items: {
+      id: string;
+      equipment_name: string;
+      project_id: string;
+      area_number?: string;
+      project_name?: string;
+    }[];
   };
 }
 interface TeamLead {
@@ -191,7 +240,7 @@ const transformTeamLead = (apiTeamLead: ApiTeamLead): TeamLead => ({
   team: apiTeamLead.team_members.map((member) => member.member_name),
 });
 const transformTask = (apiTask: ApiTask): Task => {
- // console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
+  // console.log("Transforming Task:", apiTask.id, "Raw Items:", apiTask.items);
   const validTaskTypes = Object.values(TaskType);
   const taskType = validTaskTypes.includes(apiTask.type as TaskType)
     ? (apiTask.type as TaskType)
@@ -207,26 +256,29 @@ const transformTask = (apiTask: ApiTask): Task => {
         : ItemType.Line,
       completed: typeof item.completed === "boolean" ? item.completed : false,
     };
-//console.log(
-//  "Raw Completed:",
-//  rawCompleted,
-//  "Transformed Item:",
-//  transformedItem,
-//);
+    //console.log(
+    //  "Raw Completed:",
+    //  rawCompleted,
+    //  "Transformed Item:",
+    //  transformedItem,
+    //);
     return transformedItem;
   });
- // console.log("Raw Comments:", apiTask.comments);
+  // console.log("Raw Comments:", apiTask.comments);
   const transformedComments = Array.isArray(apiTask.comments)
-    ? apiTask.comments.map((comment) => ({
-        id: comment.id,
-        userId: comment.user_id,
-        userName: comment.user_name,
-        userRole: comment.user_role as UserRole,
-        comment: comment.comment,
-        createdAt: comment.created_at,
-      }))
+    ? apiTask.comments
+        .filter((comment) => comment && comment.id && comment.user_id)
+        .map((comment) => ({
+          id: comment.id.toString(),
+          userId: comment.user_id.toString(),
+          userName: comment.user_name || "Unknown User",
+          userRole: (comment.user_role as UserRole) || "Team Member",
+          comment: comment.comment || "",
+          createdAt: comment.created_at || new Date().toISOString(),
+        }))
     : [];
-//  console.log("Transformed Comments:", transformedComments);
+  console.log(`Task ${apiTask.id} has ${transformedComments.length} comments`);
+  //  console.log("Transformed Comments:", transformedComments);
   if (
     !items.some((item) => item.type === ItemType.Line) &&
     process.env.NODE_ENV === "development"
@@ -339,7 +391,7 @@ const ProjectManagerDashboard = () => {
           },
         },
       );
-//console.log("Raw API Response for Assigned Items:", response.data.data);
+      //console.log("Raw API Response for Assigned Items:", response.data.data);
       return response.data.data;
     } catch (error) {
       const axiosError = error as AxiosError<{ message: string }>;
@@ -353,23 +405,53 @@ const ProjectManagerDashboard = () => {
     }
   };
   const handleViewCurrentWork = async (taskId: string, userId: string) => {
+    console.log("==========================================");
+    console.log("🔍 handleViewCurrentWork called");
+    console.log("📋 taskId:", taskId);
+    console.log("👤 userId:", userId);
+
     setSelectedUserId(userId);
     setLoadingItems(true);
+
     try {
+      // 🔍 DEBUG: Log all tasks to see what we have
+      console.log("📊 Total tasks in state:", tasks.length);
+      console.log(
+        "📊 Task IDs:",
+        tasks.map((t) => t.id),
+      );
+
       const task = tasks.find((t) => t.id === taskId);
-     // console.log("Selected Task:", task);
+
+      console.log("🎯 Found task:", task ? "YES" : "NO");
+      if (task) {
+        console.log("📝 Task details:", {
+          id: task.id,
+          type: task.type,
+          assignee: task.assignee,
+          assigneeId: task.assigneeId,
+          status: task.status,
+          itemsCount: task.items?.length || 0,
+          items: task.items,
+        });
+      }
+
       if (!task) {
-        setSelectedTaskType("");
-        setSelectedItemType("");
-     //   console.log("Task not found");
+        console.error("❌ Task not found in tasks array!");
         toast.error("Task not found. Cannot display assigned items.");
+        setLoadingItems(false);
         return;
       }
+
       setSelectedTaskType(task.type);
+      console.log("✅ Task type set to:", task.type);
+
       let itemType: ItemType | null = null;
       if (task.items.length > 0) {
         itemType = task.items[0].type;
+        console.log("✅ Item type from task.items:", itemType);
       } else {
+        console.log("⚠️ No items in task, determining from task type");
         switch (task.type) {
           case TaskType.Redline:
             itemType = ItemType.PID;
@@ -381,27 +463,51 @@ const ProjectManagerDashboard = () => {
           default:
             itemType = null;
         }
+        console.log("✅ Item type from task type:", itemType);
       }
-    //  console.log("Determined Item Type:", itemType);
+
       if (!itemType) {
+        console.error("❌ Could not determine item type!");
         toast.error(
           `Unsupported task type: ${task.type}. Cannot display assigned items.`,
         );
-        setSelectedTaskType("");
-        setSelectedItemType("");
+        setLoadingItems(false);
         return;
       }
+
       setSelectedItemType(itemType);
+      console.log("✅ Item type set to:", itemType);
+
+      console.log("🌐 Calling fetchAssignedItems...");
+      console.log(
+        "📍 URL:",
+        `${API_URL}/users/${userId}/assigned-items/${taskId}`,
+      );
+
       const items = await fetchAssignedItems(userId, taskId);
-    //  console.log("Fetched Assigned Items:", items);
+
+      console.log("✅ Received items from API:");
+      console.log("📦 Raw response:", items);
+      console.log("📊 Structure:", {
+        isPIDBased: items.isPIDBased,
+        pidWorkItemsCount: items.pidWorkItems?.length || 0,
+        upvLinesCount: items.upvLines?.count || 0,
+        qcLinesCount: items.qcLines?.count || 0,
+        redlinePIDsCount: items.redlinePIDs?.count || 0,
+        upvEquipmentCount: items.upvEquipment?.count || 0,
+        qcEquipmentCount: items.qcEquipment?.count || 0,
+      });
+
       const mappedItems: FetchedAssignedItems = {
+        isPIDBased: items.isPIDBased || false, // ✅ ADD THIS
+        pidWorkItems: items.pidWorkItems || [], // ✅ ADD THIS
         pids: items.pids ?? [],
         lines: items.lines ?? [],
         equipment: items.equipment ?? [],
         upvLines: {
           count: items.upvLines?.count || 0,
           items:
-            items.upvLines?.items.map((item: any) => ({
+            items.upvLines?.items?.map((item: any) => ({
               area_number: item.area_number ?? "",
               project_name: item.project_name ?? "",
               id: item.id,
@@ -412,7 +518,7 @@ const ProjectManagerDashboard = () => {
         qcLines: {
           count: items.qcLines?.count || 0,
           items:
-            items.qcLines?.items.map((item: any) => ({
+            items.qcLines?.items?.map((item: any) => ({
               area_number: item.area_number ?? "",
               project_name: item.project_name ?? "",
               id: item.id,
@@ -423,7 +529,7 @@ const ProjectManagerDashboard = () => {
         redlinePIDs: {
           count: items.redlinePIDs?.count || 0,
           items:
-            items.redlinePIDs?.items.map((item: any) => ({
+            items.redlinePIDs?.items?.map((item: any) => ({
               area_number: item.area_number ?? "",
               project_name: item.project_name ?? "",
               id: item.id,
@@ -434,7 +540,7 @@ const ProjectManagerDashboard = () => {
         upvEquipment: {
           count: items.upvEquipment?.count || 0,
           items:
-            items.upvEquipment?.items.map((item: any) => ({
+            items.upvEquipment?.items?.map((item: any) => ({
               area_number: item.area_number ?? "",
               project_name: item.project_name ?? "",
               id: item.id,
@@ -445,7 +551,7 @@ const ProjectManagerDashboard = () => {
         qcEquipment: {
           count: items.qcEquipment?.count || 0,
           items:
-            items.qcEquipment?.items.map((item: any) => ({
+            items.qcEquipment?.items?.map((item: any) => ({
               area_number: item.area_number ?? "",
               project_name: item.project_name ?? "",
               id: item.id,
@@ -454,10 +560,30 @@ const ProjectManagerDashboard = () => {
             })) || [],
         },
       };
+
+      console.log("✅ Mapped items:", mappedItems);
+      console.log("📊 Mapped structure:", {
+        isPIDBased: mappedItems.isPIDBased, // ✅ ADD THIS
+        pidWorkItemsCount: mappedItems.pidWorkItems?.length || 0, // ✅ ADD THIS
+        upvLinesCount: mappedItems.upvLines.count,
+        upvLinesItemsLength: mappedItems.upvLines.items.length,
+        qcLinesCount: mappedItems.qcLines.count,
+        qcLinesItemsLength: mappedItems.qcLines.items.length,
+      });
+
       setAssignedItems(mappedItems);
+      console.log("✅ assignedItems state updated");
+
       setModalIsOpen(true);
-    } catch (error) {
-      console.error("Error in handleViewCurrentWork:", error);
+      console.log("✅ Modal opened");
+      console.log("==========================================");
+    } catch (error: any) {
+      console.error("==========================================");
+      console.error("❌ ERROR in handleViewCurrentWork:");
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+      console.error("==========================================");
+
       toast.error(`Failed to fetch assigned items: ${error.message}`);
       setAssignedItems(null);
       setSelectedTaskType("");
@@ -474,10 +600,10 @@ const ProjectManagerDashboard = () => {
     setSelectedItemType("");
   };
   const handleViewComments = (taskId: string) => {
- //   console.log("handleViewComments called for taskId:", taskId);
+    //   console.log("handleViewComments called for taskId:", taskId);
     const task = tasks.find((t) => t.id === taskId);
     if (task) {
- //     console.log("Found Task Comments:", task.comments);
+      //     console.log("Found Task Comments:", task.comments);
       setSelectedTask(task);
       setSelectedComments(task.comments || []);
       setCommentsModalIsOpen(true);
@@ -553,7 +679,7 @@ const ProjectManagerDashboard = () => {
       if (!token) throw new Error("No authentication token found");
       const formattedDate = format(selectedDate, "yyyy-MM-dd");
       //console.log("Fetching metrics for date:", formattedDate);
-     // console.log("Users:", users);
+      // console.log("Users:", users);
 
       const response = await axios.get<MetricsData>(
         `${API_URL}/metrics/individual/all?date=${formattedDate}`,
@@ -568,7 +694,7 @@ const ProjectManagerDashboard = () => {
         },
       );
 
-     // console.log("Response for all users:", response.data);
+      // console.log("Response for all users:", response.data);
 
       const combinedMetrics: MetricsData = {
         daily: response.data.daily || [],
@@ -576,7 +702,7 @@ const ProjectManagerDashboard = () => {
         monthly: response.data.monthly || [],
       };
 
-    //  console.log("Final combined user metrics:", combinedMetrics.daily);
+      //  console.log("Final combined user metrics:", combinedMetrics.daily);
 
       setIndividualMetrics(combinedMetrics);
       setIndividualMetricsError(null);
@@ -597,7 +723,7 @@ const ProjectManagerDashboard = () => {
     try {
       const token = localStorage.getItem("teamsync_token");
       if (!token) throw new Error("No authentication token found");
-   //   console.log("Fetching area-wise progress");
+      //   console.log("Fetching area-wise progress");
       const response = await axios.get<{ data: AreaProgress[] }>(
         `${API_URL}/metrics/area/progress`,
         {
@@ -765,7 +891,7 @@ const ProjectManagerDashboard = () => {
         fetchBlockTotals(),
         fetchAreaProgress(),
       ]);
-     // calculateTeamMetrics();
+      // calculateTeamMetrics();
       toast.success("Data refreshed");
     } catch (error) {
       console.error("Fetch error:", error.message, error.stack);
@@ -781,7 +907,7 @@ const ProjectManagerDashboard = () => {
       if (!token) throw new Error("No authentication token found");
 
       const formattedDate = format(selectedDate, "yyyy-MM-dd");
-    //  console.log("Fetching team metrics for date:", formattedDate);
+      //  console.log("Fetching team metrics for date:", formattedDate);
 
       const response = await axios.get<MetricsData>(
         `${API_URL}/metrics/team/all?date=${formattedDate}`,
@@ -793,7 +919,7 @@ const ProjectManagerDashboard = () => {
         },
       );
 
-     // console.log("Team metrics response:", response.data);
+      // console.log("Team metrics response:", response.data);
 
       setTeamMetrics({
         daily: response.data.daily || [],
@@ -956,7 +1082,7 @@ const ProjectManagerDashboard = () => {
           },
         },
       );
-     // console.log("Direct API test response:", response.data);
+      // console.log("Direct API test response:", response.data);
     } catch (error) {
       console.error("API test error:", error);
     }
@@ -1198,6 +1324,7 @@ const ProjectManagerDashboard = () => {
             <TabsTrigger value="tasks">Tasks</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
+            <TabsTrigger value="detailed-log">Detailed Log</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="space-y-6 animate-fade-in">
             {isLoading ? (
@@ -1951,6 +2078,9 @@ const ProjectManagerDashboard = () => {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+          <TabsContent value="detailed-log">
+            <DetailedWorkLogTab selectedDate={selectedDate} />
           </TabsContent>
         </Tabs>
         <Modal
