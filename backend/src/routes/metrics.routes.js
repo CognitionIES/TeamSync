@@ -3,7 +3,6 @@ const router = express.Router();
 const db = require("../config/db");
 const { protect } = require("../middleware/auth");
 
-// Replace the existing /individual/all route with this updated version
 router.get("/individual/all", protect, async (req, res) => {
   console.log("Entered /individual/all route for:", req.url);
   try {
@@ -43,9 +42,6 @@ router.get("/individual/all", protect, async (req, res) => {
     } else {
       const metrics = { daily: [], weekly: [], monthly: [] };
 
-      // ========== DAILY METRICS ==========
-      console.log(" Fetching daily metrics for date:", date);
-
       // Get all users first
       const usersQuery = `SELECT id, name FROM users ORDER BY name`;
       const usersResult = await db.query(usersQuery);
@@ -53,10 +49,12 @@ router.get("/individual/all", protect, async (req, res) => {
 
       console.log(
         `Found ${allUsers.length} users:`,
-        allUsers.map((u) => `${u.name}(${u.id})`)
+        allUsers.map((u) => `${u.name}(${u.id})`),
       );
 
-      // Build daily metrics map for ALL users
+      // ========== DAILY METRICS ==========
+      console.log("📊 Fetching daily metrics for date:", date);
+
       const dailyMetricsMap = {};
 
       allUsers.forEach((user) => {
@@ -64,6 +62,8 @@ router.get("/individual/all", protect, async (req, res) => {
         dailyMetricsMap[uid] = {
           userId: uid,
           date: date,
+          areaName: null,
+          comments: null,
           counts: {
             Line: {
               UPV: { completed: 0, skipped: 0 },
@@ -88,25 +88,52 @@ router.get("/individual/all", protect, async (req, res) => {
         };
       });
 
-      // Fetch completed counts from daily_metrics
+      // Fetch completed counts with area info from daily_metrics
       let dailyQuery = `
-        SELECT user_id, date, item_type, task_type, 
-               SUM(count) as count, SUM(blocks) as blocks
-        FROM daily_metrics
-        WHERE date = $1
+        SELECT 
+          dm.user_id, 
+          dm.date, 
+          dm.item_type, 
+          dm.task_type, 
+          SUM(dm.count) as count, 
+          SUM(dm.blocks) as blocks,
+          a.name as area_name
+        FROM daily_metrics dm
+        LEFT JOIN (
+          SELECT DISTINCT ON (dm2.user_id, dm2.date, dm2.item_type, dm2.task_type)
+            dm2.user_id,
+            dm2.date,
+            dm2.item_type,
+            dm2.task_type,
+            t.area_id
+          FROM daily_metrics dm2
+          INNER JOIN tasks t ON t.assignee_id = dm2.user_id 
+            AND DATE(t.created_at) <= dm2.date
+            AND (t.completed_at IS NULL OR DATE(t.completed_at) >= dm2.date)
+          WHERE dm2.date = $1
+        ) task_areas ON 
+          dm.user_id = task_areas.user_id 
+          AND dm.date = task_areas.date
+          AND dm.item_type = task_areas.item_type
+          AND dm.task_type = task_areas.task_type
+        LEFT JOIN areas a ON task_areas.area_id = a.id
+        WHERE dm.date = $1
       `;
       let dailyParams = [date];
 
       if (userId && userId !== "all") {
-        dailyQuery += ` AND user_id = $2`;
+        dailyQuery += ` AND dm.user_id = $2`;
         dailyParams.push(userId);
       }
 
-      dailyQuery += ` GROUP BY user_id, date, item_type, task_type ORDER BY user_id`;
+      dailyQuery += ` 
+        GROUP BY dm.user_id, dm.date, dm.item_type, dm.task_type, a.name
+        ORDER BY dm.user_id
+      `;
 
       const dailyResult = await db.query(dailyQuery, dailyParams);
       console.log(
-        ` Daily metrics query returned ${dailyResult.rows.length} rows`
+        ` Daily metrics query returned ${dailyResult.rows.length} rows`,
       );
 
       dailyResult.rows.forEach((row) => {
@@ -122,11 +149,42 @@ router.get("/individual/all", protect, async (req, res) => {
             dailyMetricsMap[uid].counts[itemType][taskType].completed =
               parseInt(row.count) || 0;
             dailyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+
+            // Capture area name
+            if (!dailyMetricsMap[uid].areaName && row.area_name) {
+              dailyMetricsMap[uid].areaName = row.area_name;
+              console.log(`  ✅ Set area "${row.area_name}" for user ${uid}`);
+            }
           }
         }
       });
 
-      //   CRITICAL FIX: Fetch skipped counts from skipped_items_tracking
+      // Fallback: If area name is still null, try alternative query
+      for (const uid in dailyMetricsMap) {
+        if (!dailyMetricsMap[uid].areaName) {
+          const altAreaQuery = `
+            SELECT DISTINCT a.name as area_name
+            FROM tasks t
+            INNER JOIN areas a ON t.area_id = a.id
+            WHERE t.assignee_id = $1
+              AND DATE(t.created_at) <= $2
+              AND (t.completed_at IS NULL OR DATE(t.completed_at) >= $2)
+            LIMIT 1
+          `;
+          const altAreaResult = await db.query(altAreaQuery, [
+            parseInt(uid),
+            date,
+          ]);
+          if (altAreaResult.rows.length > 0) {
+            dailyMetricsMap[uid].areaName = altAreaResult.rows[0].area_name;
+            console.log(
+              `  ✅ Set area (fallback) "${altAreaResult.rows[0].area_name}" for user ${uid}`,
+            );
+          }
+        }
+      }
+
+      // Fetch skipped counts from skipped_items_tracking
       let skippedDailyQuery = `
         SELECT 
           user_id,
@@ -147,15 +205,14 @@ router.get("/individual/all", protect, async (req, res) => {
 
       const skippedDailyResult = await db.query(
         skippedDailyQuery,
-        skippedDailyParams
+        skippedDailyParams,
       );
       console.log(
-        ` Skipped items query returned ${skippedDailyResult.rows.length} rows`
+        ` Skipped items query returned ${skippedDailyResult.rows.length} rows`,
       );
 
       skippedDailyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
-        console.log(`Processing skipped for user ${uid}:`, row);
 
         if (dailyMetricsMap[uid] && row.item_type && row.task_type) {
           const itemType = row.item_type;
@@ -167,10 +224,45 @@ router.get("/individual/all", protect, async (req, res) => {
           ) {
             dailyMetricsMap[uid].counts[itemType][taskType].skipped =
               parseInt(row.skipped) || 0;
-            console.log(
-              `  Set skipped=${row.skipped} for user ${uid}, ${itemType}, ${taskType}`
-            );
           }
+        }
+      });
+
+      // Fetch comments from task_comments for the date
+      let commentsQuery = `
+        SELECT 
+          t.assignee_id as user_id,
+          STRING_AGG(
+            CONCAT(
+              TO_CHAR(tc.created_at, 'HH24:MI'), 
+              ': ', 
+              tc.comment
+            ), 
+            ' | ' 
+            ORDER BY tc.created_at DESC
+          ) as comments
+        FROM task_comments tc
+        INNER JOIN tasks t ON tc.task_id = t.id
+        WHERE DATE(tc.created_at) = $1
+      `;
+      let commentsParams = [date];
+
+      if (userId && userId !== "all") {
+        commentsQuery += ` AND t.assignee_id = $2`;
+        commentsParams.push(userId);
+      }
+
+      commentsQuery += ` GROUP BY t.assignee_id`;
+
+      const commentsResult = await db.query(commentsQuery, commentsParams);
+      console.log(
+        ` Comments query returned ${commentsResult.rows.length} rows`,
+      );
+
+      commentsResult.rows.forEach((row) => {
+        const uid = row.user_id?.toString();
+        if (uid && dailyMetricsMap[uid]) {
+          dailyMetricsMap[uid].comments = row.comments;
         }
       });
 
@@ -179,20 +271,22 @@ router.get("/individual/all", protect, async (req, res) => {
         const hasActivity =
           Object.values(user.counts).some((itemType) =>
             Object.values(itemType).some(
-              (taskType) => taskType.completed > 0 || taskType.skipped > 0
-            )
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0,
+            ),
           ) || user.totalBlocks > 0;
         return hasActivity;
       });
 
       console.log(
-        `  Final daily metrics: ${metrics.daily.length} users with activity`
+        `  Final daily metrics: ${metrics.daily.length} users with activity`,
       );
 
-      // ========== WEEKLY METRICS (Similar logic) ==========
+      // ========== WEEKLY METRICS ==========
       const weekStartDate = new Date(date);
       weekStartDate.setDate(weekStartDate.getDate() - 6);
       const weekStartStr = weekStartDate.toISOString().split("T")[0];
+
+      console.log("📊 Fetching weekly metrics:", weekStartStr, "to", date);
 
       const weeklyMetricsMap = {};
       allUsers.forEach((user) => {
@@ -200,6 +294,8 @@ router.get("/individual/all", protect, async (req, res) => {
         weeklyMetricsMap[uid] = {
           userId: uid,
           week_start: weekStartStr,
+          areaName: null,
+          comments: null,
           counts: {
             Line: {
               UPV: { completed: 0, skipped: 0 },
@@ -222,21 +318,45 @@ router.get("/individual/all", protect, async (req, res) => {
         };
       });
 
-      // Weekly completed
+      // Weekly completed with area
       let weeklyQuery = `
-        SELECT user_id, item_type, task_type, 
-               SUM(count) as count, SUM(blocks) as blocks
-        FROM daily_metrics
-        WHERE date >= $1 AND date <= $2
+        SELECT 
+          dm.user_id, 
+          dm.item_type, 
+          dm.task_type, 
+          SUM(dm.count) as count, 
+          SUM(dm.blocks) as blocks,
+          a.name as area_name
+        FROM daily_metrics dm
+        LEFT JOIN (
+          SELECT DISTINCT ON (dm2.user_id, dm2.item_type, dm2.task_type)
+            dm2.user_id,
+            dm2.item_type,
+            dm2.task_type,
+            t.area_id
+          FROM daily_metrics dm2
+          INNER JOIN tasks t ON t.assignee_id = dm2.user_id 
+            AND DATE(t.created_at) <= dm2.date
+            AND (t.completed_at IS NULL OR DATE(t.completed_at) >= dm2.date)
+          WHERE dm2.date >= $1 AND dm2.date <= $2
+        ) task_areas ON 
+          dm.user_id = task_areas.user_id 
+          AND dm.item_type = task_areas.item_type
+          AND dm.task_type = task_areas.task_type
+        LEFT JOIN areas a ON task_areas.area_id = a.id
+        WHERE dm.date >= $1 AND dm.date <= $2
       `;
       let weeklyParams = [weekStartStr, date];
 
       if (userId && userId !== "all") {
-        weeklyQuery += ` AND user_id = $3`;
+        weeklyQuery += ` AND dm.user_id = $3`;
         weeklyParams.push(userId);
       }
 
-      weeklyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+      weeklyQuery += ` 
+        GROUP BY dm.user_id, dm.item_type, dm.task_type, a.name
+        ORDER BY dm.user_id
+      `;
 
       const weeklyResult = await db.query(weeklyQuery, weeklyParams);
       weeklyResult.rows.forEach((row) => {
@@ -248,6 +368,10 @@ router.get("/individual/all", protect, async (req, res) => {
             weeklyMetricsMap[uid].counts[itemType][taskType].completed =
               parseInt(row.count) || 0;
             weeklyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+
+            if (!weeklyMetricsMap[uid].areaName && row.area_name) {
+              weeklyMetricsMap[uid].areaName = row.area_name;
+            }
           }
         }
       });
@@ -269,7 +393,7 @@ router.get("/individual/all", protect, async (req, res) => {
 
       const skippedWeeklyResult = await db.query(
         skippedWeeklyQuery,
-        skippedWeeklyParams
+        skippedWeeklyParams,
       );
       skippedWeeklyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
@@ -283,20 +407,59 @@ router.get("/individual/all", protect, async (req, res) => {
         }
       });
 
+      // Weekly comments
+      let weeklyCommentsQuery = `
+        SELECT 
+          t.assignee_id as user_id,
+          STRING_AGG(
+            CONCAT(
+              TO_CHAR(tc.created_at, 'MM/DD HH24:MI'), 
+              ': ', 
+              tc.comment
+            ), 
+            ' | ' 
+            ORDER BY tc.created_at DESC
+          ) as comments
+        FROM task_comments tc
+        INNER JOIN tasks t ON tc.task_id = t.id
+        WHERE tc.created_at >= $1::date AND tc.created_at <= $2::date
+      `;
+      let weeklyCommentsParams = [weekStartStr, date];
+
+      if (userId && userId !== "all") {
+        weeklyCommentsQuery += ` AND t.assignee_id = $3`;
+        weeklyCommentsParams.push(userId);
+      }
+
+      weeklyCommentsQuery += ` GROUP BY t.assignee_id`;
+
+      const weeklyCommentsResult = await db.query(
+        weeklyCommentsQuery,
+        weeklyCommentsParams,
+      );
+      weeklyCommentsResult.rows.forEach((row) => {
+        const uid = row.user_id?.toString();
+        if (uid && weeklyMetricsMap[uid]) {
+          weeklyMetricsMap[uid].comments = row.comments;
+        }
+      });
+
       metrics.weekly = Object.values(weeklyMetricsMap).filter((user) => {
         const hasActivity =
           Object.values(user.counts).some((itemType) =>
             Object.values(itemType).some(
-              (taskType) => taskType.completed > 0 || taskType.skipped > 0
-            )
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0,
+            ),
           ) || user.totalBlocks > 0;
         return hasActivity;
       });
 
-      // ========== MONTHLY METRICS (Similar logic) ==========
+      // ========== MONTHLY METRICS ==========
       const monthStartDate = new Date(date);
       monthStartDate.setDate(monthStartDate.getDate() - 29);
       const monthStartStr = monthStartDate.toISOString().split("T")[0];
+
+      console.log("📊 Fetching monthly metrics:", monthStartStr, "to", date);
 
       const monthlyMetricsMap = {};
       allUsers.forEach((user) => {
@@ -304,6 +467,8 @@ router.get("/individual/all", protect, async (req, res) => {
         monthlyMetricsMap[uid] = {
           userId: uid,
           month_start: monthStartStr,
+          areaName: null,
+          comments: null,
           counts: {
             Line: {
               UPV: { completed: 0, skipped: 0 },
@@ -326,21 +491,45 @@ router.get("/individual/all", protect, async (req, res) => {
         };
       });
 
-      // Monthly completed
+      // Monthly completed with area
       let monthlyQuery = `
-        SELECT user_id, item_type, task_type, 
-               SUM(count) as count, SUM(blocks) as blocks
-        FROM daily_metrics
-        WHERE date >= $1 AND date <= $2
+        SELECT 
+          dm.user_id, 
+          dm.item_type, 
+          dm.task_type, 
+          SUM(dm.count) as count, 
+          SUM(dm.blocks) as blocks,
+          a.name as area_name
+        FROM daily_metrics dm
+        LEFT JOIN (
+          SELECT DISTINCT ON (dm2.user_id, dm2.item_type, dm2.task_type)
+            dm2.user_id,
+            dm2.item_type,
+            dm2.task_type,
+            t.area_id
+          FROM daily_metrics dm2
+          INNER JOIN tasks t ON t.assignee_id = dm2.user_id 
+            AND DATE(t.created_at) <= dm2.date
+            AND (t.completed_at IS NULL OR DATE(t.completed_at) >= dm2.date)
+          WHERE dm2.date >= $1 AND dm2.date <= $2
+        ) task_areas ON 
+          dm.user_id = task_areas.user_id 
+          AND dm.item_type = task_areas.item_type
+          AND dm.task_type = task_areas.task_type
+        LEFT JOIN areas a ON task_areas.area_id = a.id
+        WHERE dm.date >= $1 AND dm.date <= $2
       `;
       let monthlyParams = [monthStartStr, date];
 
       if (userId && userId !== "all") {
-        monthlyQuery += ` AND user_id = $3`;
+        monthlyQuery += ` AND dm.user_id = $3`;
         monthlyParams.push(userId);
       }
 
-      monthlyQuery += ` GROUP BY user_id, item_type, task_type ORDER BY user_id`;
+      monthlyQuery += ` 
+        GROUP BY dm.user_id, dm.item_type, dm.task_type, a.name
+        ORDER BY dm.user_id
+      `;
 
       const monthlyResult = await db.query(monthlyQuery, monthlyParams);
       monthlyResult.rows.forEach((row) => {
@@ -352,6 +541,10 @@ router.get("/individual/all", protect, async (req, res) => {
             monthlyMetricsMap[uid].counts[itemType][taskType].completed =
               parseInt(row.count) || 0;
             monthlyMetricsMap[uid].totalBlocks += parseInt(row.blocks) || 0;
+
+            if (!monthlyMetricsMap[uid].areaName && row.area_name) {
+              monthlyMetricsMap[uid].areaName = row.area_name;
+            }
           }
         }
       });
@@ -373,7 +566,7 @@ router.get("/individual/all", protect, async (req, res) => {
 
       const skippedMonthlyResult = await db.query(
         skippedMonthlyQuery,
-        skippedMonthlyParams
+        skippedMonthlyParams,
       );
       skippedMonthlyResult.rows.forEach((row) => {
         const uid = row.user_id.toString();
@@ -387,17 +580,54 @@ router.get("/individual/all", protect, async (req, res) => {
         }
       });
 
+      // Monthly comments
+      let monthlyCommentsQuery = `
+        SELECT 
+          t.assignee_id as user_id,
+          STRING_AGG(
+            CONCAT(
+              TO_CHAR(tc.created_at, 'MM/DD'), 
+              ': ', 
+              SUBSTRING(tc.comment, 1, 50)
+            ), 
+            ' | ' 
+            ORDER BY tc.created_at DESC
+          ) as comments
+        FROM task_comments tc
+        INNER JOIN tasks t ON tc.task_id = t.id
+        WHERE tc.created_at >= $1::date AND tc.created_at <= $2::date
+      `;
+      let monthlyCommentsParams = [monthStartStr, date];
+
+      if (userId && userId !== "all") {
+        monthlyCommentsQuery += ` AND t.assignee_id = $3`;
+        monthlyCommentsParams.push(userId);
+      }
+
+      monthlyCommentsQuery += ` GROUP BY t.assignee_id`;
+
+      const monthlyCommentsResult = await db.query(
+        monthlyCommentsQuery,
+        monthlyCommentsParams,
+      );
+      monthlyCommentsResult.rows.forEach((row) => {
+        const uid = row.user_id?.toString();
+        if (uid && monthlyMetricsMap[uid]) {
+          monthlyMetricsMap[uid].comments = row.comments;
+        }
+      });
+
       metrics.monthly = Object.values(monthlyMetricsMap).filter((user) => {
         const hasActivity =
           Object.values(user.counts).some((itemType) =>
             Object.values(itemType).some(
-              (taskType) => taskType.completed > 0 || taskType.skipped > 0
-            )
+              (taskType) => taskType.completed > 0 || taskType.skipped > 0,
+            ),
           ) || user.totalBlocks > 0;
         return hasActivity;
       });
 
-      console.log("Final metrics response:", {
+      console.log("✅ Final metrics response:", {
         daily: metrics.daily.length,
         weekly: metrics.weekly.length,
         monthly: metrics.monthly.length,
@@ -406,7 +636,7 @@ router.get("/individual/all", protect, async (req, res) => {
       res.status(200).json(metrics);
     }
   } catch (error) {
-    console.error("Failed to fetch individual metrics:", {
+    console.error("❌ Failed to fetch individual metrics:", {
       message: error.message,
       stack: error.stack,
     });
@@ -457,7 +687,7 @@ router.get("/individual/:itemType", protect, async (req, res) => {
         userId,
         date,
         itemType,
-      })
+      }),
     );
 
     const metrics = { daily: [], weekly: [], monthly: [] };
@@ -478,7 +708,7 @@ router.get("/individual/:itemType", protect, async (req, res) => {
 
     // Aggregate daily metrics
     const dailyMetrics = result.rows.filter(
-      (r) => r.date.toISOString().split("T")[0] === date
+      (r) => r.date.toISOString().split("T")[0] === date,
     );
     if (dailyMetrics.length > 0) {
       const userMetric = dailyMetrics.reduce(
@@ -496,7 +726,7 @@ router.get("/individual/:itemType", protect, async (req, res) => {
           acc.totalBlocks += r.blocks || 0;
           return acc;
         },
-        { userId: userId.toString(), date: date, counts: {}, totalBlocks: 0 }
+        { userId: userId.toString(), date: date, counts: {}, totalBlocks: 0 },
       );
       metrics.daily.push(userMetric);
     }
@@ -505,7 +735,8 @@ router.get("/individual/:itemType", protect, async (req, res) => {
     metrics.weekly = result.rows
       .filter(
         (r) =>
-          r.date >= new Date(new Date(date).getTime() - 7 * 24 * 60 * 60 * 1000)
+          r.date >=
+          new Date(new Date(date).getTime() - 7 * 24 * 60 * 60 * 1000),
       )
       .reduce((acc, r) => {
         const key = r.week_start.toISOString();
@@ -562,7 +793,7 @@ router.get("/individual/:itemType", protect, async (req, res) => {
         itemType,
         rowCount: result.rows.length,
         daily: metrics.daily,
-      })
+      }),
     );
 
     res.status(200).json(metrics);
@@ -578,7 +809,7 @@ router.get("/individual/:itemType", protect, async (req, res) => {
           ? [date, mappedItemType, userId]
           : [date, mappedItemType],
         pgError: error.detail || error.hint || "No PostgreSQL detail available",
-      })
+      }),
     );
     res.status(500).json({
       message: "Failed to fetch individual metrics",
@@ -601,7 +832,7 @@ router.get("/blocks/totals", protect, async (req, res) => {
     }
 
     console.log(
-      JSON.stringify({ level: "info", message: "Fetching block totals", date })
+      JSON.stringify({ level: "info", message: "Fetching block totals", date }),
     );
 
     const totalsQuery = `
@@ -628,7 +859,7 @@ router.get("/blocks/totals", protect, async (req, res) => {
         message: "Block totals fetched",
         date,
         userCount: Object.keys(totals).length,
-      })
+      }),
     );
 
     res.status(200).json(totals);
@@ -642,7 +873,7 @@ router.get("/blocks/totals", protect, async (req, res) => {
         query: error.query || "N/A",
         params: [date],
         pgError: error.detail || error.hint || "No PostgreSQL detail available",
-      })
+      }),
     );
     res
       .status(500)
@@ -938,7 +1169,7 @@ router.post("/individual/update", protect, async (req, res) => {
     }
     const taskItemResult = await db.query(
       "SELECT line_id, item_id, item_type FROM task_items WHERE id = $1",
-      [itemId]
+      [itemId],
     );
     console.log("Task Item Query Result:", taskItemResult.rows);
     if (taskItemResult.rows.length === 0) {
@@ -954,45 +1185,45 @@ router.post("/individual/update", protect, async (req, res) => {
       if (item_type === "Equipment") {
         const equipResult = await db.query(
           "SELECT project_id FROM equipment WHERE id = $1",
-          [item_id]
+          [item_id],
         );
         projectId = equipResult.rows[0]?.project_id;
       } else if (item_type === "NonInlineInstrument") {
         const instrResult = await db.query(
           "SELECT project_id FROM non_inline_instruments WHERE id = $1",
-          [item_id]
+          [item_id],
         );
         projectId = instrResult.rows[0]?.project_id;
       } else if (item_type === "PID") {
         const pidResult = await db.query(
           "SELECT project_id FROM pids WHERE id = $1",
-          [item_id]
+          [item_id],
         );
         projectId = pidResult.rows[0]?.project_id;
       } else if (item_type === "Line") {
         const lineResult = await db.query(
           "SELECT id FROM lines WHERE id = $1",
-          [item_id]
+          [item_id],
         );
         effectiveEntityId = lineResult.rows[0]?.id;
       }
       if (projectId && !effectiveEntityId) {
         const lineMatch = await db.query(
           "SELECT id FROM lines WHERE project_id = $1 LIMIT 1",
-          [projectId]
+          [projectId],
         );
         effectiveEntityId = lineMatch.rows[0]?.id;
       }
       if (!effectiveEntityId) {
         const taskResult = await db.query(
           "SELECT project_id FROM tasks WHERE id = $1",
-          [taskId]
+          [taskId],
         );
         projectId = taskResult.rows[0]?.project_id;
         if (projectId) {
           const newLineResult = await db.query(
             "INSERT INTO lines (project_id, line_number, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING id",
-            [projectId, "Default Line"]
+            [projectId, "Default Line"],
           );
           effectiveEntityId = newLineResult.rows[0].id;
           await db.query("UPDATE task_items SET line_id = $1 WHERE id = $2", [
@@ -1016,7 +1247,7 @@ router.post("/individual/update", protect, async (req, res) => {
        ON CONFLICT (user_id, date, item_type, task_type) 
        DO UPDATE SET count = daily_metrics.count + 1, blocks = daily_metrics.blocks + $5, entity_id = $2, updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [userId, effectiveEntityId, itemType, taskType, blocks]
+      [userId, effectiveEntityId, itemType, taskType, blocks],
     );
     res.status(200).json({ message: "Metric updated", data: result.rows[0] });
   } catch (error) {
@@ -1028,7 +1259,7 @@ router.post("/individual/update", protect, async (req, res) => {
         code: error.code || "N/A",
         body: req.body,
         pgError: error.detail || error.hint || "No PostgreSQL detail available",
-      })
+      }),
     );
     res.status(500).json({
       message: "Failed to update individual metrics",
@@ -1477,25 +1708,39 @@ router.get("/team/all", protect, async (req, res) => {
   }
 });
 
-// Add this route after your existing ones in metrics.routes.js
 router.get("/detailed", protect, async (req, res) => {
   try {
     if (!["Project Manager"].includes(req.user.role)) {
       return res.status(403).json({ message: "Unauthorized access" });
     }
 
-    const { taskType, dateStart, dateEnd, projectId, areaId, userId, limit = 100, offset = 0 } = req.query;
+    const {
+      taskType,
+      dateStart,
+      dateEnd,
+      projectId,
+      areaId,
+      userId,
+      limit = 100,
+      offset = 0,
+    } = req.query;
 
     // Validation
     const validTaskTypes = ["UPV", "Redline", "QC", "Rework"];
     if (taskType && !validTaskTypes.includes(taskType)) {
-      return res.status(400).json({ message: `Invalid taskType. Valid: ${validTaskTypes.join(", ")}` });
+      return res.status(400).json({
+        message: `Invalid taskType. Valid: ${validTaskTypes.join(", ")}`,
+      });
     }
     if (dateStart && !/^\d{4}-\d{2}-\d{2}$/.test(dateStart)) {
-      return res.status(400).json({ message: "Invalid dateStart format. Use YYYY-MM-DD" });
+      return res
+        .status(400)
+        .json({ message: "Invalid dateStart format. Use YYYY-MM-DD" });
     }
     if (dateEnd && !/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) {
-      return res.status(400).json({ message: "Invalid dateEnd format. Use YYYY-MM-DD" });
+      return res
+        .status(400)
+        .json({ message: "Invalid dateEnd format. Use YYYY-MM-DD" });
     }
 
     let query = `
@@ -1550,37 +1795,192 @@ router.get("/detailed", protect, async (req, res) => {
     params.push(parseInt(limit));
     params.push(parseInt(offset));
 
-    console.log(`Detailed query: ${query}`, params);  // For debugging
+    console.log(`Detailed query: ${query}`, params); // For debugging
 
     const result = await db.query(query, params);
-    const countQuery = query.replace(/ORDER BY.*$/i, '').replace(/LIMIT .* OFFSET .*$/i, '') + ' SELECT COUNT(*) FROM (' + query.replace(/ORDER BY.*$/i, '') + ') AS count_sub';
+    const countQuery =
+      query.replace(/ORDER BY.*$/i, "").replace(/LIMIT .* OFFSET .*$/i, "") +
+      " SELECT COUNT(*) FROM (" +
+      query.replace(/ORDER BY.*$/i, "") +
+      ") AS count_sub";
     // Wait, better: Separate count query
-    const countParams = params.slice(0, -2);  // Remove limit/offset
-    const countResult = await db.query(`SELECT COUNT(*) FROM (${query.replace(/ ORDER BY .* LIMIT .* OFFSET .*/i, '')}) AS sub`, countParams);
+    const countParams = params.slice(0, -2); // Remove limit/offset
+    const countResult = await db.query(
+      `SELECT COUNT(*) FROM (${query.replace(/ ORDER BY .* LIMIT .* OFFSET .*/i, "")}) AS sub`,
+      countParams,
+    );
 
-    const records = result.rows.map(row => ({
-      areaNo: row.area_no || 'N/A',
-      pid: row.pid || 'N/A',
-      lineNo: row.line_no || 'N/A',
-      assignedTo: row.assigned_to || 'Unassigned',
+    const records = result.rows.map((row) => ({
+      areaNo: row.area_no || "N/A",
+      pid: row.pid || "N/A",
+      lineNo: row.line_no || "N/A",
+      assignedTo: row.assigned_to || "Unassigned",
       blockCount: row.block_count,
-      completedAt: row.completed_at ? new Date(row.completed_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Pending',
+      completedAt: row.completed_at
+        ? new Date(row.completed_at).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+        })
+        : "Pending",
       comments: row.comments,
       status: row.status,
       taskType: row.task_type,
       workItemId: row.work_item_id,
-      auditLink: `/audit?entityId=${row.work_item_id}&taskType=${row.task_type}`  // For frontend navigation to audit
+      auditLink: `/audit?entityId=${row.work_item_id}&taskType=${row.task_type}`, // For frontend navigation to audit
     }));
 
     res.status(200).json({
       data: records,
       totalCount: parseInt(countResult.rows[0].count),
-      filtersApplied: { taskType, dateStart, dateEnd, projectId, areaId, userId }
+      filtersApplied: {
+        taskType,
+        dateStart,
+        dateEnd,
+        projectId,
+        areaId,
+        userId,
+      },
     });
-
   } catch (error) {
     console.error("Detailed metrics error:", error);
-    res.status(500).json({ message: "Failed to fetch detailed metrics", error: error.message });
+    res.status(500).json({
+      message: "Failed to fetch detailed metrics",
+      error: error.message,
+    });
   }
 });
+
+router.get("/detailed-export", protect, async (req, res) => {
+  try {
+    if (!["Project Manager"].includes(req.user.role)) {
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+
+    const { date, period = "daily" } = req.query;
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid date format. Use YYYY-MM-DD" });
+    }
+
+    console.log("Fetching detailed export data for:", { date, period });
+
+    // Calculate date range based on period
+    let startDate = date;
+    let endDate = date;
+
+    if (period === "weekly") {
+      const weekStart = new Date(date);
+      weekStart.setDate(weekStart.getDate() - 6);
+      startDate = weekStart.toISOString().split("T")[0];
+    } else if (period === "monthly") {
+      const monthStart = new Date(date);
+      monthStart.setDate(monthStart.getDate() - 29);
+      startDate = monthStart.toISOString().split("T")[0];
+    }
+
+    // Get all users
+    const usersQuery = `SELECT id, name FROM users ORDER BY name`;
+    const usersResult = await db.query(usersQuery);
+    const allUsers = usersResult.rows;
+
+    const detailedData = [];
+
+    for (const user of allUsers) {
+      const userId = user.id;
+
+      // Fetch PIDs worked on
+      const pidsQuery = `
+        SELECT DISTINCT p.pid_number
+        FROM daily_metrics dm
+        INNER JOIN pids p ON dm.entity_id = p.id
+        WHERE dm.user_id = $1
+          AND dm.date >= $2 
+          AND dm.date <= $3
+          AND dm.item_type = 'PID'
+        ORDER BY p.pid_number
+      `;
+      const pidsResult = await db.query(pidsQuery, [
+        userId,
+        startDate,
+        endDate,
+      ]);
+      const pidNumbers = pidsResult.rows.map((row) => row.pid_number);
+
+      // Fetch Lines worked on
+      const linesQuery = `
+        SELECT DISTINCT l.line_number
+        FROM daily_metrics dm
+        INNER JOIN lines l ON dm.entity_id = l.id
+        WHERE dm.user_id = $1
+          AND dm.date >= $2 
+          AND dm.date <= $3
+          AND dm.item_type = 'Line'
+        ORDER BY l.line_number
+      `;
+      const linesResult = await db.query(linesQuery, [
+        userId,
+        startDate,
+        endDate,
+      ]);
+      const lineNumbers = linesResult.rows.map((row) => row.line_number);
+
+      // Fetch Equipment worked on
+      const equipmentQuery = `
+        SELECT DISTINCT e.tag_number
+        FROM daily_metrics dm
+        INNER JOIN equipment e ON dm.entity_id = e.id
+        WHERE dm.user_id = $1
+          AND dm.date >= $2 
+          AND dm.date <= $3
+          AND dm.item_type = 'Equipment'
+        ORDER BY e.tag_number
+      `;
+      const equipmentResult = await db.query(equipmentQuery, [
+        userId,
+        startDate,
+        endDate,
+      ]);
+      const equipmentNumbers = equipmentResult.rows.map(
+        (row) => row.tag_number,
+      );
+
+      // Only include users who have worked on something
+      if (
+        pidNumbers.length > 0 ||
+        lineNumbers.length > 0 ||
+        equipmentNumbers.length > 0
+      ) {
+        detailedData.push({
+          userId: userId.toString(),
+          userName: user.name,
+          pidNumbers,
+          lineNumbers,
+          equipmentNumbers,
+        });
+      }
+    }
+
+    console.log(
+      `Detailed export data prepared for ${detailedData.length} users`,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: detailedData,
+      period,
+      dateRange: { startDate, endDate },
+    });
+  } catch (error) {
+    console.error("Failed to fetch detailed export data:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      message: "Failed to fetch detailed export data",
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;

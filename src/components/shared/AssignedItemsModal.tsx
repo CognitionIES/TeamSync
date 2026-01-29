@@ -376,8 +376,8 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
         </div>
       )}
 
-    {/* Debug info - REMOVE AFTER FIXING */}
-    {process.env.NODE_ENV === 'development' && (
+    {/* Debug info */}
+    {/* {process.env.NODE_ENV === 'development' && (
       <div className="bg-yellow-50 border border-yellow-200 p-3 rounded text-xs">
         <p><strong>Debug Info:</strong></p>
         <p>isPIDBased: {String(assignedItems.isPIDBased)}</p>
@@ -390,7 +390,7 @@ const AssignedItemsModal: React.FC<AssignedItemsModalProps> = ({
         <p>upvEquipment count: {assignedItems.upvEquipment?.count || 0}</p>
         <p>qcEquipment count: {assignedItems.qcEquipment?.count || 0}</p>
       </div>
-    )}
+    )} */}
 
     {/*   PID-based rendering */}
       {assignedItems.isPIDBased === true ? (
