@@ -19,7 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, Eye, EyeOff, Plus } from "lucide-react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Download, Eye, EyeOff, Plus, Pencil, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import Navbar from "../shared/Navbar";
 import {
@@ -47,13 +53,22 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import LoginAnimation from "../landing/LoginAnimation";
-import TaskTypeIndicator from "../shared/TaskTypeIndicator";
+import { Badge } from "@/components/ui/badge";
 
 // API URL
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
-// Log the API_URL for debugging
 console.log("VITE_API_URL from env:", import.meta.env.VITE_API_URL);
 console.log("Using API_URL:", API_URL);
 
@@ -81,15 +96,21 @@ interface Project {
 interface User {
   id: string;
   name: string;
-  role: "Team Member" | "Team Lead";
-  projectId?: string;
-  teamLead?: string;
-  password?: string;
+  role: string;
+  is_active: boolean;
+  team_lead_id?: string;
+  team_lead_name?: string;
+}
+
+interface TeamLead {
+  id: string;
+  name: string;
 }
 
 const AdminDashboard = () => {
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [selectedTeam, setSelectedTeam] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState<string>("overview");
   const [isExporting, setIsExporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -111,11 +132,10 @@ const AdminDashboard = () => {
 
   // User management state
   const [users, setUsers] = useState<User[]>([]);
+  const [teamLeads, setTeamLeads] = useState<TeamLead[]>([]);
   const [newUserName, setNewUserName] = useState("");
-  const [newUserRole, setNewUserRole] = useState<
-    "Team Member" | "Team Lead" | ""
-  >("");
-  const [newUserProject, setNewUserProject] = useState<string>("none");
+  const [newUserRole, setNewUserRole] = useState<string>("");
+  const [newUserTeamLead, setNewUserTeamLead] = useState<string>("none");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -123,24 +143,23 @@ const AdminDashboard = () => {
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Team management state
-  const [newTeamName, setNewTeamName] = useState("");
-  const [newTeamLead, setNewTeamLead] = useState<string>("none");
-  const [isAddingTeam, setIsAddingTeam] = useState(false);
-  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+  // Edit user state
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editUserRole, setEditUserRole] = useState<string>("");
+  const [editUserTeamLead, setEditUserTeamLead] = useState<string>("none");
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
-  // Task type management state
-  const [newTaskType, setNewTaskType] = useState("");
-  const [isAddingTaskType, setIsAddingTaskType] = useState(false);
-  const [isTaskTypeModalOpen, setIsTaskTypeModalOpen] = useState(false);
-
-  // Team change state
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [newTeamForUser, setNewTeamForUser] = useState<string>("none");
+  // Delete user state
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, token } = useAuth();
+
+  const validRoles = ["Data Entry", "Team Member", "Team Lead", "Project Manager", "Admin"];
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -167,7 +186,7 @@ const AdminDashboard = () => {
         statsResponse,
         statusResponse,
         logsResponse,
-        usersResponse,
+        usersWithTeamsResponse,
       ] = await Promise.all([
         axios
           .get(`${API_URL}/projects`, config)
@@ -189,7 +208,7 @@ const AdminDashboard = () => {
           .get(`${API_URL}/audit-logs${urlSuffix}`, config)
           .catch(() => ({ data: { data: [] } })),
         axios
-          .get(`${API_URL}/users`, config)
+          .get(`${API_URL}/users/with-teams`, config)
           .catch(() => ({ data: { data: [] } })),
       ]);
 
@@ -229,18 +248,26 @@ const AdminDashboard = () => {
         },
       ]);
       setAuditLogs(logsResponse.data.data || []);
-      setUsers(
-        usersResponse.data.data.map((u: any) => ({
-          id: u.id.toString(),
-          name: u.name,
-          role: u.role,
-          projectId: u.projectId?.toString(),
-          teamLead: u.team_lead?.toString(), // Assuming team_lead is in the response
-        })) || []
-      );
+      
+      const usersData = usersWithTeamsResponse.data.data.map((u: any) => ({
+        id: u.id.toString(),
+        name: u.name,
+        role: u.role,
+        is_active: u.is_active !== false,
+        team_lead_id: u.team_lead_id?.toString() || null,
+        team_lead_name: u.team_lead_name || null,
+      })) || [];
+      
+      setUsers(usersData);
+      
+      // Extract team leads for dropdown
+      const leads = usersData
+        .filter((u: User) => u.role === "Team Lead")
+        .map((u: User) => ({ id: u.id, name: u.name }));
+      setTeamLeads(leads);
 
       toast.success("Data refreshed");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching data:", error);
       toast.error(
         error.response?.data?.message || error.message || "Failed to fetch data"
@@ -362,84 +389,63 @@ const AdminDashboard = () => {
           "Content-Type": "application/json",
         },
       };
-      const userData: {
-        name: string;
-        role: "Team Member" | "Team Lead";
-        password: string;
-        projectId?: string;
-        teamLead?: string;
-      } = {
+      
+      // First, create the user
+      const userData = {
         name: newUserName,
         role: newUserRole,
         password: newUserPassword,
+        is_active: true,
       };
-      if (newUserProject !== "none") userData.projectId = newUserProject;
-      if (newTeamForUser !== "none") userData.teamLead = newTeamForUser;
-      console.log(
-        "Posting to URL:",
-        `${API_URL}/users`,
-        "Request payload:",
-        userData
-      );
+      
+      console.log("Creating user:", userData);
       const response = await axios.post(`${API_URL}/users`, userData, config);
-      console.log("Add user response:", response.data);
+      console.log("User created:", response.data);
+      
+      const newUserId = response.data.data.id;
+      
+      // Then, assign to team if selected
+      if (newUserTeamLead !== "none") {
+        console.log(`Assigning user ${newUserId} to team lead ${newUserTeamLead}`);
+        await axios.patch(
+          `${API_URL}/users/${newUserId}/team`,
+          { lead_id: newUserTeamLead },
+          config
+        );
+        console.log("Team assignment successful");
+      }
+      
       await fetchData();
       setNewUserName("");
       setNewUserRole("");
-      setNewUserProject("none");
+      setNewUserTeamLead("none");
       setNewUserPassword("");
       setConfirmPassword("");
       setShowPassword(false);
       setShowConfirmPassword(false);
       setIsModalOpen(false);
       toast.success(`User ${newUserName} added successfully`);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding user:", error);
       const errorMessage =
-        error.response?.status === 404
-          ? "User creation endpoint not found. Please check the backend API route (expected POST /api/users)."
-          : error.response?.data?.message || "Failed to add user";
+        error.response?.data?.message || "Failed to add user";
       toast.error(errorMessage);
     } finally {
       setIsAddingUser(false);
     }
   };
 
-  const handleCreateTeam = async () => {
-    if (!newTeamName || newTeamLead === "none") {
-      toast.error("Please provide a team name and select a team lead");
-      return;
-    }
-
-    setIsAddingTeam(true);
-    try {
-      const config = {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      };
-      const teamData = { name: newTeamName, team_lead: newTeamLead };
-      console.log("Creating team with:", teamData);
-      const response = await axios.post(`${API_URL}/teams`, teamData, config);
-      console.log("Team creation response:", response.data);
-      await fetchData();
-      setNewTeamName("");
-      setNewTeamLead("none");
-      setIsTeamModalOpen(false);
-      toast.success(`Team ${newTeamName} created successfully`);
-    } catch (error) {
-      console.error("Error creating team:", error);
-      toast.error(error.response?.data?.message || "Failed to create team");
-    } finally {
-      setIsAddingTeam(false);
-    }
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    setEditUserRole(user.role);
+    setEditUserTeamLead(user.team_lead_id || "none");
+    setIsEditModalOpen(true);
   };
-  const handleArrowBack = async () => {
-    if (!newTaskType) {
-      toast.error("clash royal!!");
-      return;
-    }
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+
+    setIsUpdatingUser(true);
     try {
       const config = {
         headers: {
@@ -447,74 +453,67 @@ const AdminDashboard = () => {
           "Content-Type": "application/json",
         },
       };
-      const authType = { task: newTaskType };
-      const response = await axios.post(`${API_URL}/pid-work.js`, TaskTypeIndicator)
-    } catch (error) {
 
-    }
-  }
-  const handleAddTaskType = async () => {
-    if (!newTaskType) {
-      toast.error("Please provide a task type");
-      return;
-    }
+      // Update role if changed
+      if (editUserRole !== editingUser.role) {
+        console.log(`Updating user ${editingUser.id} role to ${editUserRole}`);
+        await axios.patch(
+          `${API_URL}/users/${editingUser.id}/role`,
+          { role: editUserRole },
+          config
+        );
+      }
 
-    setIsAddingTaskType(true);
-    try {
-      const config = {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      };
-      const taskTypeData = { type: newTaskType };
-      console.log("Adding task type with:", taskTypeData);
-      const response = await axios.post(
-        `${API_URL}/task-types`,
-        taskTypeData,
-        config
-      );
-      console.log("Task type creation response:", response.data);
+      // Update team if changed
+      if (editUserTeamLead !== (editingUser.team_lead_id || "none")) {
+        console.log(`Updating user ${editingUser.id} team to ${editUserTeamLead}`);
+        await axios.patch(
+          `${API_URL}/users/${editingUser.id}/team`,
+          { lead_id: editUserTeamLead === "none" ? null : editUserTeamLead },
+          config
+        );
+      }
+
       await fetchData();
-      setNewTaskType("");
-      setIsTaskTypeModalOpen(false);
-      toast.success(`Task type ${newTaskType} added successfully`);
-    } catch (error) {
-      console.error("Error adding task type:", error);
-      toast.error(error.response?.data?.message || "Failed to add task type");
+      setIsEditModalOpen(false);
+      setEditingUser(null);
+      toast.success("User updated successfully");
+    } catch (error: any) {
+      console.error("Error updating user:", error);
+      toast.error(error.response?.data?.message || "Failed to update user");
     } finally {
-      setIsAddingTaskType(false);
+      setIsUpdatingUser(false);
     }
   };
 
-  const handleChangeTeam = async (userId: string, newTeam: string) => {
-    if (!userId || newTeam === "none") {
-      toast.error("Please select a user and a team");
-      return;
-    }
+  const handleDeleteUser = (user: User) => {
+    setUserToDelete(user);
+    setIsDeleteDialogOpen(true);
+  };
 
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    setIsDeletingUser(true);
     try {
       const config = {
         headers: {
           Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
         },
       };
-      const updateData = { team_lead: newTeam };
-      console.log(`Updating user ${userId} to team ${newTeam}`);
-      const response = await axios.patch(
-        `${API_URL}/users/${userId}`,
-        updateData,
-        config
-      );
-      console.log("Team change response:", response.data);
+
+      console.log(`Deleting user ${userToDelete.id}`);
+      await axios.delete(`${API_URL}/users/${userToDelete.id}`, config);
+
       await fetchData();
-      setSelectedUserId(null);
-      setNewTeamForUser("none");
-      toast.success("Team updated successfully");
-    } catch (error) {
-      console.error("Error changing team:", error);
-      toast.error(error.response?.data?.message || "Failed to change team");
+      setIsDeleteDialogOpen(false);
+      setUserToDelete(null);
+      toast.success(`User ${userToDelete.name} deleted successfully`);
+    } catch (error: any) {
+      console.error("Error deleting user:", error);
+      toast.error(error.response?.data?.message || "Failed to delete user");
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
@@ -549,28 +548,20 @@ const AdminDashboard = () => {
             <Button
               variant="outline"
               className="flex items-center gap-2"
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => {
+                setActiveTab("users");
+                setIsModalOpen(true);
+              }}
             >
-              <Plus size={16} /> Add Member
+              <Plus size={16} /> Add User
             </Button>
             <Button
               variant="outline"
               className="flex items-center gap-2"
-              onClick={() => setIsTeamModalOpen(true)}
-            >
-              <Plus size={16} /> Create Team
-            </Button>
-            <Button
-              variant="outline"
-              className="flex items-center gap-2"
-              onClick={() => setIsTaskTypeModalOpen(true)}
-            >
-              <Plus size={16} /> Add Task Type
-            </Button>
-            <Button
-              variant="outline"
-              className="flex items-center gap-2"
-              onClick={handleExport}
+              onClick={() => {
+                setActiveTab("audits");
+                handleExport();
+              }}
               disabled={isExporting}
             >
               <Download size={16} /> Export Logs
@@ -578,131 +569,328 @@ const AdminDashboard = () => {
           </div>
         </header>
 
-        {/* Filters */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium mb-1">
-                  Filter by Project
-                </label>
-                <Select
-                  value={selectedProject}
-                  onValueChange={setSelectedProject}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Projects" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Projects</SelectItem>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex-1">
-                <label className="block text-sm font-medium mb-1">
-                  Filter by Team
-                </label>
-                <Select value={selectedTeam} onValueChange={setSelectedTeam}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Teams" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Teams</SelectItem>
-                    {teams.map((team) => (
-                      <SelectItem key={team} value={team}>
-                        {team}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="audits">Audits</TabsTrigger>
+            <TabsTrigger value="users">Users</TabsTrigger>
+          </TabsList>
 
-        {/* Project Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {selectedProject === "all"
-                  ? "Overall Project Metrics"
-                  : `Project Metrics for ${projects.find((p) => p.id === selectedProject)?.name
-                  }`}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Total P&IDs:</span>
-                <span className="text-lg font-bold">
-                  {projectStats.pidCount}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Total Lines:</span>
-                <span className="text-lg font-bold">
-                  {projectStats.lineCount}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Total Equipment:</span>
-                <span className="text-lg font-bold">
-                  {projectStats.equipmentCount}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="col-span-1 md:col-span-2">
-            <CardHeader>
-              <CardTitle>
-                {selectedTeam === "all"
-                  ? "Overall Task Status Breakdown"
-                  : `Task Status Breakdown for ${selectedTeam}`}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={statusData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                      nameKey="name"
-                      label={({ name, percent }) =>
-                        `${name}: ${(percent * 100).toFixed(0)}%`
-                      }
+          <TabsContent value="overview" className="mt-6">
+            {/* Filters */}
+            <Card className="mb-6">
+              <CardContent className="pt-6">
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium mb-1">
+                      Filter by Project
+                    </label>
+                    <Select
+                      value={selectedProject}
+                      onValueChange={setSelectedProject}
                     >
-                      {statusData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => [`${value} tasks`, "Count"]}
-                    />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All Projects" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Projects</SelectItem>
+                        {projects.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium mb-1">
+                      Filter by Team
+                    </label>
+                    <Select value={selectedTeam} onValueChange={setSelectedTeam}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All Teams" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Teams</SelectItem>
+                        {teams.map((team) => (
+                          <SelectItem key={team} value={team}>
+                            {team}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Project Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {selectedProject === "all"
+                      ? "Overall Project Metrics"
+                      : `Project Metrics for ${
+                          projects.find((p) => p.id === selectedProject)?.name
+                        }`}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Total P&IDs:</span>
+                    <span className="text-lg font-bold">
+                      {projectStats.pidCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Total Lines:</span>
+                    <span className="text-lg font-bold">
+                      {projectStats.lineCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium">Total Equipment:</span>
+                    <span className="text-lg font-bold">
+                      {projectStats.equipmentCount}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="col-span-1 md:col-span-2">
+                <CardHeader>
+                  <CardTitle>
+                    {selectedTeam === "all"
+                      ? "Overall Task Status Breakdown"
+                      : `Task Status Breakdown for ${selectedTeam}`}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={statusData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                          nameKey="name"
+                          label={({ name, percent }) =>
+                            `${name}: ${(percent * 100).toFixed(0)}%`
+                          }
+                        >
+                          {statusData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value) => [`${value} tasks`, "Count"]}
+                        />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="audits" className="mt-6">
+            {/* Audit Trails */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Audit Trails</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Created By</TableHead>
+                        <TableHead>Current Work</TableHead>
+                        <TableHead>Time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentLogs.length > 0 ? (
+                        currentLogs.map((log: any) => (
+                          <TableRow key={log.id}>
+                            <TableCell>{log.type}</TableCell>
+                            <TableCell>{log.name}</TableCell>
+                            <TableCell>{log.createdBy}</TableCell>
+                            <TableCell>
+                              <TooltipProvider>
+                                <UITooltip>
+                                  <TooltipTrigger className="cursor-help text-left">
+                                    <span className="text-sm">
+                                      {truncateText(log.currentWork, 50)}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>{log.currentWork}</p>
+                                  </TooltipContent>
+                                </UITooltip>
+                              </TooltipProvider>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1">
+                                <div>Assigned at: {formatTime(log.timestamp)}</div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-24 text-center">
+                            No audit logs found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Logs per page:</span>
+                    <Select
+                      value={logsPerPage.toString()}
+                      onValueChange={(value) => {
+                        setLogsPerPage(Number(value));
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="5">5</SelectItem>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="20">20</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(prev - 1, 1))
+                      }
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-gray-600">
+                      Page {currentPage} of {totalPages || 1}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                      }
+                      disabled={currentPage === totalPages || totalPages === 0}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="users" className="mt-6">
+            {/* User Management Section */}
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users size={20} />
+                  User Management
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Team Lead</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.length > 0 ? (
+                        users.map((user) => (
+                          <TableRow key={user.id}>
+                            <TableCell className="font-medium">
+                              {user.name}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{user.role}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              {user.team_lead_name || (
+                                <span className="text-gray-400">No team</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={user.is_active ? "default" : "secondary"}
+                              >
+                                {user.is_active ? "Active" : "Inactive"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleEditUser(user)}
+                                >
+                                  <Pencil size={16} />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-red-600 hover:text-red-700"
+                                  onClick={() => handleDeleteUser(user)}
+                                >
+                                  <Trash2 size={16} />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-24 text-center">
+                            No users found
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Add User Modal */}
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
-              <DialogTitle>Add New Member</DialogTitle>
+              <DialogTitle>Add New User</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -716,37 +904,14 @@ const AdminDashboard = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Role</label>
-                  <Select
-                    value={newUserRole}
-                    onValueChange={(value) =>
-                      setNewUserRole(value as "Team Member" | "Team Lead")
-                    }
-                  >
+                  <Select value={newUserRole} onValueChange={setNewUserRole}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Team Member">Team Member</SelectItem>
-                      <SelectItem value="Team Lead">Team Lead</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Project (Optional)
-                  </label>
-                  <Select
-                    value={newUserProject}
-                    onValueChange={setNewUserProject}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select project" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {projects.map((project) => (
-                        <SelectItem key={project.id} value={project.id}>
-                          {project.name}
+                      {validRoles.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {role}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -754,20 +919,20 @@ const AdminDashboard = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">
-                    Team (Optional)
+                    Team Lead (Optional)
                   </label>
                   <Select
-                    value={newTeamForUser}
-                    onValueChange={setNewTeamForUser}
+                    value={newUserTeamLead}
+                    onValueChange={setNewUserTeamLead}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select team" />
+                      <SelectValue placeholder="Select team lead" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {teams.map((team) => (
-                        <SelectItem key={team} value={team}>
-                          {team}
+                      <SelectItem value="none">No Team</SelectItem>
+                      {teamLeads.map((lead) => (
+                        <SelectItem key={lead.id} value={lead.id}>
+                          {lead.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -788,15 +953,12 @@ const AdminDashboard = () => {
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                      aria-label={
-                        showPassword ? "Hide password" : "Show password"
-                      }
                     >
                       {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
                   </div>
                 </div>
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-sm font-medium mb-1">
                     Confirm Password
                   </label>
@@ -813,9 +975,6 @@ const AdminDashboard = () => {
                         setShowConfirmPassword(!showConfirmPassword)
                       }
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                      aria-label={
-                        showConfirmPassword ? "Hide password" : "Show password"
-                      }
                     >
                       {showConfirmPassword ? (
                         <EyeOff size={20} />
@@ -833,8 +992,7 @@ const AdminDashboard = () => {
                 onClick={() => {
                   setNewUserName("");
                   setNewUserRole("");
-                  setNewUserProject("none");
-                  setNewTeamForUser("none");
+                  setNewUserTeamLead("none");
                   setNewUserPassword("");
                   setConfirmPassword("");
                   setShowPassword(false);
@@ -849,46 +1007,52 @@ const AdminDashboard = () => {
                 disabled={isAddingUser}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {isAddingUser ? "Adding..." : "Add Member"}
+                {isAddingUser ? "Adding..." : "Add User"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Create Team Modal */}
-        <Dialog open={isTeamModalOpen} onOpenChange={setIsTeamModalOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+        {/* Edit User Modal */}
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
-              <DialogTitle>Create New Team</DialogTitle>
+              <DialogTitle>Edit User: {editingUser?.name}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Team Name
-                </label>
-                <Input
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  placeholder="Enter team name"
-                />
+                <label className="block text-sm font-medium mb-1">Role</label>
+                <Select value={editUserRole} onValueChange={setEditUserRole}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {validRoles.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {role}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Team Lead
                 </label>
-                <Select value={newTeamLead} onValueChange={setNewTeamLead}>
+                <Select
+                  value={editUserTeamLead}
+                  onValueChange={setEditUserTeamLead}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select team lead" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {users
-                      .filter((u) => u.role === "Team Lead")
-                      .map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))}
+                    <SelectItem value="none">No Team</SelectItem>
+                    {teamLeads.map((lead) => (
+                      <SelectItem key={lead.id} value={lead.id}>
+                        {lead.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -897,205 +1061,51 @@ const AdminDashboard = () => {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setNewTeamName("");
-                  setNewTeamLead("none");
-                  setIsTeamModalOpen(false);
+                  setIsEditModalOpen(false);
+                  setEditingUser(null);
                 }}
               >
                 Cancel
               </Button>
               <Button
-                onClick={handleCreateTeam}
-                disabled={isAddingTeam}
+                onClick={handleUpdateUser}
+                disabled={isUpdatingUser}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {isAddingTeam ? "Creating..." : "Create Team"}
+                {isUpdatingUser ? "Updating..." : "Update User"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Add Task Type Modal */}
-        <Dialog
-          open={isTaskTypeModalOpen}
-          onOpenChange={setIsTaskTypeModalOpen}
+        {/* Delete User Confirmation Dialog */}
+        <AlertDialog
+          open={isDeleteDialogOpen}
+          onOpenChange={setIsDeleteDialogOpen}
         >
-          <DialogContent className="sm:max-w-[600px]">
-            <DialogHeader>
-              <DialogTitle>Add New Task Type</DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Task Type
-                </label>
-                <Input
-                  value={newTaskType}
-                  onChange={(e) => setNewTaskType(e.target.value)}
-                  placeholder="Enter task type (e.g., upv, qc)"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setNewTaskType("");
-                  setIsTaskTypeModalOpen(false);
-                }}
-              >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the user{" "}
+                <strong>{userToDelete?.name}</strong> and remove them from all
+                teams. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setUserToDelete(null)}>
                 Cancel
-              </Button>
-              <Button
-                onClick={handleAddTaskType}
-                disabled={isAddingTaskType}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmDeleteUser}
+                disabled={isDeletingUser}
+                className="bg-red-600 hover:bg-red-700"
               >
-                {isAddingTaskType ? "Adding..." : "Add Task Type"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Manage User Teams */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Manage User Teams</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {users.map((user) => (
-                <div key={user.id} className="flex items-center gap-4">
-                  <span>
-                    {user.name} ({user.role})
-                  </span>
-                  <Select
-                    value={user.teamLead || "none"}
-                    onValueChange={(value) => handleChangeTeam(user.id, value)}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Select team" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {teams.map((team) => (
-                        <SelectItem key={team} value={team}>
-                          {team}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Audit Trails */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Audit Trails</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Created By</TableHead>
-                    <TableHead>Current Work</TableHead>
-                    <TableHead>Time</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {currentLogs.length > 0 ? (
-                    currentLogs.map((log: any) => (
-                      <TableRow key={log.id}>
-                        <TableCell>{log.type}</TableCell>
-                        <TableCell>{log.name}</TableCell>
-                        <TableCell>{log.createdBy}</TableCell>
-                        <TableCell>
-                          <TooltipProvider>
-                            <UITooltip>
-                              <TooltipTrigger className="cursor-help text-left">
-                                <span className="text-sm">
-                                  {truncateText(log.currentWork, 50)}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{log.currentWork}</p>
-                              </TooltipContent>
-                            </UITooltip>
-                          </TooltipProvider>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div>Assigned at: {formatTime(log.timestamp)}</div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center">
-                        No audit logs found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">Logs per page:</span>
-                <Select
-                  value={logsPerPage.toString()}
-                  onValueChange={(value) => {
-                    setLogsPerPage(Number(value));
-                    setCurrentPage(1);
-                  }}
-                >
-                  <SelectTrigger className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5">5</SelectItem>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="20">20</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.max(prev - 1, 1))
-                  }
-                  disabled={currentPage === 1}
-                >
-                  Previous
-                </Button>
-                <span className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages || 1}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                  }
-                  disabled={currentPage === totalPages || totalPages === 0}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+                {isDeletingUser ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

@@ -3,11 +3,21 @@ const {
   getUserById,
   getUsersByRole,
   getUserByName,
+  createUser,
+  updateUserTeam,
+  getUsersWithTeam,
+  updateUserRole,
+  deleteUser,
 } = require("../controllers/users.controller");
 const { protect, authorize } = require("../middleware/auth");
 const db = require("../config/db");
 
 const router = express.Router();
+
+// ============================================================================
+// TEST/DEBUG ROUTES (can be removed in production)
+// ============================================================================
+
 // Test 1: Ultra simple - no database, no nothing
 router.get("/ping", (req, res) => {
   console.log("=== PING route hit ===");
@@ -124,6 +134,7 @@ router.get("/check-env", (req, res) => {
     allEnvKeys: Object.keys(process.env).filter(key => !key.includes('SECRET') && !key.includes('PASSWORD'))
   });
 });
+
 // Add this to users.routes.js temporarily
 router.get("/debug-db-info", async (req, res) => {
   try {
@@ -150,7 +161,10 @@ router.get("/debug-db-info", async (req, res) => {
   }
 });
 
+// ============================================================================
 // PUBLIC ROUTES (NO AUTHENTICATION REQUIRED)
+// ============================================================================
+
 // Public test route to fetch all users
 router.get("/test", async (req, res) => {
   console.log("=== /test route called ===");
@@ -171,15 +185,42 @@ router.get("/test", async (req, res) => {
   }
 });
 
+// Get users by role (public - used for login dropdown)
 router.get("/role/:role", (req, res, next) => {
   console.log("=== /role/:role route matched ===");
   console.log("Role parameter:", req.params.role);
   next();
 }, getUsersByRole);
 
+// ============================================================================
 // PROTECTED ROUTES (AUTHENTICATION REQUIRED)
+// ============================================================================
+
 // All routes below require authentication
 router.use(protect);
+
+// ============================================================================
+// ADMIN-ONLY ROUTES - User Management
+// ============================================================================
+
+// Create new user (Admin only)
+router.post("/", authorize(["Admin"]), createUser);
+
+// Get all users with team information (Admin only)
+router.get("/with-teams", authorize(["Admin"]), getUsersWithTeam);
+
+// Update user's team (Admin only)
+router.patch("/:id/team", authorize(["Admin"]), updateUserTeam);
+
+// Update user's role (Admin only)
+router.patch("/:id/role", authorize(["Admin"]), updateUserRole);
+
+// Delete user (Admin only)
+router.delete("/:id", authorize(["Admin"]), deleteUser);
+
+// ============================================================================
+// ROLE-BASED ROUTES
+// ============================================================================
 
 // Fetch team members (for Team Lead dashboard dropdown)
 router.get("/team-members", authorize(["Team Lead", "Project Manager"]), async (req, res) => {
@@ -304,8 +345,6 @@ router.get("/", async (req, res) => {
 });
 
 // Fetch assigned items for a specific user
-// Replace the entire endpoint in users.routes.js with this:
-
 router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
   console.log(
     `Received request for /api/users/${req.params.userId}/assigned-items/${req.params.taskId}`
@@ -549,7 +588,7 @@ router.get("/:userId/assigned-items/:taskId", protect, async (req, res) => {
   }
 });
 
-// Get specific user (Admin only)
+// Get specific user (Admin only) - must be last to avoid conflicts
 router.get("/:id", authorize(["Admin"]), getUserById);
 
 module.exports = router;
