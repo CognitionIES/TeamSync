@@ -190,8 +190,7 @@ router.post("/batch", protect, async (req, res) => {
     const values = processedLines
       .map(
         (_, i) =>
-          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${
-            i * 6 + 5
+          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5
           }, $${i * 6 + 6})`
       )
       .join(", ");
@@ -218,8 +217,7 @@ router.post("/batch", protect, async (req, res) => {
       const auditValues = createdLines
         .map(
           (_, i) =>
-            `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${
-              i * 5 + 5
+            `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5
             })`
         )
         .join(", ");
@@ -377,8 +375,7 @@ router.put("/assign/batch", protect, async (req, res) => {
     // Batch update lines
     const updateQuery = `
       UPDATE lines 
-      SET assigned_to_id = $${
-        lineIds.length + 1
+      SET assigned_to_id = $${lineIds.length + 1
       }, updated_at = CURRENT_TIMESTAMP 
       WHERE id IN (${lineIdPlaceholders}) 
       RETURNING *

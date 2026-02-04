@@ -846,7 +846,7 @@ const TeamLeadDashboard = () => {
     setSelectedEquipment([]);
   };
   const handleAssignmentTypeChange = (value: string) => {
-    console.log("Assignment type changed to:", value); // Add this log
+    console.log("Assignment type changed to:", value); 
     if (
       value === "PID" ||
       value === "Line" ||

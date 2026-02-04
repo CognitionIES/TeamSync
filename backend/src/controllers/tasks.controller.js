@@ -179,7 +179,7 @@ const getTasks = async (req, res) => {
 // @route   POST /api/tasks
 const createTask = async (req, res) => {
   try {
-    // ✅ ALLOW BOTH TEAM LEAD AND PROJECT MANAGER
+    // ALLOW BOTH TEAM LEAD AND PROJECT MANAGER
     if (req.user.role !== "Team Lead" && req.user.role !== "Project Manager") {
       return res.status(403).json({
         message: `User role ${req.user.role} is not authorized to create tasks`,

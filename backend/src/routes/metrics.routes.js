@@ -53,7 +53,7 @@ router.get("/individual/all", protect, async (req, res) => {
       );
 
       // ========== DAILY METRICS ==========
-      console.log("📊 Fetching daily metrics for date:", date);
+      console.log(" Fetching daily metrics for date:", date);
 
       const dailyMetricsMap = {};
 
@@ -153,7 +153,7 @@ router.get("/individual/all", protect, async (req, res) => {
             // Capture area name
             if (!dailyMetricsMap[uid].areaName && row.area_name) {
               dailyMetricsMap[uid].areaName = row.area_name;
-              console.log(`  ✅ Set area "${row.area_name}" for user ${uid}`);
+              console.log(`  Set area "${row.area_name}" for user ${uid}`);
             }
           }
         }
@@ -286,7 +286,7 @@ router.get("/individual/all", protect, async (req, res) => {
       weekStartDate.setDate(weekStartDate.getDate() - 6);
       const weekStartStr = weekStartDate.toISOString().split("T")[0];
 
-      console.log("📊 Fetching weekly metrics:", weekStartStr, "to", date);
+      console.log("  Fetching weekly metrics:", weekStartStr, "to", date);
 
       const weeklyMetricsMap = {};
       allUsers.forEach((user) => {
@@ -459,7 +459,7 @@ router.get("/individual/all", protect, async (req, res) => {
       monthStartDate.setDate(monthStartDate.getDate() - 29);
       const monthStartStr = monthStartDate.toISOString().split("T")[0];
 
-      console.log("📊 Fetching monthly metrics:", monthStartStr, "to", date);
+      console.log("  Fetching monthly metrics:", monthStartStr, "to", date);
 
       const monthlyMetricsMap = {};
       allUsers.forEach((user) => {
@@ -627,7 +627,7 @@ router.get("/individual/all", protect, async (req, res) => {
         return hasActivity;
       });
 
-      console.log("✅ Final metrics response:", {
+      console.log("Final metrics response:", {
         daily: metrics.daily.length,
         weekly: metrics.weekly.length,
         monthly: metrics.monthly.length,
@@ -636,7 +636,7 @@ router.get("/individual/all", protect, async (req, res) => {
       res.status(200).json(metrics);
     }
   } catch (error) {
-    console.error("❌ Failed to fetch individual metrics:", {
+    console.error(" Failed to fetch individual metrics:", {
       message: error.message,
       stack: error.stack,
     });

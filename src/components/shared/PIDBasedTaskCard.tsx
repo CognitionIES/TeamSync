@@ -210,7 +210,7 @@ const pidWorkItems = task.pidWorkItems || [];
         }
       );
 
-      //console.log(`[${task.id}] Backend updated successfully`);
+      console.log(`[${task.id}] Backend updated successfully`);
       
       toast.success(
         completed 

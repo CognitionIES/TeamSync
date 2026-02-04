@@ -135,7 +135,7 @@ router.get("/check-env", (req, res) => {
   });
 });
 
-// Add this to users.routes.js temporarily
+//temp
 router.get("/debug-db-info", async (req, res) => {
   try {
     // Check current database
